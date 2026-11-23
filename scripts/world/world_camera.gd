@@ -16,6 +16,11 @@ var _is_dragging: bool = false
 var _drag_button: int = 0
 var _drag_total_dist: float = 0.0
 var _last_drag_screen: Vector2 = Vector2.ZERO
+var auto_pan_enabled: bool = false
+var _auto_pan_time: float = 0.0
+var _saved_pos: Vector2 = Vector2(1024.0, 512.0)
+var _saved_zoom: float = 1.0
+var _has_saved_view: bool = false
 
 
 func _ready() -> void:
@@ -33,6 +38,36 @@ func reset_view() -> void:
 	_target_pos = map_size * 0.5
 
 
+func set_auto_pan(enabled: bool, preserve_view: bool = false) -> void:
+	if enabled:
+		if not auto_pan_enabled:
+			_has_saved_view = preserve_view
+			if preserve_view:
+				_saved_pos = _target_pos
+				_saved_zoom = _target_zoom
+		auto_pan_enabled = true
+		_is_dragging = false
+		_drag_button = 0
+		_recompute_min_zoom()
+		_target_zoom = clampf(maxf(_min_zoom * 2.0, 1.35), _min_zoom, max_zoom)
+		_target_pos = Vector2(
+			map_size.x * 0.5 + sin(_auto_pan_time * 0.14) * 560.0,
+			485.0 + sin(_auto_pan_time * 0.09 + 0.6) * 165.0
+		)
+		_clamp_target_pos()
+	else:
+		auto_pan_enabled = false
+		if preserve_view and _has_saved_view:
+			_has_saved_view = false
+			_recompute_min_zoom()
+			_target_zoom = clampf(_saved_zoom, _min_zoom, max_zoom)
+			_target_pos = _saved_pos
+			_clamp_target_pos()
+		else:
+			_has_saved_view = false
+			reset_view()
+
+
 func _on_viewport_resized() -> void:
 	_recompute_min_zoom()
 	_target_zoom = clampf(_target_zoom, _min_zoom, max_zoom)
@@ -48,6 +83,20 @@ func _recompute_min_zoom() -> void:
 
 
 func _process(delta: float) -> void:
+	if auto_pan_enabled:
+		_auto_pan_time += delta
+		_target_zoom = clampf(maxf(_min_zoom * 2.0, 1.35), _min_zoom, max_zoom)
+		_target_pos = Vector2(
+			map_size.x * 0.5 + sin(_auto_pan_time * 0.14) * 560.0,
+			485.0 + sin(_auto_pan_time * 0.09 + 0.6) * 165.0
+		)
+		_clamp_target_pos()
+		var auto_t: float = 1.0 - exp(-2.2 * delta)
+		zoom = zoom.lerp(Vector2(_target_zoom, _target_zoom), auto_t)
+		position = position.lerp(_target_pos, auto_t)
+		_clamp_current_pos()
+		return
+
 	var dir := Vector2.ZERO
 	if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
 		dir.x -= 1.0
@@ -70,6 +119,8 @@ func _process(delta: float) -> void:
 
 func handle_map_input(event: InputEvent) -> bool:
 	"""Returns true if event consumed as camera drag/zoom (suppresses province selection)."""
+	if auto_pan_enabled:
+		return false
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_WHEEL_UP and mb.pressed:

@@ -18,6 +18,9 @@ tools/cache/
 .DS_Store
 Thumbs.db
 
+# Launcher compiled Win32 resources
+launcher/*.syso
+
 # Internal dev & AI notes
 .agent/
 prompt.txt

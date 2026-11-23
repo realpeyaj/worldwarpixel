@@ -16,22 +16,23 @@ grow_vertical = 2
 mouse_filter = 2
 
 [node name="TopBar" type="PanelContainer" parent="Root"]
+visible = false
 layout_mode = 1
 anchors_preset = 7
 anchor_left = 0.5
 anchor_top = 1.0
 anchor_right = 0.5
 anchor_bottom = 1.0
-offset_left = -360.0
-offset_top = -82.0
-offset_right = 360.0
-offset_bottom = -48.0
+offset_left = -374.0
+offset_top = -90.0
+offset_right = 374.0
+offset_bottom = -56.0
 grow_horizontal = 2
 grow_vertical = 0
 
 [node name="HBox" type="HBoxContainer" parent="Root/TopBar"]
 layout_mode = 2
-theme_override_constants/separation = 8
+theme_override_constants/separation = 6
 
 [node name="BrandLabel" type="Label" parent="Root/TopBar/HBox"]
 visible = false
@@ -98,7 +99,8 @@ text = "Keys"
 
 [node name="AudioBtn" type="Button" parent="Root/TopBar/HBox"]
 layout_mode = 2
-text = "Audio"
+tooltip_text = "Audio Settings"
+text = ""
 
 [node name="MenuBtn" type="Button" parent="Root/TopBar/HBox"]
 layout_mode = 2
@@ -146,9 +148,9 @@ anchor_left = 0.5
 anchor_top = 1.0
 anchor_right = 0.5
 anchor_bottom = 1.0
-offset_left = -360.0
-offset_top = -44.0
-offset_right = 360.0
+offset_left = -374.0
+offset_top = -56.0
+offset_right = 374.0
 offset_bottom = -8.0
 grow_horizontal = 2
 grow_vertical = 0
@@ -156,7 +158,7 @@ grow_vertical = 0
 [node name="HBox" type="HBoxContainer" parent="Root/ActionDock"]
 layout_mode = 2
 alignment = 1
-theme_override_constants/separation = 3
+theme_override_constants/separation = 2
 
 [node name="ExpandBtn" type="Button" parent="Root/ActionDock/HBox"]
 layout_mode = 2
@@ -164,43 +166,49 @@ text = "Explore"
 
 [node name="TownBtn" type="Button" parent="Root/ActionDock/HBox"]
 layout_mode = 2
-text = "[1] Town"
+text = "1·125k"
 
 [node name="FactoryBtn" type="Button" parent="Root/ActionDock/HBox"]
 layout_mode = 2
-text = "[2] Factory"
+text = "2·125k"
 
 [node name="PortBtn" type="Button" parent="Root/ActionDock/HBox"]
 layout_mode = 2
-text = "[3] Port"
+text = "3·125k"
 
 [node name="DefenseBtn" type="Button" parent="Root/ActionDock/HBox"]
 layout_mode = 2
-text = "[4] Defense"
+text = "4·50k"
 
 [node name="SiloBtn" type="Button" parent="Root/ActionDock/HBox"]
 layout_mode = 2
-text = "[5] Silo"
+text = "5·1M"
 
 [node name="SamBtn" type="Button" parent="Root/ActionDock/HBox"]
 layout_mode = 2
-text = "[6] SAM"
+text = "6·1.5M"
 
 [node name="WarshipBtn" type="Button" parent="Root/ActionDock/HBox"]
 layout_mode = 2
-text = "[7] Ship"
+text = "7·250k"
+
+[node name="NukeSep" type="VSeparator" parent="Root/ActionDock/HBox"]
+layout_mode = 2
 
 [node name="AtomDockBtn" type="Button" parent="Root/ActionDock/HBox"]
 layout_mode = 2
-text = "[8] Atom"
+text = "8·750k"
 
 [node name="HbombDockBtn" type="Button" parent="Root/ActionDock/HBox"]
 layout_mode = 2
-text = "[9] H-Bomb"
+text = "9·5M"
 
 [node name="MirvDockBtn" type="Button" parent="Root/ActionDock/HBox"]
 layout_mode = 2
-text = "[F] MIRV"
+text = "F·25M"
+
+[node name="CommitSep" type="VSeparator" parent="Root/ActionDock/HBox"]
+layout_mode = 2
 
 [node name="CommitBox" type="HBoxContainer" parent="Root/ActionDock/HBox"]
 layout_mode = 2
@@ -311,7 +319,8 @@ clip_text = true
 
 [node name="CloseBtn" type="Button" parent="Root/RightStack/StructurePanel/VBox/Header"]
 layout_mode = 2
-text = "×"
+tooltip_text = "Close"
+text = ""
 
 [node name="SubLabel" type="Label" parent="Root/RightStack/StructurePanel/VBox"]
 layout_mode = 2
@@ -410,7 +419,8 @@ clip_text = true
 
 [node name="DipCloseBtn" type="Button" parent="Root/RightStack/DiplomacyPanel/VBox/Header"]
 layout_mode = 2
-text = "×"
+tooltip_text = "Close"
+text = ""
 
 [node name="DipStatusLabel" type="Label" parent="Root/RightStack/DiplomacyPanel/VBox"]
 layout_mode = 2
@@ -442,6 +452,7 @@ size_flags_horizontal = 3
 text = "Send 25% Troops"
 
 [node name="LeaderboardPanel" type="PanelContainer" parent="Root"]
+visible = false
 layout_mode = 1
 anchors_preset = 3
 anchor_left = 1.0
@@ -602,7 +613,8 @@ offset_left = 92.0
 offset_top = 92.0
 offset_right = 128.0
 offset_bottom = 128.0
-text = "×"
+tooltip_text = "Close"
+text = ""
 
 [node name="SubPicker" type="PanelContainer" parent="Root/RadialMenu"]
 visible = false
@@ -622,7 +634,7 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-color = Color(0.035, 0.055, 0.085, 0.82)
+color = Color(0.03, 0.05, 0.09, 0.38)
 
 [node name="Center" type="CenterContainer" parent="Root/MenuOverlay"]
 layout_mode = 1
@@ -633,7 +645,7 @@ grow_horizontal = 2
 grow_vertical = 2
 
 [node name="MenuCard" type="PanelContainer" parent="Root/MenuOverlay/Center"]
-custom_minimum_size = Vector2(400, 0)
+custom_minimum_size = Vector2(390, 0)
 layout_mode = 2
 
 [node name="VBox" type="VBoxContainer" parent="Root/MenuOverlay/Center/MenuCard"]
@@ -689,7 +701,7 @@ size_flags_horizontal = 3
 
 [node name="ColorInfo" type="Label" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
 layout_mode = 2
-modulate = Color(0.68, 0.78, 0.88, 1)
+modulate = Color(0.70, 0.80, 0.90, 0.90)
 horizontal_alignment = 1
 text = "Nation Color: Randomly assigned each match"
 
@@ -697,39 +709,77 @@ text = "Nation Color: Randomly assigned each match"
 layout_mode = 2
 
 [node name="PlayBtn" type="Button" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
+custom_minimum_size = Vector2(0, 34)
 layout_mode = 2
 text = "Play Match"
 
-[node name="MultiplayerBtn" type="Button" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
+[node name="SocialRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
 layout_mode = 2
-text = "Multiplayer Online"
+theme_override_constants/separation = 8
+
+[node name="MultiplayerBtn" type="Button" parent="Root/MenuOverlay/Center/MenuCard/VBox/SocialRow"]
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Multiplayer"
+
+[node name="FriendsBtn" type="Button" parent="Root/MenuOverlay/Center/MenuCard/VBox/SocialRow"]
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Friends"
 
 [node name="NewMatchBtn" type="Button" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
 visible = false
+custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 text = "Restart New Match"
 
-[node name="MenuAudioBtn" type="Button" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
+[node name="FooterRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
 layout_mode = 2
-text = "Audio Settings"
+theme_override_constants/separation = 8
 
-[node name="QuitBtn" type="Button" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
+[node name="MenuAudioBtn" type="Button" parent="Root/MenuOverlay/Center/MenuCard/VBox/FooterRow"]
+custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
+size_flags_horizontal = 3
+text = "Audio"
+
+[node name="QuitBtn" type="Button" parent="Root/MenuOverlay/Center/MenuCard/VBox/FooterRow"]
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+size_flags_horizontal = 3
 text = "Quit"
 
 [node name="MpLobbyCard" type="PanelContainer" parent="Root/MenuOverlay/Center"]
 visible = false
-custom_minimum_size = Vector2(430, 0)
+custom_minimum_size = Vector2(420, 0)
 layout_mode = 2
 
 [node name="VBox" type="VBoxContainer" parent="Root/MenuOverlay/Center/MpLobbyCard"]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Title" type="Label" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox"]
+[node name="HeaderRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox"]
 layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="MpDisconnectBtn" type="Button" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox/HeaderRow"]
+layout_mode = 2
+text = "Back"
+
+[node name="Title" type="Label" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox/HeaderRow"]
+layout_mode = 2
+size_flags_horizontal = 3
 horizontal_alignment = 1
-text = "MULTIPLAYER LOBBY"
+text = "MULTIPLAYER"
+
+[node name="MpFriendsBtn" type="Button" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox/HeaderRow"]
+layout_mode = 2
+text = "Friends"
+
+[node name="HSepTop" type="HSeparator" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox"]
+layout_mode = 2
 
 [node name="ServerRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox"]
 layout_mode = 2
@@ -739,7 +789,14 @@ theme_override_constants/separation = 8
 layout_mode = 2
 text = "Server"
 
+[node name="ServerValueLabel" type="Label" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox/ServerRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+modulate = Color(0.86, 0.94, 1.0, 1)
+text = "Manila, PH"
+
 [node name="ServerOption" type="OptionButton" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox/ServerRow"]
+visible = false
 layout_mode = 2
 size_flags_horizontal = 3
 
@@ -773,7 +830,7 @@ text = "Room Code: (Not in Room)"
 [node name="CopyCodeBtn" type="Button" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox/AssignedCodeRow"]
 disabled = true
 layout_mode = 2
-text = "Copy Code"
+text = "Copy"
 
 [node name="RoomRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox"]
 layout_mode = 2
@@ -790,22 +847,19 @@ placeholder_text = "Enter Room Code to Join"
 
 [node name="BtnRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox"]
 layout_mode = 2
-theme_override_constants/separation = 6
+theme_override_constants/separation = 8
 
 [node name="CreateRoomBtn" type="Button" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox/BtnRow"]
+custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Create Room"
 
 [node name="MpConnectBtn" type="Button" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox/BtnRow"]
+custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Join Code"
-
-[node name="MpDisconnectBtn" type="Button" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox/BtnRow"]
-layout_mode = 2
-size_flags_horizontal = 3
-text = "Back / Leave"
 
 [node name="MpStatusLabel" type="Label" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox"]
 layout_mode = 2
@@ -818,69 +872,130 @@ text = "Players: --"
 autowrap_mode = 2
 
 [node name="MpStartBtn" type="Button" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox"]
+custom_minimum_size = Vector2(0, 32)
 disabled = true
 layout_mode = 2
 text = "Start Online Match"
 
-[node name="HSepFriends" type="HSeparator" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox"]
+[node name="FriendsCard" type="PanelContainer" parent="Root/MenuOverlay/Center"]
+visible = false
+custom_minimum_size = Vector2(420, 0)
 layout_mode = 2
 
-[node name="FriendsTitle" type="Label" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox"]
+[node name="VBox" type="VBoxContainer" parent="Root/MenuOverlay/Center/FriendsCard"]
 layout_mode = 2
-modulate = Color(0.76, 0.86, 0.96, 1)
-text = "FRIENDS & INVITES"
+theme_override_constants/separation = 8
 
-[node name="FriendAddRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox"]
+[node name="HeaderRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/FriendsCard/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="FriendsBackBtn" type="Button" parent="Root/MenuOverlay/Center/FriendsCard/VBox/HeaderRow"]
+layout_mode = 2
+text = "Back"
+
+[node name="FriendsIcon" type="TextureRect" parent="Root/MenuOverlay/Center/FriendsCard/VBox/HeaderRow"]
+texture_filter = 1
+custom_minimum_size = Vector2(18, 18)
+layout_mode = 2
+size_flags_vertical = 4
+stretch_mode = 5
+
+[node name="Title" type="Label" parent="Root/MenuOverlay/Center/FriendsCard/VBox/HeaderRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "FRIENDS"
+
+[node name="HSep1" type="HSeparator" parent="Root/MenuOverlay/Center/FriendsCard/VBox"]
+layout_mode = 2
+
+[node name="FriendAddRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/FriendsCard/VBox"]
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="FriendNameEdit" type="LineEdit" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox/FriendAddRow"]
+[node name="FriendNameEdit" type="LineEdit" parent="Root/MenuOverlay/Center/FriendsCard/VBox/FriendAddRow"]
 layout_mode = 2
 size_flags_horizontal = 3
-placeholder_text = "Friend Name"
+placeholder_text = "Enter player name..."
 
-[node name="AddFriendBtn" type="Button" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox/FriendAddRow"]
+[node name="AddFriendBtn" type="Button" parent="Root/MenuOverlay/Center/FriendsCard/VBox/FriendAddRow"]
 layout_mode = 2
-text = "+ Add Friend"
+text = "Add"
 
-[node name="FriendsRows" type="VBoxContainer" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox"]
-layout_mode = 2
-theme_override_constants/separation = 4
-
-[node name="InviteRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox"]
+[node name="InviteRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/FriendsCard/VBox"]
 visible = false
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="InviteLabel" type="Label" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox/InviteRow"]
+[node name="InviteLabel" type="Label" parent="Root/MenuOverlay/Center/FriendsCard/VBox/InviteRow"]
 layout_mode = 2
 size_flags_horizontal = 3
 modulate = Color(0.68, 0.96, 0.78, 1)
 text = "Invite received!"
 clip_text = true
 
-[node name="AcceptInviteBtn" type="Button" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox/InviteRow"]
+[node name="AcceptInviteBtn" type="Button" parent="Root/MenuOverlay/Center/FriendsCard/VBox/InviteRow"]
 layout_mode = 2
-text = "Join Invite"
+text = "Join"
+
+[node name="DismissInviteBtn" type="Button" parent="Root/MenuOverlay/Center/FriendsCard/VBox/InviteRow"]
+layout_mode = 2
+tooltip_text = "Dismiss Invite"
+text = ""
+
+[node name="FriendsScroll" type="ScrollContainer" parent="Root/MenuOverlay/Center/FriendsCard/VBox"]
+custom_minimum_size = Vector2(0, 150)
+layout_mode = 2
+
+[node name="FriendsRows" type="VBoxContainer" parent="Root/MenuOverlay/Center/FriendsCard/VBox/FriendsScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 5
+
+[node name="HSep2" type="HSeparator" parent="Root/MenuOverlay/Center/FriendsCard/VBox"]
+layout_mode = 2
+
+[node name="FriendsHintLabel" type="Label" parent="Root/MenuOverlay/Center/FriendsCard/VBox"]
+layout_mode = 2
+modulate = Color(0.70, 0.80, 0.90, 0.88)
+text = "Invite a friend to auto-create a Manila, PH room."
+autowrap_mode = 2
 
 [node name="AudioPopover" type="PanelContainer" parent="Root"]
 visible = false
 layout_mode = 1
-anchors_preset = 7
+anchors_preset = 8
 anchor_left = 0.5
-anchor_top = 1.0
+anchor_top = 0.5
 anchor_right = 0.5
-anchor_bottom = 1.0
-offset_left = 290.0
-offset_top = -324.0
-offset_right = 514.0
-offset_bottom = -96.0
+anchor_bottom = 0.5
+offset_left = -125.0
+offset_top = -135.0
+offset_right = 125.0
+offset_bottom = 135.0
 grow_horizontal = 2
-grow_vertical = 0
+grow_vertical = 2
 
 [node name="VBox" type="VBoxContainer" parent="Root/AudioPopover"]
 layout_mode = 2
 theme_override_constants/separation = 6
+
+[node name="Header" type="HBoxContainer" parent="Root/AudioPopover/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Title" type="Label" parent="Root/AudioPopover/VBox/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "AUDIO"
+
+[node name="AudioCloseBtn" type="Button" parent="Root/AudioPopover/VBox/Header"]
+layout_mode = 2
+tooltip_text = "Close"
+text = ""
+
+[node name="HSep" type="HSeparator" parent="Root/AudioPopover/VBox"]
+layout_mode = 2
 
 [node name="MuteCheck" type="CheckButton" parent="Root/AudioPopover/VBox"]
 layout_mode = 2
@@ -927,6 +1042,7 @@ step = 0.05
 value = 0.45
 
 [node name="PingBadge" type="PanelContainer" parent="Root"]
+visible = false
 layout_mode = 1
 anchors_preset = 2
 anchor_top = 1.0

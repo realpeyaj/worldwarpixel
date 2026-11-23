@@ -62,7 +62,9 @@ func _ready() -> void:
 	hud.mp_disconnect_requested.connect(_on_mp_disconnect_requested)
 	hud.mp_start_match_requested.connect(func(ai_c: int) -> void: mp_client.send_start_match(ai_c))
 	hud.friend_invite_requested.connect(func(f_name: String, _code: String) -> void: mp_client.send_friend_invite(f_name))
+	hud.menu_visibility_changed.connect(_on_menu_visibility_changed)
 	hud.quit_requested.connect(func() -> void: get_tree().quit(0))
+	_on_menu_visibility_changed(hud.menu_overlay.visible)
 
 	mp_client.lobby_updated.connect(hud.update_mp_lobby)
 	mp_client.spawn_phase_started.connect(_on_mp_spawn_phase_started)
@@ -99,6 +101,11 @@ func _ready() -> void:
 func _exit_tree() -> void:
 	_tcp_ping.disconnect_from_host()
 	mp_client.disconnect_from_server(false)
+
+
+func _on_menu_visibility_changed(is_open: bool) -> void:
+	var preserve_view: bool = world_state.match_phase != WorldState.PHASE_SPAWN_SELECT
+	world_map.set_home_pan_active(is_open, preserve_view)
 
 
 func _process(delta: float) -> void:

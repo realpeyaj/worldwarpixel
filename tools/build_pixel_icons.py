@@ -385,39 +385,274 @@ def _make_9patch(
     border: Tuple[int, int, int, int],
     hi: Tuple[int, int, int, int],
     sh: Tuple[int, int, int, int],
+    cut_top: bool = True,
+    cut_bottom: bool = True,
+    top_border: Tuple[int, int, int, int] | None = None,
+    bottom_border: Tuple[int, int, int, int] | None = None,
+    corner_accent: Tuple[int, int, int, int] | None = None,
 ) -> Image.Image:
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     px = img.load()
     m = size - 1
+    tb = top_border if top_border is not None else border
+    bb = bottom_border if bottom_border is not None else border
+
     for y in range(size):
         for x in range(size):
-            if (x == 0 or x == m) and (y == 0 or y == m):
+            if cut_top and y == 0 and (x == 0 or x == m):
                 continue
-            if x == 0 or x == m or y == 0 or y == m or ((x == 1 or x == m - 1) and (y == 1 or y == m - 1)):
+            if cut_bottom and y == m and (x == 0 or x == m):
+                continue
+            is_top_diag = cut_top and y == 1 and (x == 1 or x == m - 1)
+            is_bot_diag = cut_bottom and y == m - 1 and (x == 1 or x == m - 1)
+            if y == 0 or is_top_diag:
+                px[x, y] = tb
+            elif y == m or is_bot_diag:
+                px[x, y] = bb
+            elif x == 0 or x == m:
                 px[x, y] = border
-            elif y == 1 or x == 1:
+            elif (y == 1 if cut_top else y == 0) or x == 1:
                 px[x, y] = hi
-            elif y == m - 1 or x == m - 1:
+            elif (y == m - 1 if cut_bottom else y == m) or x == m - 1:
                 px[x, y] = sh
             else:
                 px[x, y] = fill
+
+    if cut_top and not cut_bottom:
+        for x in range(1, m):
+            px[x, m] = bb
+        px[1, m - 1] = hi
+        px[m - 1, m - 1] = sh
+    elif not cut_top and cut_bottom:
+        for x in range(1, m):
+            px[x, 0] = tb
+        for x in range(1, m):
+            px[x, 1] = hi
+        px[1, 1] = hi
+
+    if corner_accent is not None and size >= 12:
+        for ax, ay in ((2, 2), (m - 2, 2), (2, m - 2), (m - 2, m - 2)):
+            px[ax, ay] = corner_accent
     return img
 
 
 def generate_ui_9patch_textures() -> None:
     os.makedirs(UI_DIR, exist_ok=True)
     specs = {
-        "panel_9patch.png": (16, (17, 25, 36, 238), (11, 16, 23, 255), (54, 76, 102, 245), (14, 21, 31, 245)),
-        "btn_normal_9patch.png": (12, (28, 40, 56, 248), (11, 16, 23, 255), (66, 92, 122, 255), (16, 23, 33, 255)),
-        "btn_hover_9patch.png": (12, (42, 60, 84, 255), (11, 16, 23, 255), (98, 134, 174, 255), (24, 34, 48, 255)),
-        "btn_pressed_9patch.png": (12, (54, 78, 108, 255), (11, 16, 23, 255), (18, 26, 38, 255), (118, 156, 198, 255)),
-        "btn_disabled_9patch.png": (12, (20, 26, 36, 175), (12, 16, 22, 190), (34, 44, 58, 180), (14, 18, 24, 180)),
+        "panel_9patch.png": dict(
+            size=16,
+            fill=(18, 28, 42, 240),
+            border=(9, 14, 22, 255),
+            hi=(74, 108, 144, 255),
+            sh=(12, 19, 29, 255),
+            corner_accent=(214, 178, 86, 255),
+        ),
+        "dock_top_9patch.png": dict(
+            size=16,
+            fill=(18, 28, 42, 242),
+            border=(9, 14, 22, 255),
+            hi=(74, 108, 144, 255),
+            sh=(14, 22, 34, 255),
+            cut_top=True,
+            cut_bottom=False,
+            bottom_border=(10, 16, 26, 255),
+        ),
+        "dock_bottom_9patch.png": dict(
+            size=16,
+            fill=(14, 22, 34, 244),
+            border=(9, 14, 22, 255),
+            hi=(48, 72, 100, 255),
+            sh=(10, 16, 24, 255),
+            cut_top=False,
+            cut_bottom=True,
+            top_border=(36, 56, 80, 255),
+        ),
+        # Neutral grayscale stepped bevels tinted cleanly via StyleBoxTexture.modulate_color
+        "btn_normal_9patch.png": dict(
+            size=16,
+            fill=(212, 216, 222, 255),
+            border=(46, 52, 62, 255),
+            hi=(252, 254, 255, 255),
+            sh=(132, 138, 148, 255),
+        ),
+        "btn_hover_9patch.png": dict(
+            size=16,
+            fill=(228, 232, 238, 255),
+            border=(56, 64, 76, 255),
+            hi=(255, 255, 255, 255),
+            sh=(156, 162, 172, 255),
+        ),
+        "btn_pressed_9patch.png": dict(
+            size=16,
+            fill=(192, 196, 204, 255),
+            border=(46, 52, 62, 255),
+            hi=(118, 124, 134, 255),
+            sh=(232, 236, 242, 255),
+        ),
+        "btn_disabled_9patch.png": dict(
+            size=16,
+            fill=(172, 176, 184, 195),
+            border=(42, 46, 54, 210),
+            hi=(206, 210, 218, 200),
+            sh=(112, 116, 124, 200),
+        ),
     }
-    for fname, (sz, fill, border, hi, sh) in specs.items():
-        img = _make_9patch(sz, fill, border, hi, sh)
+    for fname, kw in specs.items():
+        img = _make_9patch(**kw)
         dest = os.path.join(UI_DIR, fname)
         img.save(dest, format="PNG")
-        print(f"[ui] Generated {dest} ({sz}x{sz})")
+        print(f"[ui] Generated {dest} ({img.width}x{img.height})")
+
+
+def _render_pixel_sprite_16(rows: List[str], out_size: int = 32) -> Image.Image:
+    """Renders a 16x16 bitmap with automatic 1px dark outline into a crisp NEAREST RGBA image."""
+    w, h = 16, 16
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    px = img.load()
+    fg = set()
+    palette = {
+        "#": (244, 248, 255, 255),
+        "s": (182, 200, 222, 255),
+        "g": (248, 210, 88, 255),
+    }
+    for y in range(min(h, len(rows))):
+        row = rows[y]
+        for x in range(min(w, len(row))):
+            if row[x] in palette:
+                fg.add((x, y))
+    for x, y in fg:
+        for oy in (-1, 0, 1):
+            for ox in (-1, 0, 1):
+                nx, ny = x + ox, y + oy
+                if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in fg:
+                    px[nx, ny] = (12, 18, 28, 255)
+    for y in range(min(h, len(rows))):
+        row = rows[y]
+        for x in range(min(w, len(row))):
+            ch = row[x]
+            if ch in palette:
+                px[x, y] = palette[ch]
+    return img.resize((out_size, out_size), Image.Resampling.NEAREST)
+
+
+def generate_pixel_ui_icons() -> None:
+    """Generates crisp nearest-neighbor pixel-art action icons for menus, headers, and close/back controls."""
+    os.makedirs(SPRITES_DIR, exist_ok=True)
+    bitmaps = {
+        "icon_play": [
+            "................",
+            "....##..........",
+            "....####........",
+            "....######......",
+            "....########....",
+            "....##########..",
+            "....###########.",
+            "....############",
+            "....###########s",
+            "....##########ss",
+            "....########ssss",
+            "....######ss....",
+            "....####ss......",
+            "....##ss........",
+            "................",
+            "................",
+        ],
+        "icon_back": [
+            "................",
+            "......##........",
+            ".....###........",
+            "....####........",
+            "...#####........",
+            "..##############",
+            ".###############",
+            ".##############s",
+            "..######ssssssss",
+            "...#####........",
+            "....####........",
+            ".....###........",
+            "......##........",
+            "................",
+            "................",
+            "................",
+        ],
+        "icon_close": [
+            "................",
+            "................",
+            "..##........##..",
+            "..###......###..",
+            "...###....###...",
+            "....###..###....",
+            ".....######.....",
+            "......####......",
+            "......####......",
+            ".....######.....",
+            "....###..###....",
+            "...###....###...",
+            "..###......###..",
+            "..ss........ss..",
+            "................",
+            "................",
+        ],
+        "icon_friends": [
+            "................",
+            "...###....###...",
+            "..#####..#####..",
+            "..#####..#####..",
+            "..sssss..sssss..",
+            "...###....###...",
+            ".#######.######.",
+            "########.#######",
+            "########.#######",
+            "########.#######",
+            ".sssssss.ssssss.",
+            "................",
+            "..........g.....",
+            ".........ggg....",
+            "..........g.....",
+            "................",
+        ],
+        "icon_multiplayer": [
+            "................",
+            ".....######.....",
+            "...##########...",
+            "..###s####s###..",
+            "..##ss####ss##..",
+            ".###s######s###.",
+            ".##############.",
+            ".sssss####sssss.",
+            ".##############.",
+            ".###s######s###.",
+            "..##ss####ss##..",
+            "..###s####s###..",
+            "...##########...",
+            ".....ssssss.....",
+            "................",
+            "................",
+        ],
+        "icon_audio": [
+            "................",
+            ".......##.......",
+            "......###...s...",
+            ".....####....s..",
+            "..#######..s..s.",
+            "..#######...s.s.",
+            "..#######...s.s.",
+            "..#######...s.s.",
+            "..#######...s.s.",
+            "..#######..s..s.",
+            ".....####....s..",
+            "......sss...s...",
+            ".......ss.......",
+            "................",
+            "................",
+            "................",
+        ],
+    }
+    for name, rows in bitmaps.items():
+        img = _render_pixel_sprite_16(rows, 32)
+        dest = os.path.join(SPRITES_DIR, f"{name}.png")
+        img.save(dest, format="PNG")
+        print(f"[ui-icon] Generated {dest} ({img.width}x{img.height})")
 
 
 def generate_pixel_logo() -> None:
@@ -512,11 +747,44 @@ def generate_pixel_logo() -> None:
     logo.save(dest, format="PNG")
     print(f"[logo] Generated pixel-art logo {dest} ({logo.width}x{logo.height})")
 
+    # Square multi-size app icon built from the 21x21 globe + crosshair emblem
+    emblem = canvas.crop((2, 2, 23, 23))
+    icon_specs = [
+        (256, 231),
+        (128, 126),
+        (64, 63),
+        (48, 42),
+        (32, 30),
+        (16, 16),
+    ]
+    frames: List[Image.Image] = []
+    for box_sz, inner_sz in icon_specs:
+        scaled = emblem.resize((inner_sz, inner_sz), Image.Resampling.NEAREST)
+        if inner_sz == box_sz:
+            frames.append(scaled)
+        else:
+            square = Image.new("RGBA", (box_sz, box_sz), (0, 0, 0, 0))
+            offset = (box_sz - inner_sz) // 2
+            square.paste(scaled, (offset, offset))
+            frames.append(square)
+
+    png_icon_dest = os.path.join(SPRITES_DIR, "app_icon.png")
+    frames[0].save(png_icon_dest, format="PNG")
+    ico_dest = os.path.join(SPRITES_DIR, "app_icon.ico")
+    frames[0].save(
+        ico_dest,
+        format="ICO",
+        sizes=[(f.width, f.height) for f in frames],
+        append_images=frames[1:],
+    )
+    print(f"[logo] Generated square app icons {png_icon_dest} and {ico_dest}")
+
 
 def main() -> None:
     os.makedirs(SPRITES_DIR, exist_ok=True)
     os.makedirs(CACHE_DIR, exist_ok=True)
     generate_ui_9patch_textures()
+    generate_pixel_ui_icons()
     generate_pixel_logo()
 
     cell_w, cell_h = 112, 84

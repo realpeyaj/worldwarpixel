@@ -572,9 +572,29 @@ func _run_all_tests() -> void:
 		var has_banner := l4 != null and l4.get("_tex_banner") != null and l4.get("_tex_banner_mask") != null
 		var ui_ok := false
 		if hud != null:
-			var menu_init: bool = hud.menu_overlay.visible and not hud.spawn_banner.visible
+			var menu_init: bool = hud.menu_overlay.visible and not hud.spawn_banner.visible and not hud.top_bar.visible and not hud.action_dock.visible and not hud.leaderboard_panel.visible and not hud.ping_badge.visible
+			var cam_pan_init: bool = wm != null and wm.camera.auto_pan_enabled
+			var cam_p0: Vector2 = wm.camera._target_pos if wm != null else Vector2.ZERO
+			if wm != null:
+				wm.camera._process(0.5)
+			var cam_pan_moved: bool = wm != null and not wm.camera._target_pos.is_equal_approx(cam_p0)
+			hud.open_friends_page("menu")
+			var friends_open_ok: bool = hud.friends_card.visible and not hud.menu_card.visible
+			hud._on_friends_back_pressed()
+			var friends_back_ok: bool = (not hud.friends_card.visible) and hud.menu_card.visible
+			var prof_cfg := ConfigFile.new()
+			var had_prof := prof_cfg.load(GameHUD.PROFILE_SAVE_PATH) == OK
+			var prev_saved_name: String = str(prof_cfg.get_value("profile", "player_name", "")) if had_prof else ""
+			hud.save_player_name("Admiral Reyes")
+			hud.menu_name_edit.text = "TmpOverride"
+			hud._load_profile()
+			var name_rem_ok: bool = hud.menu_name_edit.text == "Admiral Reyes" and hud.nation_name_edit.text == "Admiral Reyes"
+			if had_prof and not prev_saved_name.is_empty():
+				hud.save_player_name(prev_saved_name)
+			elif FileAccess.file_exists(GameHUD.PROFILE_SAVE_PATH):
+				DirAccess.remove_absolute(ProjectSettings.globalize_path(GameHUD.PROFILE_SAVE_PATH))
 			hud._on_play_pressed()
-			var play_reveals_spawn: bool = (not hud.menu_overlay.visible) and hud.spawn_banner.visible
+			var play_reveals_spawn: bool = (not hud.menu_overlay.visible) and hud.spawn_banner.visible and hud.top_bar.visible and hud.ping_badge.visible and (not wm.camera.auto_pan_enabled)
 			var no_color_or_slider: bool = inst.get_node_or_null("HUD/Root/SpawnBanner/VBox/Row/ColorRow") == null and inst.get_node_or_null("HUD/Root/ActionDock/HBox/CommitBox/CommitSlider") == null
 			hud.set_commit_ratio(0.20)
 			var r20: bool = is_equal_approx(hud.get_commit_ratio(), 0.20)
@@ -606,12 +626,19 @@ func _run_all_tests() -> void:
 				and hud.gold_icon.texture != null
 				and hud.troops_icon.texture != null
 				and hud.logo_rect.texture != null
+				and hud.play_btn.icon != null
+				and hud.friends_back_btn.icon != null
+				and hud.mp_disconnect_btn.icon != null
+				and hud.quit_btn.icon != null
+				and hud.st_close_btn.icon != null
 				and not (inst.get_node("HUD/Root/MenuOverlay/Center/MenuCard/VBox/Subtitle") as Control).visible
 				and (inst.get_node("HUD/Root/MenuOverlay/Center/MenuCard/VBox/NameRow/Lbl") as Label).text == "Name"
+				and GameHUD.SERVER_REGIONS.size() == 1
 				and hud.get_selected_server_name() == "Manila, PH"
 				and not hud.mp_server_edit.visible
 				and hud.expand_btn.text == "Explore"
 				and (hud.action_dock.offset_right - hud.action_dock.offset_left) <= 760.0
+				and hud.action_dock.get_combined_minimum_size().x <= 760.0
 				and hud.radial_attack_btn.text == "Attack"
 				and hud.radial_build_btn.text == "Upgrade"
 				and hud.radial_warship_btn.text == "Boat"
@@ -620,7 +647,7 @@ func _run_all_tests() -> void:
 				and inst.get_node_or_null("HUD/Root/SpectatorBanner") != null
 			)
 			var of_nodes := inst.get_node_or_null("HUD/Root/RadialMenu") != null and inst.get_node_or_null("HUD/Root/RightStack/DiplomacyPanel") != null and inst.get_node_or_null("HUD/Root/AllianceBanner") != null
-			var mp_nodes := inst.get_node_or_null("HUD/Root/MenuOverlay/Center/MpLobbyCard") != null and inst.get_node_or_null("HUD/Root/MenuOverlay/Center/MenuCard/VBox/MultiplayerBtn") != null
+			var mp_nodes := inst.get_node_or_null("HUD/Root/MenuOverlay/Center/MpLobbyCard") != null and inst.get_node_or_null("HUD/Root/MenuOverlay/Center/FriendsCard") != null and hud.multiplayer_btn != null
 			var ping_nodes := inst.get_node_or_null("HUD/Root/PingBadge") != null and inst.get_node_or_null("HUD/Root/PingBadge/HBox/PingIcon") != null and inst.get_node_or_null("HUD/Root/PingBadge/HBox/PingLabel") != null
 			hud.update_ping(42)
 			var ping_set_ok: bool = hud.ping_label.text == "42ms"
@@ -658,7 +685,9 @@ func _run_all_tests() -> void:
 			var hk_m: bool = hud._missile_mode == MissileUnit.KIND_MIRV
 			hud.clear_missile_mode()
 			hud._world_state.match_phase = WorldState.PHASE_SPAWN_SELECT
-			ui_ok = menu_init and play_reveals_spawn and no_color_or_slider and r20 and r50 and r75 and hk_init and hk_off and lb_min and lb_restored and dock_icons and of_nodes and mp_nodes and ping_nodes and ping_set_ok and ping_reset_ok and peso_hud_ok and smooth_filter_ok and hk_fact and hk_ship and hk_atom and hk_h and hk_m
+			ui_ok = menu_init and cam_pan_init and cam_pan_moved and friends_open_ok and friends_back_ok and name_rem_ok and play_reveals_spawn and no_color_or_slider and r20 and r50 and r75 and hk_init and hk_off and lb_min and lb_restored and dock_icons and of_nodes and mp_nodes and ping_nodes and ping_set_ok and ping_reset_ok and peso_hud_ok and smooth_filter_ok and hk_fact and hk_ship and hk_atom and hk_h and hk_m
+			if not ui_ok:
+				print("[UI DEBUG] menu_init=", menu_init, " cam_pan_init=", cam_pan_init, " cam_pan_moved=", cam_pan_moved, " friends_open=", friends_open_ok, " friends_back=", friends_back_ok, " name_rem=", name_rem_ok, " play=", play_reveals_spawn, " lb_min=", lb_min, " lb_restored=", lb_restored, " dock_icons=", dock_icons, " dock_min=", hud.action_dock.get_combined_minimum_size(), " mp_nodes=", mp_nodes, " peso=", peso_hud_ok, " hk=", hk_fact, "/", hk_ship, "/", hk_atom, "/", hk_h, "/", hk_m)
 		_check(ok and no_army_ui and has_banner and ui_ok,
 			"Main scene verifies smooth filters, Pesos bottom HUD, hotkeys(1..9,F), PingBadge, RadialMenu & Diplomacy")
 		inst.queue_free()

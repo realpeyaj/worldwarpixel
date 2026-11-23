@@ -96,7 +96,7 @@ func _process(_delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if _world_state == null:
+	if _world_state == null or camera.auto_pan_enabled:
 		return
 
 	if event is InputEventKey:
@@ -281,6 +281,10 @@ func set_political_mode(enabled: bool) -> void:
 
 func reset_camera_view() -> void:
 	camera.reset_view()
+
+
+func set_home_pan_active(active: bool, preserve_view: bool = false) -> void:
+	camera.set_auto_pan(active, preserve_view)
 
 
 func _on_nation_spawned(_nid: int) -> void:

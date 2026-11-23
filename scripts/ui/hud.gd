@@ -27,17 +27,23 @@ signal mp_connect_requested(ws_url: String, room_code: String, player_name: Stri
 signal mp_disconnect_requested
 signal mp_start_match_requested(ai_count: int)
 signal friend_invite_requested(friend_name: String, room_code: String)
+signal menu_visibility_changed(is_open: bool)
 signal quit_requested
 
 const MAX_LEADERBOARD_ROWS := 7
 const FRIENDS_SAVE_PATH := "user://friends.cfg"
+const PROFILE_SAVE_PATH := "user://player_profile.cfg"
 const SERVER_REGIONS := [
 	{"name": "Manila, PH", "url": "ws://151.242.136.36:30041/ws"},
-	{"name": "Singapore, SG", "url": "ws://151.242.136.36:30041/ws"},
-	{"name": "Tokyo, JP", "url": "ws://151.242.136.36:30041/ws"},
 ]
 
 var _tex_logo := preload("res://assets/sprites/logo_world_war_pixel.png")
+var _tex_play := preload("res://assets/sprites/icon_play.png")
+var _tex_back := preload("res://assets/sprites/icon_back.png")
+var _tex_close := preload("res://assets/sprites/icon_close.png")
+var _tex_friends := preload("res://assets/sprites/icon_friends.png")
+var _tex_multiplayer := preload("res://assets/sprites/icon_multiplayer.png")
+var _tex_audio := preload("res://assets/sprites/icon_audio.png")
 var _tex_attack := preload("res://assets/sprites/icon_attack.png")
 var _tex_town := preload("res://assets/sprites/icon_town.png")
 var _tex_town_mask := preload("res://assets/sprites/icon_town_mask.png")
@@ -87,8 +93,12 @@ var _pending_invite_friend: String = ""
 var _pending_join_invite_code: String = ""
 var _friends: Array[String] = []
 var _is_spectating: bool = false
+var _friends_return_to: String = "menu"
+var _icon_close_16: ImageTexture
+var _icon_play_16: ImageTexture
 
 @onready var root_control: Control = $Root
+@onready var top_bar: PanelContainer = $Root/TopBar
 @onready var clock_label: Label = $Root/TopBar/HBox/ClockLabel
 @onready var gold_icon: TextureRect = $Root/TopBar/HBox/GoldIcon
 @onready var gold_label: Label = $Root/TopBar/HBox/GoldLabel
@@ -117,6 +127,7 @@ var _is_spectating: bool = false
 @onready var atom_dock_btn: Button = $Root/ActionDock/HBox/AtomDockBtn
 @onready var hbomb_dock_btn: Button = $Root/ActionDock/HBox/HbombDockBtn
 @onready var mirv_dock_btn: Button = $Root/ActionDock/HBox/MirvDockBtn
+@onready var commit_sep: VSeparator = $Root/ActionDock/HBox/CommitSep
 @onready var commit_box: HBoxContainer = $Root/ActionDock/HBox/CommitBox
 @onready var commit_20_btn: Button = $Root/ActionDock/HBox/CommitBox/Commit20Btn
 @onready var commit_35_btn: Button = $Root/ActionDock/HBox/CommitBox/Commit35Btn
@@ -188,12 +199,14 @@ var _is_spectating: bool = false
 @onready var menu_name_edit: LineEdit = $Root/MenuOverlay/Center/MenuCard/VBox/NameRow/MenuNameEdit
 @onready var menu_ai_option: OptionButton = $Root/MenuOverlay/Center/MenuCard/VBox/AiRow/MenuAiOption
 @onready var play_btn: Button = $Root/MenuOverlay/Center/MenuCard/VBox/PlayBtn
-@onready var multiplayer_btn: Button = $Root/MenuOverlay/Center/MenuCard/VBox/MultiplayerBtn
+@onready var multiplayer_btn: Button = $Root/MenuOverlay/Center/MenuCard/VBox/SocialRow/MultiplayerBtn
+@onready var friends_btn: Button = $Root/MenuOverlay/Center/MenuCard/VBox/SocialRow/FriendsBtn
 @onready var new_match_btn: Button = $Root/MenuOverlay/Center/MenuCard/VBox/NewMatchBtn
-@onready var menu_audio_btn: Button = $Root/MenuOverlay/Center/MenuCard/VBox/MenuAudioBtn
-@onready var quit_btn: Button = $Root/MenuOverlay/Center/MenuCard/VBox/QuitBtn
+@onready var menu_audio_btn: Button = $Root/MenuOverlay/Center/MenuCard/VBox/FooterRow/MenuAudioBtn
+@onready var quit_btn: Button = $Root/MenuOverlay/Center/MenuCard/VBox/FooterRow/QuitBtn
 
 @onready var mp_lobby_card: PanelContainer = $Root/MenuOverlay/Center/MpLobbyCard
+@onready var server_value_label: Label = $Root/MenuOverlay/Center/MpLobbyCard/VBox/ServerRow/ServerValueLabel
 @onready var server_option: OptionButton = $Root/MenuOverlay/Center/MpLobbyCard/VBox/ServerRow/ServerOption
 @onready var conn_bar_icon: TextureRect = $Root/MenuOverlay/Center/MpLobbyCard/VBox/ServerRow/ConnBarIcon
 @onready var conn_strength_label: Label = $Root/MenuOverlay/Center/MpLobbyCard/VBox/ServerRow/ConnStrengthLabel
@@ -203,18 +216,26 @@ var _is_spectating: bool = false
 @onready var mp_room_edit: LineEdit = $Root/MenuOverlay/Center/MpLobbyCard/VBox/RoomRow/MpRoomEdit
 @onready var create_room_btn: Button = $Root/MenuOverlay/Center/MpLobbyCard/VBox/BtnRow/CreateRoomBtn
 @onready var mp_connect_btn: Button = $Root/MenuOverlay/Center/MpLobbyCard/VBox/BtnRow/MpConnectBtn
-@onready var mp_disconnect_btn: Button = $Root/MenuOverlay/Center/MpLobbyCard/VBox/BtnRow/MpDisconnectBtn
+@onready var mp_disconnect_btn: Button = $Root/MenuOverlay/Center/MpLobbyCard/VBox/HeaderRow/MpDisconnectBtn
+@onready var mp_friends_btn: Button = $Root/MenuOverlay/Center/MpLobbyCard/VBox/HeaderRow/MpFriendsBtn
 @onready var mp_status_label: Label = $Root/MenuOverlay/Center/MpLobbyCard/VBox/MpStatusLabel
 @onready var mp_players_label: Label = $Root/MenuOverlay/Center/MpLobbyCard/VBox/MpPlayersLabel
 @onready var mp_start_btn: Button = $Root/MenuOverlay/Center/MpLobbyCard/VBox/MpStartBtn
-@onready var friend_name_edit: LineEdit = $Root/MenuOverlay/Center/MpLobbyCard/VBox/FriendAddRow/FriendNameEdit
-@onready var add_friend_btn: Button = $Root/MenuOverlay/Center/MpLobbyCard/VBox/FriendAddRow/AddFriendBtn
-@onready var friends_rows: VBoxContainer = $Root/MenuOverlay/Center/MpLobbyCard/VBox/FriendsRows
-@onready var invite_row: HBoxContainer = $Root/MenuOverlay/Center/MpLobbyCard/VBox/InviteRow
-@onready var invite_label: Label = $Root/MenuOverlay/Center/MpLobbyCard/VBox/InviteRow/InviteLabel
-@onready var accept_invite_btn: Button = $Root/MenuOverlay/Center/MpLobbyCard/VBox/InviteRow/AcceptInviteBtn
+
+@onready var friends_card: PanelContainer = $Root/MenuOverlay/Center/FriendsCard
+@onready var friends_back_btn: Button = $Root/MenuOverlay/Center/FriendsCard/VBox/HeaderRow/FriendsBackBtn
+@onready var friends_header_icon: TextureRect = $Root/MenuOverlay/Center/FriendsCard/VBox/HeaderRow/FriendsIcon
+@onready var friend_name_edit: LineEdit = $Root/MenuOverlay/Center/FriendsCard/VBox/FriendAddRow/FriendNameEdit
+@onready var add_friend_btn: Button = $Root/MenuOverlay/Center/FriendsCard/VBox/FriendAddRow/AddFriendBtn
+@onready var friends_rows: VBoxContainer = $Root/MenuOverlay/Center/FriendsCard/VBox/FriendsScroll/FriendsRows
+@onready var invite_row: HBoxContainer = $Root/MenuOverlay/Center/FriendsCard/VBox/InviteRow
+@onready var invite_label: Label = $Root/MenuOverlay/Center/FriendsCard/VBox/InviteRow/InviteLabel
+@onready var accept_invite_btn: Button = $Root/MenuOverlay/Center/FriendsCard/VBox/InviteRow/AcceptInviteBtn
+@onready var dismiss_invite_btn: Button = $Root/MenuOverlay/Center/FriendsCard/VBox/InviteRow/DismissInviteBtn
+@onready var friends_hint_label: Label = $Root/MenuOverlay/Center/FriendsCard/VBox/FriendsHintLabel
 
 @onready var audio_popover: PanelContainer = $Root/AudioPopover
+@onready var audio_close_btn: Button = $Root/AudioPopover/VBox/Header/AudioCloseBtn
 @onready var mute_check: CheckButton = $Root/AudioPopover/VBox/MuteCheck
 @onready var master_slider: HSlider = $Root/AudioPopover/VBox/MasterSlider
 @onready var music_slider: HSlider = $Root/AudioPopover/VBox/MusicSlider
@@ -244,8 +265,21 @@ var _is_spectating: bool = false
 func _ready() -> void:
 	root_control.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	root_control.theme = ThemeFactory.build_strategy_theme()
+	ThemeFactory.apply_panel_variant(top_bar, "dock_top")
+	ThemeFactory.apply_panel_variant(action_dock, "dock_bottom")
+	ThemeFactory.apply_panel_variant(ping_badge, "flat")
+	_icon_close_16 = _make_pixel_icon(_tex_close, Color.WHITE, 14)
+	_icon_play_16 = _make_pixel_icon(_tex_play, Color.WHITE, 14)
+	var icon_back_16: ImageTexture = _make_pixel_icon(_tex_back, Color.WHITE, 14)
+	var icon_friends_16: ImageTexture = _make_pixel_icon(_tex_friends, Color.WHITE, 16)
+	var icon_mp_16: ImageTexture = _make_pixel_icon(_tex_multiplayer, Color.WHITE, 16)
+	var icon_audio_16: ImageTexture = _make_pixel_icon(_tex_audio, Color.WHITE, 15)
+
 	logo_rect.texture = _tex_logo
 	logo_rect.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	friends_header_icon.texture = icon_friends_16
+	friends_header_icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+
 	hover_card.visible = false
 	structure_panel.visible = false
 	expansions_panel.visible = false
@@ -262,13 +296,17 @@ func _ready() -> void:
 	spawn_banner.visible = false
 	world_min_btn.visible = false
 	new_match_btn.visible = false
+	mp_lobby_card.visible = false
+	friends_card.visible = false
+	menu_card.visible = true
 	menu_overlay.visible = true
 
+	_apply_ui_variants_and_icons(icon_back_16, icon_friends_16, icon_mp_16, icon_audio_16)
 	_populate_spawn_controls()
+	_load_profile()
 	_populate_server_regions()
 	_load_friends()
 	_init_leaderboard_pool()
-	ping_badge.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
 	radial_wheel.draw.connect(_on_radial_wheel_draw)
 	_apply_action_dock_icons(Color(0.32, 0.56, 0.90))
 	for icon_ctrl: CanvasItem in [
@@ -280,9 +318,33 @@ func _ready() -> void:
 		ping_icon, radial_attack_btn, radial_build_btn, radial_warship_btn, radial_missile_btn, radial_dip_btn, radial_info_btn,
 	]:
 		icon_ctrl.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	for pixel_ctrl: CanvasItem in [
+		play_btn, multiplayer_btn, friends_btn, menu_audio_btn, quit_btn,
+		mp_disconnect_btn, mp_friends_btn, mp_start_btn, friends_back_btn,
+		accept_invite_btn, dismiss_invite_btn, st_close_btn, dip_close_btn,
+		audio_close_btn, radial_close_btn, audio_btn,
+	]:
+		pixel_ctrl.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	for dock_ctrl: Control in [
+		gold_label, troops_label, world_pct_label, clock_label,
+		map_mode_btn, reset_view_btn, hotkeys_btn, audio_btn, menu_btn,
+		commit_20_btn, commit_35_btn, commit_50_btn, commit_75_btn,
+	]:
+		dock_ctrl.add_theme_font_size_override("font_size", 11)
+	for slot_btn: Button in [
+		expand_btn, town_btn, factory_btn, port_btn, defense_btn, silo_btn, sam_btn,
+		warship_btn, atom_dock_btn, hbomb_dock_btn, mirv_dock_btn,
+	]:
+		slot_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		slot_btn.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
+		slot_btn.add_theme_font_size_override("font_size", 10)
+		slot_btn.add_theme_constant_override("v_separation", 1)
+		slot_btn.custom_minimum_size = Vector2(52, 38) if slot_btn == expand_btn else Vector2(46, 38)
+
 	ping_icon.texture = _build_tinted_icon(_tex_wifi, null, Color.WHITE, 16, 16)
 	conn_bar_icon.texture = ping_icon.texture
 	update_ping(-1)
+	_sync_hud_chrome_visibility()
 
 	victory_new_match_btn.pressed.connect(func() -> void:
 		AudioManager.play_ui_tap()
@@ -386,14 +448,26 @@ func _ready() -> void:
 	play_btn.pressed.connect(_on_play_pressed)
 	multiplayer_btn.pressed.connect(func() -> void:
 		AudioManager.play_ui_tap()
+		save_player_name(menu_name_edit.text)
 		menu_card.visible = false
+		friends_card.visible = false
 		mp_lobby_card.visible = true
 	)
+	friends_btn.pressed.connect(func() -> void:
+		save_player_name(menu_name_edit.text)
+		open_friends_page("menu")
+	)
+	mp_friends_btn.pressed.connect(func() -> void:
+		save_player_name(menu_name_edit.text)
+		open_friends_page("mp_lobby")
+	)
+	friends_back_btn.pressed.connect(_on_friends_back_pressed)
 	create_room_btn.pressed.connect(func() -> void:
 		AudioManager.play_ui_tap()
 		mp_room_edit.text = ""
 		mp_status_label.text = "Creating Room on %s..." % get_selected_server_name()
 		var cfg: Dictionary = get_spawn_config()
+		save_player_name(str(cfg.get("name", "")))
 		mp_connect_requested.emit(get_mp_server_url(), "", str(cfg.get("name", "Commander")))
 	)
 	mp_connect_btn.pressed.connect(func() -> void:
@@ -401,6 +475,7 @@ func _ready() -> void:
 		var code_in: String = mp_room_edit.text.strip_edges().to_upper()
 		mp_status_label.text = ("Joining Room %s on %s..." % [code_in, get_selected_server_name()]) if not code_in.is_empty() else ("Creating Room on %s..." % get_selected_server_name())
 		var cfg: Dictionary = get_spawn_config()
+		save_player_name(str(cfg.get("name", "")))
 		mp_connect_requested.emit(get_mp_server_url(), code_in, str(cfg.get("name", "Commander")))
 	)
 	copy_code_btn.pressed.connect(func() -> void:
@@ -422,16 +497,32 @@ func _ready() -> void:
 	accept_invite_btn.pressed.connect(func() -> void:
 		AudioManager.play_ui_tap()
 		invite_row.visible = false
+		_refresh_friends_badge()
 		if not _pending_join_invite_code.is_empty():
+			friends_card.visible = false
+			mp_lobby_card.visible = true
 			mp_room_edit.text = _pending_join_invite_code
 			var cfg: Dictionary = get_spawn_config()
+			save_player_name(str(cfg.get("name", "")))
 			mp_connect_requested.emit(get_mp_server_url(), _pending_join_invite_code, str(cfg.get("name", "Commander")))
+			_pending_join_invite_code = ""
+	)
+	dismiss_invite_btn.pressed.connect(func() -> void:
+		AudioManager.play_ui_tap()
+		_pending_join_invite_code = ""
+		invite_row.visible = false
+		_refresh_friends_badge()
+	)
+	audio_close_btn.pressed.connect(func() -> void:
+		AudioManager.play_panel_close()
+		audio_popover.visible = false
 	)
 	mp_disconnect_btn.pressed.connect(func() -> void:
 		AudioManager.play_ui_tap()
 		mp_disconnect_requested.emit()
 		on_mp_disconnected("Returned to main menu.")
 		mp_lobby_card.visible = false
+		friends_card.visible = false
 		menu_card.visible = true
 	)
 	mp_start_btn.pressed.connect(func() -> void:
@@ -442,16 +533,19 @@ func _ready() -> void:
 	new_match_btn.pressed.connect(func() -> void:
 		AudioManager.play_ui_tap()
 		menu_overlay.visible = false
+		_sync_hud_chrome_visibility()
 		new_match_requested.emit()
 	)
 	quit_btn.pressed.connect(func() -> void:
 		AudioManager.play_ui_tap()
+		save_player_name(menu_name_edit.text)
 		quit_requested.emit()
 	)
 
 	mute_check.toggled.connect(func(t: bool) -> void:
 		AudioManager.set_muted(t)
-		audio_btn.text = "Audio: Muted" if t else "Audio"
+		audio_btn.modulate = Color(1.0, 0.48, 0.48) if t else Color.WHITE
+		audio_btn.tooltip_text = "Audio: Muted" if t else "Audio Settings"
 	)
 	master_slider.value_changed.connect(func(v: float) -> void: AudioManager.set_bus_volume("Master", v))
 	music_slider.value_changed.connect(func(v: float) -> void: AudioManager.set_bus_volume("Music", v))
@@ -460,6 +554,47 @@ func _ready() -> void:
 	_update_action_dock_buttons()
 	_update_commit_buttons()
 	_update_hotkeys_button()
+
+
+func _apply_ui_variants_and_icons(icon_back_16: ImageTexture, icon_friends_16: ImageTexture, icon_mp_16: ImageTexture, icon_audio_16: ImageTexture) -> void:
+	for btn: Button in [play_btn, create_room_btn, mp_start_btn, add_friend_btn, accept_invite_btn, st_upgrade_btn, victory_new_match_btn, spec_new_match_btn, alliance_accept_btn]:
+		ThemeFactory.apply_button_variant(btn, "primary")
+	for btn: Button in [multiplayer_btn, friends_btn, mp_connect_btn, victory_inspect_btn, spec_continue_btn, donate_gold_btn, donate_troops_btn]:
+		ThemeFactory.apply_button_variant(btn, "secondary")
+	for btn: Button in [mp_disconnect_btn, friends_back_btn, menu_audio_btn, new_match_btn]:
+		ThemeFactory.apply_button_variant(btn, "back")
+	for btn: Button in [quit_btn, alliance_decline_btn]:
+		ThemeFactory.apply_button_variant(btn, "danger")
+	for btn: Button in [map_mode_btn, reset_view_btn, hotkeys_btn, audio_btn, menu_btn, lb_toggle_btn, copy_code_btn, mp_friends_btn, commit_20_btn, commit_35_btn, commit_50_btn, commit_75_btn]:
+		ThemeFactory.apply_button_variant(btn, "ghost")
+	for btn: Button in [st_close_btn, dip_close_btn, audio_close_btn, dismiss_invite_btn, radial_close_btn]:
+		_style_close_button(btn)
+	for btn: Button in [expand_btn, town_btn, factory_btn, port_btn, defense_btn, silo_btn, sam_btn, warship_btn, atom_dock_btn, hbomb_dock_btn, mirv_dock_btn]:
+		ThemeFactory.apply_button_variant(btn, "dock_slot")
+
+	play_btn.icon = _icon_play_16
+	mp_start_btn.icon = _icon_play_16
+	accept_invite_btn.icon = _icon_play_16
+	mp_disconnect_btn.icon = icon_back_16
+	friends_back_btn.icon = icon_back_16
+	quit_btn.icon = _icon_close_16
+	multiplayer_btn.icon = icon_mp_16
+	friends_btn.icon = icon_friends_16
+	mp_friends_btn.icon = icon_friends_16
+	menu_audio_btn.icon = icon_audio_16
+	audio_btn.icon = icon_audio_16
+
+
+func _style_close_button(btn: Button) -> void:
+	if btn == null:
+		return
+	ThemeFactory.apply_button_variant(btn, "ghost_danger")
+	btn.text = ""
+	btn.icon = _icon_close_16
+	btn.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	btn.add_theme_color_override("icon_normal_color", Color(1.0, 0.45, 0.45))
+	btn.add_theme_color_override("icon_hover_color", Color.WHITE)
+	btn.add_theme_color_override("icon_pressed_color", Color.WHITE)
 
 
 func _populate_spawn_controls() -> void:
@@ -474,11 +609,17 @@ func _populate_spawn_controls() -> void:
 	nation_name_edit.text_changed.connect(func(txt: String) -> void:
 		if menu_name_edit.text != txt:
 			menu_name_edit.text = txt
+		save_player_name(txt)
 	)
 	menu_name_edit.text_changed.connect(func(txt: String) -> void:
 		if nation_name_edit.text != txt:
 			nation_name_edit.text = txt
+		save_player_name(txt)
 	)
+	nation_name_edit.focus_exited.connect(func() -> void: save_player_name(nation_name_edit.text))
+	menu_name_edit.focus_exited.connect(func() -> void: save_player_name(menu_name_edit.text))
+	nation_name_edit.text_submitted.connect(func(txt: String) -> void: save_player_name(txt))
+	menu_name_edit.text_submitted.connect(func(txt: String) -> void: save_player_name(txt))
 	ai_count_option.item_selected.connect(func(idx: int) -> void:
 		if menu_ai_option.selected != idx:
 			menu_ai_option.select(idx)
@@ -489,23 +630,68 @@ func _populate_spawn_controls() -> void:
 	)
 
 
+func _load_profile() -> void:
+	var cfg := ConfigFile.new()
+	if cfg.load(PROFILE_SAVE_PATH) == OK:
+		var saved: String = str(cfg.get_value("profile", "player_name", "")).strip_edges()
+		if not saved.is_empty():
+			menu_name_edit.text = saved
+			nation_name_edit.text = saved
+
+
+func save_player_name(raw_name: String) -> void:
+	var clean: String = raw_name.strip_edges()
+	if clean.is_empty():
+		return
+	var cfg := ConfigFile.new()
+	cfg.load(PROFILE_SAVE_PATH)
+	cfg.set_value("profile", "player_name", clean)
+	cfg.save(PROFILE_SAVE_PATH)
+
+
 func _populate_server_regions() -> void:
 	server_option.clear()
 	for i in range(SERVER_REGIONS.size()):
 		server_option.add_item(str(SERVER_REGIONS[i]["name"]), i)
 	server_option.select(0)
+	server_option.visible = false
+	server_value_label.text = str(SERVER_REGIONS[0]["name"])
 	mp_server_edit.visible = false
 	mp_server_edit.text = str(SERVER_REGIONS[0]["url"])
-	server_option.item_selected.connect(func(idx: int) -> void:
-		AudioManager.play_ui_tap()
-		if idx >= 0 and idx < SERVER_REGIONS.size():
-			mp_server_edit.text = str(SERVER_REGIONS[idx]["url"])
-	)
 
 
 func get_selected_server_name() -> String:
 	var idx: int = clampi(server_option.selected, 0, SERVER_REGIONS.size() - 1)
 	return str(SERVER_REGIONS[idx]["name"])
+
+
+func open_friends_page(return_to: String = "menu") -> void:
+	AudioManager.play_ui_tap()
+	_friends_return_to = return_to
+	menu_card.visible = false
+	mp_lobby_card.visible = false
+	friends_card.visible = true
+	menu_overlay.visible = true
+	_refresh_friends_ui()
+
+
+func _on_friends_back_pressed() -> void:
+	AudioManager.play_ui_tap()
+	friends_card.visible = false
+	if _friends_return_to == "mp_lobby":
+		mp_lobby_card.visible = true
+	else:
+		menu_card.visible = true
+
+
+func _refresh_friends_badge() -> void:
+	var label_txt := "Friends (1)" if invite_row.visible else "Friends"
+	friends_btn.text = label_txt
+	mp_friends_btn.text = label_txt
+	if not _current_room_code.is_empty():
+		friends_hint_label.text = "Room Code: %s — click Invite to send to friends." % _current_room_code
+	else:
+		friends_hint_label.text = "Invite a friend to auto-create a %s room." % get_selected_server_name()
 
 
 func _load_friends() -> void:
@@ -572,6 +758,7 @@ func _refresh_friends_ui() -> void:
 
 		var inv_btn := Button.new()
 		inv_btn.text = "Invite"
+		ThemeFactory.apply_button_variant(inv_btn, "secondary")
 		var f_cap: String = f_name
 		inv_btn.pressed.connect(func() -> void:
 			AudioManager.play_ui_tap()
@@ -580,7 +767,8 @@ func _refresh_friends_ui() -> void:
 		row.add_child(inv_btn)
 
 		var rm_btn := Button.new()
-		rm_btn.text = "×"
+		_style_close_button(rm_btn)
+		rm_btn.tooltip_text = "Remove Friend"
 		rm_btn.pressed.connect(func() -> void:
 			AudioManager.play_ui_tap()
 			remove_friend(f_cap)
@@ -593,9 +781,12 @@ func _refresh_friends_ui() -> void:
 func _on_invite_friend_pressed(friend_name: String) -> void:
 	if _current_room_code.is_empty():
 		_pending_invite_friend = friend_name
+		friends_card.visible = false
+		mp_lobby_card.visible = true
 		mp_room_edit.text = ""
 		mp_status_label.text = "Creating Room on %s to invite %s..." % [get_selected_server_name(), friend_name]
 		var cfg: Dictionary = get_spawn_config()
+		save_player_name(str(cfg.get("name", "")))
 		mp_connect_requested.emit(get_mp_server_url(), "", str(cfg.get("name", "Commander")))
 		return
 	DisplayServer.clipboard_set(_current_room_code)
@@ -609,6 +800,7 @@ func show_incoming_invite(from_name: String, room_code: String) -> void:
 	_pending_join_invite_code = room_code.strip_edges().to_upper()
 	invite_label.text = "%s invited you · Code: %s" % [from_name, _pending_join_invite_code]
 	invite_row.visible = true
+	_refresh_friends_badge()
 	show_toast("Room Invite from %s (Code: %s)!" % [from_name, _pending_join_invite_code], false)
 
 
@@ -639,7 +831,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				return
 	if menu_overlay.visible or not _hotkeys_enabled:
 		return
-	if nation_name_edit.has_focus() or menu_name_edit.has_focus() or mp_server_edit.has_focus() or mp_room_edit.has_focus():
+	if nation_name_edit.has_focus() or menu_name_edit.has_focus() or mp_server_edit.has_focus() or mp_room_edit.has_focus() or friend_name_edit.has_focus():
 		return
 	if event is InputEventKey:
 		var ke := event as InputEventKey
@@ -720,14 +912,43 @@ func toggle_hotkeys() -> void:
 	_update_hotkeys_button()
 
 
+func _sync_hud_chrome_visibility() -> void:
+	var in_menu: bool = menu_overlay.visible
+	if in_menu:
+		top_bar.visible = false
+		action_dock.visible = false
+		spawn_banner.visible = false
+		leaderboard_panel.visible = false
+		world_min_btn.visible = false
+		hover_card.visible = false
+		ping_badge.visible = false
+		structure_panel.visible = false
+		expansions_panel.visible = false
+		diplomacy_panel.visible = false
+		alliance_banner.visible = false
+		radial_menu.visible = false
+	else:
+		var is_playing: bool = _world_state != null and _world_state.match_phase == WorldState.PHASE_PLAYING
+		top_bar.visible = true
+		ping_badge.visible = true
+		leaderboard_panel.visible = not _leaderboard_minimized
+		world_min_btn.visible = _leaderboard_minimized
+		action_dock.visible = is_playing and not _is_spectating
+		spawn_banner.visible = (_world_state != null and _world_state.match_phase == WorldState.PHASE_SPAWN_SELECT)
+	menu_visibility_changed.emit(in_menu)
+
+
 func open_menu() -> void:
 	AudioManager.play_panel_open()
+	audio_popover.visible = false
 	var in_match: bool = _world_state != null and _world_state.match_phase != WorldState.PHASE_SPAWN_SELECT
 	play_btn.text = "Resume Match" if in_match else "Play Match"
 	new_match_btn.visible = in_match
 	mp_lobby_card.visible = false
+	friends_card.visible = false
 	menu_card.visible = true
 	menu_overlay.visible = true
+	_sync_hud_chrome_visibility()
 
 
 func update_mp_lobby(room_code: String, phase: String, players: Array, ai_count: int, is_host: bool) -> void:
@@ -735,6 +956,7 @@ func update_mp_lobby(room_code: String, phase: String, players: Array, ai_count:
 	mp_room_edit.text = room_code
 	assigned_code_label.text = "Room Code: %s" % (room_code if not room_code.is_empty() else "(Not in Room)")
 	copy_code_btn.disabled = room_code.is_empty()
+	_refresh_friends_badge()
 	mp_status_label.text = "%s · Room %s · %s · AI: %d (%s)" % [get_selected_server_name(), room_code, phase, ai_count, "Host" if is_host else "Guest"]
 	var names := PackedStringArray()
 	for pv: Variant in players:
@@ -754,9 +976,10 @@ func update_mp_lobby(room_code: String, phase: String, players: Array, ai_count:
 func on_mp_spawn_phase(seconds_left: float) -> void:
 	menu_overlay.visible = false
 	mp_lobby_card.visible = false
+	friends_card.visible = false
 	menu_card.visible = true
-	action_dock.visible = false
-	spawn_banner.visible = true
+	audio_popover.visible = false
+	_sync_hud_chrome_visibility()
 	world_pct_label.text = "MP Spawn Selection (%.0fs)" % maxf(seconds_left, 0.0)
 
 
@@ -764,6 +987,7 @@ func on_mp_disconnected(reason: String) -> void:
 	_current_room_code = ""
 	assigned_code_label.text = "Room Code: (Not in Room)"
 	copy_code_btn.disabled = true
+	_refresh_friends_badge()
 	mp_status_label.text = reason
 	mp_players_label.text = "Players: --"
 	mp_start_btn.disabled = true
@@ -806,7 +1030,6 @@ func enter_spectator_mode(conqueror_name: String = "") -> void:
 	_is_spectating = true
 	clear_build_mode()
 	clear_missile_mode()
-	action_dock.visible = false
 	structure_panel.visible = false
 	diplomacy_panel.visible = false
 	radial_menu.visible = false
@@ -814,6 +1037,7 @@ func enter_spectator_mode(conqueror_name: String = "") -> void:
 	var by_str: String = (" by %s" % conqueror_name) if not conqueror_name.is_empty() else ""
 	spec_label.text = "Your Nation Was Conquered%s — Spectating Live Match" % by_str
 	spectator_banner.visible = true
+	_sync_hud_chrome_visibility()
 	refresh_player_bar()
 
 
@@ -821,8 +1045,8 @@ func on_match_started() -> void:
 	_is_spectating = false
 	spectator_banner.visible = false
 	menu_overlay.visible = false
-	spawn_banner.visible = false
-	action_dock.visible = true
+	audio_popover.visible = false
+	_sync_hud_chrome_visibility()
 	var p: NationData = _world_state.get_player_nation() if _world_state != null else null
 	if p != null:
 		_apply_action_dock_icons(p.color)
@@ -834,19 +1058,19 @@ func on_match_reset() -> void:
 	spectator_banner.visible = false
 	menu_overlay.visible = false
 	victory_overlay.visible = false
-	action_dock.visible = false
+	audio_popover.visible = false
 	structure_panel.visible = false
 	expansions_panel.visible = false
 	diplomacy_panel.visible = false
 	alliance_banner.visible = false
 	radial_menu.visible = false
 	radial_sub_picker.visible = false
-	spawn_banner.visible = true
 	_selected_structure_id = 0
 	_selected_dip_nation_id = 0
 	_pending_alliance_from_id = 0
 	clear_build_mode()
 	clear_missile_mode()
+	_sync_hud_chrome_visibility()
 	refresh_all()
 
 
@@ -881,6 +1105,17 @@ func _select_missile_mode(kind: String) -> void:
 
 func _update_action_dock_buttons() -> void:
 	var free_hand: bool = (_build_mode == "" and _missile_mode == "")
+	ThemeFactory.set_slot_active(expand_btn, free_hand, Color(0.56, 0.88, 1.0, 0.95))
+	ThemeFactory.set_slot_active(town_btn, _build_mode == StructureData.TYPE_TOWN, Color(0.46, 0.94, 0.62, 0.95))
+	ThemeFactory.set_slot_active(factory_btn, _build_mode == StructureData.TYPE_FACTORY, Color(0.98, 0.80, 0.36, 0.95))
+	ThemeFactory.set_slot_active(port_btn, _build_mode == StructureData.TYPE_PORT, Color(0.44, 0.86, 1.0, 0.95))
+	ThemeFactory.set_slot_active(defense_btn, _build_mode == StructureData.TYPE_DEFENSE_POST, Color(0.52, 0.76, 1.0, 0.95))
+	ThemeFactory.set_slot_active(silo_btn, _build_mode == StructureData.TYPE_MISSILE_SILO, Color(1.0, 0.56, 0.46, 0.95))
+	ThemeFactory.set_slot_active(sam_btn, _build_mode == StructureData.TYPE_SAM_LAUNCHER, Color(0.42, 0.96, 0.92, 0.95))
+	ThemeFactory.set_slot_active(warship_btn, _build_mode == "warship", Color(0.48, 0.86, 1.0, 0.95))
+	ThemeFactory.set_slot_active(atom_dock_btn, _missile_mode == MissileUnit.KIND_ATOM, Color(1.0, 0.82, 0.36, 0.95))
+	ThemeFactory.set_slot_active(hbomb_dock_btn, _missile_mode == MissileUnit.KIND_HYDROGEN, Color(1.0, 0.52, 0.32, 0.95))
+	ThemeFactory.set_slot_active(mirv_dock_btn, _missile_mode == MissileUnit.KIND_MIRV, Color(1.0, 0.38, 0.66, 0.95))
 	expand_btn.modulate = Color(0.76, 0.94, 1.0) if free_hand else Color.WHITE
 	town_btn.modulate = Color(0.76, 0.98, 0.82) if _build_mode == StructureData.TYPE_TOWN else Color.WHITE
 	factory_btn.modulate = Color(1.0, 0.88, 0.62) if _build_mode == StructureData.TYPE_FACTORY else Color.WHITE
@@ -892,11 +1127,16 @@ func _update_action_dock_buttons() -> void:
 	atom_dock_btn.modulate = Color(1.0, 0.78, 0.44) if _missile_mode == MissileUnit.KIND_ATOM else Color.WHITE
 	hbomb_dock_btn.modulate = Color(1.0, 0.56, 0.36) if _missile_mode == MissileUnit.KIND_HYDROGEN else Color.WHITE
 	mirv_dock_btn.modulate = Color(1.0, 0.44, 0.66) if _missile_mode == MissileUnit.KIND_MIRV else Color.WHITE
+	commit_sep.visible = free_hand
 	commit_box.visible = free_hand
 
 
 func _update_commit_buttons() -> void:
 	var active_col := Color(0.68, 0.94, 1.0)
+	ThemeFactory.set_slot_active(commit_20_btn, is_equal_approx(_commit_ratio, 0.20), active_col)
+	ThemeFactory.set_slot_active(commit_35_btn, is_equal_approx(_commit_ratio, 0.35), active_col)
+	ThemeFactory.set_slot_active(commit_50_btn, is_equal_approx(_commit_ratio, 0.50), active_col)
+	ThemeFactory.set_slot_active(commit_75_btn, is_equal_approx(_commit_ratio, 0.75), active_col)
 	commit_20_btn.modulate = active_col if is_equal_approx(_commit_ratio, 0.20) else Color.WHITE
 	commit_35_btn.modulate = active_col if is_equal_approx(_commit_ratio, 0.35) else Color.WHITE
 	commit_50_btn.modulate = active_col if is_equal_approx(_commit_ratio, 0.50) else Color.WHITE
@@ -904,24 +1144,63 @@ func _update_commit_buttons() -> void:
 
 
 func _update_hotkeys_button() -> void:
-	hotkeys_btn.text = "Hotkeys: ON" if _hotkeys_enabled else "Hotkeys: OFF"
+	hotkeys_btn.text = "Keys" if _hotkeys_enabled else "Keys Off"
+	hotkeys_btn.tooltip_text = "Keyboard Hotkeys: ON" if _hotkeys_enabled else "Keyboard Hotkeys: OFF"
 	hotkeys_btn.modulate = Color(0.78, 0.96, 0.84) if _hotkeys_enabled else Color(0.72, 0.76, 0.82)
 
 
 func _on_play_pressed() -> void:
 	AudioManager.play_ui_tap()
+	save_player_name(menu_name_edit.text)
 	menu_overlay.visible = false
-	if _world_state != null and _world_state.match_phase == WorldState.PHASE_SPAWN_SELECT:
-		spawn_banner.visible = true
+	friends_card.visible = false
+	audio_popover.visible = false
+	_sync_hud_chrome_visibility()
 	play_match_requested.emit()
 
 
 func _toggle_audio_popover() -> void:
 	audio_popover.visible = not audio_popover.visible
 	if audio_popover.visible:
+		if menu_overlay.visible:
+			audio_popover.anchor_left = 0.5
+			audio_popover.anchor_right = 0.5
+			audio_popover.anchor_top = 0.5
+			audio_popover.anchor_bottom = 0.5
+			audio_popover.offset_left = -130.0
+			audio_popover.offset_top = -140.0
+			audio_popover.offset_right = 130.0
+			audio_popover.offset_bottom = 140.0
+		else:
+			audio_popover.anchor_left = 0.5
+			audio_popover.anchor_right = 0.5
+			audio_popover.anchor_top = 1.0
+			audio_popover.anchor_bottom = 1.0
+			audio_popover.offset_left = 114.0
+			audio_popover.offset_top = -360.0
+			audio_popover.offset_right = 374.0
+			audio_popover.offset_bottom = -96.0
+		audio_popover.move_to_front()
 		AudioManager.play_panel_open()
 	else:
 		AudioManager.play_panel_close()
+
+
+static func _make_pixel_icon(base: Texture2D, tint: Color = Color.WHITE, size_px: int = 16) -> ImageTexture:
+	if base == null:
+		return null
+	var img: Image = base.get_image().duplicate()
+	if img.get_format() != Image.FORMAT_RGBA8:
+		img.convert(Image.FORMAT_RGBA8)
+	if size_px > 0 and (img.get_width() != size_px or img.get_height() != size_px):
+		img.resize(size_px, size_px, Image.INTERPOLATE_NEAREST)
+	if tint != Color.WHITE:
+		for y in range(img.get_height()):
+			for x in range(img.get_width()):
+				var c: Color = img.get_pixel(x, y)
+				if c.a > 0.01:
+					img.set_pixel(x, y, Color(c.r * tint.r, c.g * tint.g, c.b * tint.b, c.a * tint.a))
+	return ImageTexture.create_from_image(img)
 
 
 func _apply_action_dock_icons(player_col: Color) -> void:
@@ -1224,6 +1503,7 @@ func _init_leaderboard_pool() -> void:
 
 		var dip_btn := Button.new()
 		dip_btn.text = "Dip"
+		ThemeFactory.apply_button_variant(dip_btn, "ghost")
 		dip_btn.icon = _build_tinted_icon(_tex_diplomacy, null, Color.WHITE, 14, 14)
 		var slot_idx: int = i
 		dip_btn.pressed.connect(func() -> void:
@@ -1277,7 +1557,8 @@ func refresh_expansions() -> void:
 		s_row.add_child(nav_lbl)
 
 		var rs_btn := Button.new()
-		rs_btn.text = "×"
+		_style_close_button(rs_btn)
+		rs_btn.tooltip_text = "Retreat Landing Boat"
 		var sid_cap: int = sh.id
 		rs_btn.pressed.connect(func() -> void:
 			AudioManager.play_ui_tap()
@@ -1305,7 +1586,8 @@ func refresh_expansions() -> void:
 		row.add_child(lbl)
 
 		var c_btn := Button.new()
-		c_btn.text = "×"
+		_style_close_button(c_btn)
+		c_btn.tooltip_text = "Cancel Operation"
 		var eid_cap: int = o.id
 		c_btn.pressed.connect(func() -> void:
 			AudioManager.play_ui_tap()
@@ -1360,7 +1642,8 @@ func show_toast(msg: String, is_alert: bool = true) -> void:
 func _on_map_mode_pressed() -> void:
 	AudioManager.play_ui_tap()
 	_political_mode = not _political_mode
-	map_mode_btn.text = "Mode: Political" if _political_mode else "Mode: Terrain"
+	map_mode_btn.text = "Map" if _political_mode else "Terrain"
+	map_mode_btn.tooltip_text = "Political Borders" if _political_mode else "Natural Terrain"
 	map_mode_toggled.emit(_political_mode)
 
 
@@ -1395,6 +1678,7 @@ func show_diplomacy_panel(target_nid: int) -> void:
 		rel_str, other.territory_percent, int(round(other.troops)), StructureData.format_pesos(other.gold)
 	]
 	ally_btn.text = "Break Alliance" if allied else "Propose Alliance"
+	ThemeFactory.apply_button_variant(ally_btn, "danger" if allied else "primary")
 	embargo_btn.text = "Lift Embargo" if embargoed else "Trade Embargo"
 	donate_gold_btn.text = "Send %s Pesos" % StructureData.format_pesos(100000.0)
 	donate_gold_btn.disabled = not allied
@@ -1456,14 +1740,14 @@ func _on_radial_wheel_draw() -> void:
 	var c := radial_wheel.size * 0.5
 	var r_outer := minf(c.x, c.y) - 6.0
 	var r_inner := 22.0
-	radial_wheel.draw_circle(c, r_outer, Color(0.12, 0.16, 0.22, 0.72))
-	radial_wheel.draw_arc(c, r_outer, 0.0, TAU, 56, Color(0.70, 0.80, 0.90, 0.28), 1.4)
+	radial_wheel.draw_circle(c, r_outer, Color(0.07, 0.11, 0.17, 0.88))
+	radial_wheel.draw_arc(c, r_outer, 0.0, TAU, 56, Color(0.84, 0.70, 0.34, 0.65), 2.0)
 	for i in range(4):
 		var a := float(i) * (TAU / 4.0) + PI * 0.25
 		var dir := Vector2(cos(a), sin(a))
-		radial_wheel.draw_line(c + dir * r_inner, c + dir * r_outer, Color(0.68, 0.78, 0.88, 0.22), 1.0)
-	radial_wheel.draw_circle(c, r_inner, Color(0.16, 0.20, 0.28, 0.84))
-	radial_wheel.draw_arc(c, r_inner, 0.0, TAU, 32, Color(0.72, 0.82, 0.92, 0.36), 1.2)
+		radial_wheel.draw_line(c + dir * r_inner, c + dir * r_outer, Color(0.28, 0.42, 0.58, 0.55), 1.0)
+	radial_wheel.draw_circle(c, r_inner, Color(0.11, 0.17, 0.26, 0.94))
+	radial_wheel.draw_arc(c, r_inner, 0.0, TAU, 32, Color(0.45, 0.66, 0.86, 0.72), 1.5)
 
 
 func open_radial_menu(screen_pos: Vector2, world_pos: Vector2, cell: Vector2i) -> void:
