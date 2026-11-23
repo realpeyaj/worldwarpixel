@@ -1,0 +1,12 @@
+World War Pixel — Verified Audio Sources & Licenses
+===================================================
+UI Sounds: Kenney Interface Sounds (CC0 1.0 Public Domain) via Calinou/kenney-interface-sounds
+
+Public-Domain Missile, Silo, SAM, Intercept & Combat SFX (endless-sky/endless-sky sounds/*, License: public-domain):
+- assets/audio/sfx/missile_launch.wav <- https://raw.githubusercontent.com/endless-sky/endless-sky/master/sounds/rocket.wav (1.55s)
+- assets/audio/sfx/silo_nuke_launch.wav <- https://raw.githubusercontent.com/endless-sky/endless-sky/master/sounds/nuke.wav (2.40s)
+- assets/audio/sfx/sam_launch.wav <- https://raw.githubusercontent.com/endless-sky/endless-sky/master/sounds/sidewinder.wav (0.90s)
+- assets/audio/sfx/sam_intercept.wav <- https://raw.githubusercontent.com/endless-sky/endless-sky/master/sounds/missile%20hit.wav (1.35s)
+- assets/audio/sfx/nuke_blast.wav <- https://raw.githubusercontent.com/endless-sky/endless-sky/master/sounds/explosion%20nuke.wav (3.20s)
+- assets/audio/sfx/cannon_fire.wav <- https://raw.githubusercontent.com/endless-sky/endless-sky/master/sounds/ballistic.wav (1.10s)
+- assets/audio/sfx/battle_clash.wav <- https://raw.githubusercontent.com/endless-sky/endless-sky/master/sounds/explosion%20medium.wav (0.72s)

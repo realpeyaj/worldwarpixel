@@ -1,0 +1,1075 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/hud.gd" id="1_hud"]
+
+[node name="HUD" type="CanvasLayer"]
+layer = 10
+script = ExtResource("1_hud")
+
+[node name="Root" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="TopBar" type="PanelContainer" parent="Root"]
+layout_mode = 1
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -360.0
+offset_top = -82.0
+offset_right = 360.0
+offset_bottom = -48.0
+grow_horizontal = 2
+grow_vertical = 0
+
+[node name="HBox" type="HBoxContainer" parent="Root/TopBar"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="BrandLabel" type="Label" parent="Root/TopBar/HBox"]
+visible = false
+layout_mode = 2
+text = "WORLD WAR PIXEL"
+
+[node name="VSep1" type="VSeparator" parent="Root/TopBar/HBox"]
+visible = false
+layout_mode = 2
+
+[node name="GoldIcon" type="TextureRect" parent="Root/TopBar/HBox"]
+custom_minimum_size = Vector2(15, 15)
+layout_mode = 2
+size_flags_vertical = 4
+stretch_mode = 5
+
+[node name="GoldLabel" type="Label" parent="Root/TopBar/HBox"]
+layout_mode = 2
+modulate = Color(0.98, 0.90, 0.56, 1)
+text = "Pesos: --"
+
+[node name="VSep2" type="VSeparator" parent="Root/TopBar/HBox"]
+layout_mode = 2
+
+[node name="TroopsIcon" type="TextureRect" parent="Root/TopBar/HBox"]
+custom_minimum_size = Vector2(15, 15)
+layout_mode = 2
+size_flags_vertical = 4
+stretch_mode = 5
+
+[node name="TroopsLabel" type="Label" parent="Root/TopBar/HBox"]
+layout_mode = 2
+modulate = Color(0.80, 0.92, 1.0, 1)
+text = "Troops: --"
+
+[node name="VSep3" type="VSeparator" parent="Root/TopBar/HBox"]
+layout_mode = 2
+
+[node name="WorldPctLabel" type="Label" parent="Root/TopBar/HBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Select Spawn Point"
+clip_text = true
+
+[node name="VSep4" type="VSeparator" parent="Root/TopBar/HBox"]
+layout_mode = 2
+
+[node name="ClockLabel" type="Label" parent="Root/TopBar/HBox"]
+layout_mode = 2
+modulate = Color(0.82, 0.88, 0.95, 1)
+text = "Day 1  00:00"
+
+[node name="MapModeBtn" type="Button" parent="Root/TopBar/HBox"]
+layout_mode = 2
+text = "Map"
+
+[node name="ResetViewBtn" type="Button" parent="Root/TopBar/HBox"]
+layout_mode = 2
+text = "Center"
+
+[node name="HotkeysBtn" type="Button" parent="Root/TopBar/HBox"]
+layout_mode = 2
+text = "Keys"
+
+[node name="AudioBtn" type="Button" parent="Root/TopBar/HBox"]
+layout_mode = 2
+text = "Audio"
+
+[node name="MenuBtn" type="Button" parent="Root/TopBar/HBox"]
+layout_mode = 2
+text = "Menu"
+
+[node name="SpawnBanner" type="PanelContainer" parent="Root"]
+visible = false
+layout_mode = 1
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -310.0
+offset_top = 52.0
+offset_right = 310.0
+offset_bottom = 122.0
+grow_horizontal = 2
+
+[node name="VBox" type="VBoxContainer" parent="Root/SpawnBanner"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Prompt" type="Label" parent="Root/SpawnBanner/VBox"]
+layout_mode = 2
+horizontal_alignment = 1
+text = "Spawn Your Nation — Click Any Land on Earth (Color Assigned Randomly)"
+
+[node name="Row" type="HBoxContainer" parent="Root/SpawnBanner/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="NameEdit" type="LineEdit" parent="Root/SpawnBanner/VBox/Row"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Terran Vanguard"
+placeholder_text = "Name"
+
+[node name="AiOption" type="OptionButton" parent="Root/SpawnBanner/VBox/Row"]
+layout_mode = 2
+
+[node name="ActionDock" type="PanelContainer" parent="Root"]
+visible = false
+layout_mode = 1
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -360.0
+offset_top = -44.0
+offset_right = 360.0
+offset_bottom = -8.0
+grow_horizontal = 2
+grow_vertical = 0
+
+[node name="HBox" type="HBoxContainer" parent="Root/ActionDock"]
+layout_mode = 2
+alignment = 1
+theme_override_constants/separation = 3
+
+[node name="ExpandBtn" type="Button" parent="Root/ActionDock/HBox"]
+layout_mode = 2
+text = "Explore"
+
+[node name="TownBtn" type="Button" parent="Root/ActionDock/HBox"]
+layout_mode = 2
+text = "[1] Town"
+
+[node name="FactoryBtn" type="Button" parent="Root/ActionDock/HBox"]
+layout_mode = 2
+text = "[2] Factory"
+
+[node name="PortBtn" type="Button" parent="Root/ActionDock/HBox"]
+layout_mode = 2
+text = "[3] Port"
+
+[node name="DefenseBtn" type="Button" parent="Root/ActionDock/HBox"]
+layout_mode = 2
+text = "[4] Defense"
+
+[node name="SiloBtn" type="Button" parent="Root/ActionDock/HBox"]
+layout_mode = 2
+text = "[5] Silo"
+
+[node name="SamBtn" type="Button" parent="Root/ActionDock/HBox"]
+layout_mode = 2
+text = "[6] SAM"
+
+[node name="WarshipBtn" type="Button" parent="Root/ActionDock/HBox"]
+layout_mode = 2
+text = "[7] Ship"
+
+[node name="AtomDockBtn" type="Button" parent="Root/ActionDock/HBox"]
+layout_mode = 2
+text = "[8] Atom"
+
+[node name="HbombDockBtn" type="Button" parent="Root/ActionDock/HBox"]
+layout_mode = 2
+text = "[9] H-Bomb"
+
+[node name="MirvDockBtn" type="Button" parent="Root/ActionDock/HBox"]
+layout_mode = 2
+text = "[F] MIRV"
+
+[node name="CommitBox" type="HBoxContainer" parent="Root/ActionDock/HBox"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="Lbl" type="Label" parent="Root/ActionDock/HBox/CommitBox"]
+visible = false
+layout_mode = 2
+text = "Commit"
+
+[node name="Commit20Btn" type="Button" parent="Root/ActionDock/HBox/CommitBox"]
+layout_mode = 2
+text = "20%"
+
+[node name="Commit35Btn" type="Button" parent="Root/ActionDock/HBox/CommitBox"]
+layout_mode = 2
+text = "35%"
+
+[node name="Commit50Btn" type="Button" parent="Root/ActionDock/HBox/CommitBox"]
+layout_mode = 2
+text = "50%"
+
+[node name="Commit75Btn" type="Button" parent="Root/ActionDock/HBox/CommitBox"]
+layout_mode = 2
+text = "75%"
+
+[node name="HoverCard" type="PanelContainer" parent="Root"]
+visible = false
+layout_mode = 1
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 14.0
+offset_top = -124.0
+offset_right = 310.0
+offset_bottom = -44.0
+grow_vertical = 0
+mouse_filter = 2
+
+[node name="VBox" type="VBoxContainer" parent="Root/HoverCard"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 3
+
+[node name="Title" type="Label" parent="Root/HoverCard/VBox"]
+layout_mode = 2
+mouse_filter = 2
+text = "Region"
+
+[node name="Sub" type="Label" parent="Root/HoverCard/VBox"]
+layout_mode = 2
+mouse_filter = 2
+modulate = Color(0.75, 0.82, 0.90, 1)
+text = "Terrain"
+
+[node name="OwnerRow" type="HBoxContainer" parent="Root/HoverCard/VBox"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 6
+
+[node name="Dot" type="ColorRect" parent="Root/HoverCard/VBox/OwnerRow"]
+custom_minimum_size = Vector2(10, 10)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+
+[node name="OwnerLbl" type="Label" parent="Root/HoverCard/VBox/OwnerRow"]
+layout_mode = 2
+mouse_filter = 2
+text = "Unclaimed"
+
+[node name="RightStack" type="VBoxContainer" parent="Root"]
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -324.0
+offset_top = 52.0
+offset_right = -12.0
+offset_bottom = 480.0
+grow_horizontal = 0
+mouse_filter = 2
+theme_override_constants/separation = 8
+
+[node name="StructurePanel" type="PanelContainer" parent="Root/RightStack"]
+visible = false
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="Root/RightStack/StructurePanel"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Header" type="HBoxContainer" parent="Root/RightStack/StructurePanel/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="StIcon" type="TextureRect" parent="Root/RightStack/StructurePanel/VBox/Header"]
+custom_minimum_size = Vector2(18, 18)
+layout_mode = 2
+size_flags_vertical = 4
+stretch_mode = 5
+
+[node name="Title" type="Label" parent="Root/RightStack/StructurePanel/VBox/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Structure"
+clip_text = true
+
+[node name="CloseBtn" type="Button" parent="Root/RightStack/StructurePanel/VBox/Header"]
+layout_mode = 2
+text = "×"
+
+[node name="SubLabel" type="Label" parent="Root/RightStack/StructurePanel/VBox"]
+layout_mode = 2
+modulate = Color(0.70, 0.78, 0.88, 1)
+text = "Owner"
+
+[node name="StatsLabel" type="Label" parent="Root/RightStack/StructurePanel/VBox"]
+layout_mode = 2
+text = "Stats"
+autowrap_mode = 2
+
+[node name="NextLabel" type="Label" parent="Root/RightStack/StructurePanel/VBox"]
+layout_mode = 2
+modulate = Color(0.68, 0.92, 0.74, 1)
+text = "Next level"
+autowrap_mode = 2
+
+[node name="ProgressBar" type="ProgressBar" parent="Root/RightStack/StructurePanel/VBox"]
+visible = false
+custom_minimum_size = Vector2(0, 14)
+layout_mode = 2
+show_percentage = false
+
+[node name="UpgradeBtn" type="Button" parent="Root/RightStack/StructurePanel/VBox"]
+layout_mode = 2
+text = "Upgrade"
+
+[node name="ActionRow" type="HBoxContainer" parent="Root/RightStack/StructurePanel/VBox"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 5
+
+[node name="BuildWarshipBtn" type="Button" parent="Root/RightStack/StructurePanel/VBox/ActionRow"]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Warship (250k)"
+
+[node name="AtomBtn" type="Button" parent="Root/RightStack/StructurePanel/VBox/ActionRow"]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+text = "[8] Atom (750k)"
+
+[node name="HbombBtn" type="Button" parent="Root/RightStack/StructurePanel/VBox/ActionRow"]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+text = "[9] H-Bomb (5M)"
+
+[node name="MirvBtn" type="Button" parent="Root/RightStack/StructurePanel/VBox/ActionRow"]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+text = "[F] MIRV (25M)"
+
+[node name="ExpansionsPanel" type="PanelContainer" parent="Root/RightStack"]
+visible = false
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="Root/RightStack/ExpansionsPanel"]
+layout_mode = 2
+theme_override_constants/separation = 5
+
+[node name="Title" type="Label" parent="Root/RightStack/ExpansionsPanel/VBox"]
+layout_mode = 2
+modulate = Color(0.72, 0.85, 0.98, 1)
+text = "ACTIVE OPERATIONS"
+
+[node name="Rows" type="VBoxContainer" parent="Root/RightStack/ExpansionsPanel/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="DiplomacyPanel" type="PanelContainer" parent="Root/RightStack"]
+visible = false
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="Root/RightStack/DiplomacyPanel"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Header" type="HBoxContainer" parent="Root/RightStack/DiplomacyPanel/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="DipDot" type="ColorRect" parent="Root/RightStack/DiplomacyPanel/VBox/Header"]
+custom_minimum_size = Vector2(12, 12)
+layout_mode = 2
+size_flags_vertical = 4
+
+[node name="DipTitle" type="Label" parent="Root/RightStack/DiplomacyPanel/VBox/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Diplomacy"
+clip_text = true
+
+[node name="DipCloseBtn" type="Button" parent="Root/RightStack/DiplomacyPanel/VBox/Header"]
+layout_mode = 2
+text = "×"
+
+[node name="DipStatusLabel" type="Label" parent="Root/RightStack/DiplomacyPanel/VBox"]
+layout_mode = 2
+text = "Relation: Neutral"
+autowrap_mode = 2
+
+[node name="BtnGrid" type="GridContainer" parent="Root/RightStack/DiplomacyPanel/VBox"]
+layout_mode = 2
+columns = 2
+
+[node name="AllyBtn" type="Button" parent="Root/RightStack/DiplomacyPanel/VBox/BtnGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Propose Alliance"
+
+[node name="EmbargoBtn" type="Button" parent="Root/RightStack/DiplomacyPanel/VBox/BtnGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Trade Embargo"
+
+[node name="DonateGoldBtn" type="Button" parent="Root/RightStack/DiplomacyPanel/VBox/BtnGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Send 100k Pesos"
+
+[node name="DonateTroopsBtn" type="Button" parent="Root/RightStack/DiplomacyPanel/VBox/BtnGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Send 25% Troops"
+
+[node name="LeaderboardPanel" type="PanelContainer" parent="Root"]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -324.0
+offset_top = -236.0
+offset_right = -12.0
+offset_bottom = -14.0
+grow_horizontal = 0
+grow_vertical = 0
+
+[node name="VBox" type="VBoxContainer" parent="Root/LeaderboardPanel"]
+layout_mode = 2
+theme_override_constants/separation = 5
+
+[node name="Header" type="HBoxContainer" parent="Root/LeaderboardPanel/VBox"]
+layout_mode = 2
+
+[node name="Title" type="Label" parent="Root/LeaderboardPanel/VBox/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "WORLD CONTROL (80% WIN)"
+
+[node name="ToggleBtn" type="Button" parent="Root/LeaderboardPanel/VBox/Header"]
+layout_mode = 2
+text = "-"
+
+[node name="Body" type="VBoxContainer" parent="Root/LeaderboardPanel/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="ClaimedLabel" type="Label" parent="Root/LeaderboardPanel/VBox/Body"]
+layout_mode = 2
+modulate = Color(0.72, 0.82, 0.92, 1)
+text = "World Claimed: 0.0%"
+
+[node name="Rows" type="VBoxContainer" parent="Root/LeaderboardPanel/VBox/Body"]
+layout_mode = 2
+theme_override_constants/separation = 3
+
+[node name="VictoryBanner" type="Label" parent="Root/LeaderboardPanel/VBox/Body"]
+visible = false
+layout_mode = 2
+modulate = Color(1.0, 0.88, 0.36, 1)
+text = "VICTORY REACHED!"
+
+[node name="WorldControlMinBtn" type="Button" parent="Root"]
+visible = false
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -148.0
+offset_top = -42.0
+offset_right = -12.0
+offset_bottom = -14.0
+grow_horizontal = 0
+grow_vertical = 0
+text = "World Control ▲"
+
+[node name="AllianceBanner" type="PanelContainer" parent="Root"]
+visible = false
+layout_mode = 1
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -250.0
+offset_top = 96.0
+offset_right = 250.0
+offset_bottom = 138.0
+grow_horizontal = 2
+
+[node name="HBox" type="HBoxContainer" parent="Root/AllianceBanner"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="AlliancePrompt" type="Label" parent="Root/AllianceBanner/HBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Alliance proposal"
+clip_text = true
+
+[node name="AcceptBtn" type="Button" parent="Root/AllianceBanner/HBox"]
+layout_mode = 2
+text = "Accept"
+
+[node name="DeclineBtn" type="Button" parent="Root/AllianceBanner/HBox"]
+layout_mode = 2
+text = "Decline"
+
+[node name="RadialMenu" type="Control" parent="Root"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+
+[node name="Wheel" type="Control" parent="Root/RadialMenu"]
+offset_left = 100.0
+offset_top = 100.0
+offset_right = 320.0
+offset_bottom = 320.0
+mouse_filter = 2
+
+[node name="RadialAttackBtn" type="Button" parent="Root/RadialMenu/Wheel"]
+offset_left = 62.0
+offset_top = 6.0
+offset_right = 158.0
+offset_bottom = 38.0
+text = "Attack"
+
+[node name="RadialBuildBtn" type="Button" parent="Root/RadialMenu/Wheel"]
+offset_left = 4.0
+offset_top = 94.0
+offset_right = 94.0
+offset_bottom = 126.0
+text = "Upgrade"
+
+[node name="RadialWarshipBtn" type="Button" parent="Root/RadialMenu/Wheel"]
+offset_left = 126.0
+offset_top = 94.0
+offset_right = 216.0
+offset_bottom = 126.0
+text = "Boat"
+
+[node name="RadialMissileBtn" type="Button" parent="Root/RadialMenu/Wheel"]
+visible = false
+offset_left = 62.0
+offset_top = 182.0
+offset_right = 158.0
+offset_bottom = 214.0
+text = "Nuke"
+
+[node name="RadialDipBtn" type="Button" parent="Root/RadialMenu/Wheel"]
+offset_left = 62.0
+offset_top = 182.0
+offset_right = 158.0
+offset_bottom = 214.0
+text = "Ally"
+
+[node name="RadialInfoBtn" type="Button" parent="Root/RadialMenu/Wheel"]
+visible = false
+offset_left = 4.0
+offset_top = 52.0
+offset_right = 92.0
+offset_bottom = 84.0
+text = "Info"
+
+[node name="RadialCloseBtn" type="Button" parent="Root/RadialMenu/Wheel"]
+offset_left = 92.0
+offset_top = 92.0
+offset_right = 128.0
+offset_bottom = 128.0
+text = "×"
+
+[node name="SubPicker" type="PanelContainer" parent="Root/RadialMenu"]
+visible = false
+offset_left = 100.0
+offset_top = 318.0
+offset_right = 480.0
+offset_bottom = 358.0
+
+[node name="SubHBox" type="HBoxContainer" parent="Root/RadialMenu/SubPicker"]
+layout_mode = 2
+theme_override_constants/separation = 5
+
+[node name="MenuOverlay" type="ColorRect" parent="Root"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.035, 0.055, 0.085, 0.82)
+
+[node name="Center" type="CenterContainer" parent="Root/MenuOverlay"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="MenuCard" type="PanelContainer" parent="Root/MenuOverlay/Center"]
+custom_minimum_size = Vector2(400, 0)
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="Root/MenuOverlay/Center/MenuCard"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="LogoRect" type="TextureRect" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
+texture_filter = 1
+custom_minimum_size = Vector2(310, 84)
+layout_mode = 2
+stretch_mode = 5
+
+[node name="Title" type="Label" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
+visible = false
+layout_mode = 2
+horizontal_alignment = 1
+text = "WORLD WAR PIXEL"
+
+[node name="Subtitle" type="Label" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
+visible = false
+layout_mode = 2
+horizontal_alignment = 1
+text = ""
+
+[node name="HSep1" type="HSeparator" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
+layout_mode = 2
+
+[node name="NameRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Lbl" type="Label" parent="Root/MenuOverlay/Center/MenuCard/VBox/NameRow"]
+layout_mode = 2
+text = "Name"
+
+[node name="MenuNameEdit" type="LineEdit" parent="Root/MenuOverlay/Center/MenuCard/VBox/NameRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Terran Vanguard"
+placeholder_text = "Name"
+
+[node name="AiRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Lbl" type="Label" parent="Root/MenuOverlay/Center/MenuCard/VBox/AiRow"]
+layout_mode = 2
+text = "Opponents"
+
+[node name="MenuAiOption" type="OptionButton" parent="Root/MenuOverlay/Center/MenuCard/VBox/AiRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ColorInfo" type="Label" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
+layout_mode = 2
+modulate = Color(0.68, 0.78, 0.88, 1)
+horizontal_alignment = 1
+text = "Nation Color: Randomly assigned each match"
+
+[node name="HSep2" type="HSeparator" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
+layout_mode = 2
+
+[node name="PlayBtn" type="Button" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
+layout_mode = 2
+text = "Play Match"
+
+[node name="MultiplayerBtn" type="Button" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
+layout_mode = 2
+text = "Multiplayer Online"
+
+[node name="NewMatchBtn" type="Button" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
+visible = false
+layout_mode = 2
+text = "Restart New Match"
+
+[node name="MenuAudioBtn" type="Button" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
+layout_mode = 2
+text = "Audio Settings"
+
+[node name="QuitBtn" type="Button" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
+layout_mode = 2
+text = "Quit"
+
+[node name="MpLobbyCard" type="PanelContainer" parent="Root/MenuOverlay/Center"]
+visible = false
+custom_minimum_size = Vector2(430, 0)
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="Root/MenuOverlay/Center/MpLobbyCard"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Title" type="Label" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox"]
+layout_mode = 2
+horizontal_alignment = 1
+text = "MULTIPLAYER LOBBY"
+
+[node name="ServerRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Lbl" type="Label" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox/ServerRow"]
+layout_mode = 2
+text = "Server"
+
+[node name="ServerOption" type="OptionButton" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox/ServerRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ConnBarIcon" type="TextureRect" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox/ServerRow"]
+custom_minimum_size = Vector2(14, 14)
+layout_mode = 2
+size_flags_vertical = 4
+stretch_mode = 5
+
+[node name="ConnStrengthLabel" type="Label" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox/ServerRow"]
+layout_mode = 2
+text = "▮▮▮▮ --ms"
+
+[node name="MpServerEdit" type="LineEdit" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox/ServerRow"]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+text = "ws://151.242.136.36:30041/ws"
+placeholder_text = "ws://host:30041/ws"
+
+[node name="AssignedCodeRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="AssignedCodeLabel" type="Label" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox/AssignedCodeRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+modulate = Color(0.98, 0.88, 0.52, 1)
+text = "Room Code: (Not in Room)"
+
+[node name="CopyCodeBtn" type="Button" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox/AssignedCodeRow"]
+disabled = true
+layout_mode = 2
+text = "Copy Code"
+
+[node name="RoomRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Lbl" type="Label" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox/RoomRow"]
+layout_mode = 2
+text = "Code"
+
+[node name="MpRoomEdit" type="LineEdit" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox/RoomRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Enter Room Code to Join"
+
+[node name="BtnRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="CreateRoomBtn" type="Button" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox/BtnRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Create Room"
+
+[node name="MpConnectBtn" type="Button" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox/BtnRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Join Code"
+
+[node name="MpDisconnectBtn" type="Button" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox/BtnRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Back / Leave"
+
+[node name="MpStatusLabel" type="Label" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox"]
+layout_mode = 2
+modulate = Color(0.72, 0.85, 0.98, 1)
+text = "Disconnected"
+
+[node name="MpPlayersLabel" type="Label" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox"]
+layout_mode = 2
+text = "Players: --"
+autowrap_mode = 2
+
+[node name="MpStartBtn" type="Button" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox"]
+disabled = true
+layout_mode = 2
+text = "Start Online Match"
+
+[node name="HSepFriends" type="HSeparator" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox"]
+layout_mode = 2
+
+[node name="FriendsTitle" type="Label" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox"]
+layout_mode = 2
+modulate = Color(0.76, 0.86, 0.96, 1)
+text = "FRIENDS & INVITES"
+
+[node name="FriendAddRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="FriendNameEdit" type="LineEdit" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox/FriendAddRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Friend Name"
+
+[node name="AddFriendBtn" type="Button" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox/FriendAddRow"]
+layout_mode = 2
+text = "+ Add Friend"
+
+[node name="FriendsRows" type="VBoxContainer" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="InviteRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="InviteLabel" type="Label" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox/InviteRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+modulate = Color(0.68, 0.96, 0.78, 1)
+text = "Invite received!"
+clip_text = true
+
+[node name="AcceptInviteBtn" type="Button" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox/InviteRow"]
+layout_mode = 2
+text = "Join Invite"
+
+[node name="AudioPopover" type="PanelContainer" parent="Root"]
+visible = false
+layout_mode = 1
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = 290.0
+offset_top = -324.0
+offset_right = 514.0
+offset_bottom = -96.0
+grow_horizontal = 2
+grow_vertical = 0
+
+[node name="VBox" type="VBoxContainer" parent="Root/AudioPopover"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="MuteCheck" type="CheckButton" parent="Root/AudioPopover/VBox"]
+layout_mode = 2
+text = "Mute All Audio"
+
+[node name="MasterLbl" type="Label" parent="Root/AudioPopover/VBox"]
+layout_mode = 2
+text = "Master Volume"
+
+[node name="MasterSlider" type="HSlider" parent="Root/AudioPopover/VBox"]
+layout_mode = 2
+max_value = 1.0
+step = 0.05
+value = 1.0
+
+[node name="MusicLbl" type="Label" parent="Root/AudioPopover/VBox"]
+layout_mode = 2
+text = "Theme Music Volume"
+
+[node name="MusicSlider" type="HSlider" parent="Root/AudioPopover/VBox"]
+layout_mode = 2
+max_value = 1.0
+step = 0.05
+value = 0.8
+
+[node name="SfxLbl" type="Label" parent="Root/AudioPopover/VBox"]
+layout_mode = 2
+text = "SFX / UI Volume"
+
+[node name="SfxSlider" type="HSlider" parent="Root/AudioPopover/VBox"]
+layout_mode = 2
+max_value = 1.0
+step = 0.05
+value = 0.8
+
+[node name="AmbLbl" type="Label" parent="Root/AudioPopover/VBox"]
+layout_mode = 2
+text = "Ocean Ambience"
+
+[node name="AmbienceSlider" type="HSlider" parent="Root/AudioPopover/VBox"]
+layout_mode = 2
+max_value = 1.0
+step = 0.05
+value = 0.45
+
+[node name="PingBadge" type="PanelContainer" parent="Root"]
+layout_mode = 1
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 12.0
+offset_top = -36.0
+offset_right = 104.0
+offset_bottom = -10.0
+grow_vertical = 0
+mouse_filter = 2
+
+[node name="HBox" type="HBoxContainer" parent="Root/PingBadge"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 5
+
+[node name="PingIcon" type="TextureRect" parent="Root/PingBadge/HBox"]
+custom_minimum_size = Vector2(14, 14)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+stretch_mode = 5
+
+[node name="PingLabel" type="Label" parent="Root/PingBadge/HBox"]
+layout_mode = 2
+mouse_filter = 2
+text = "--ms"
+
+[node name="ToastPanel" type="PanelContainer" parent="Root"]
+visible = false
+layout_mode = 1
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -240.0
+offset_top = 52.0
+offset_right = 240.0
+offset_bottom = 88.0
+grow_horizontal = 2
+mouse_filter = 2
+
+[node name="ToastLabel" type="Label" parent="Root/ToastPanel"]
+layout_mode = 2
+mouse_filter = 2
+horizontal_alignment = 1
+text = "Alert"
+
+[node name="VictoryOverlay" type="ColorRect" parent="Root"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.04, 0.07, 0.11, 0.72)
+
+[node name="Center" type="CenterContainer" parent="Root/VictoryOverlay"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VictoryCard" type="PanelContainer" parent="Root/VictoryOverlay/Center"]
+custom_minimum_size = Vector2(390, 0)
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="Root/VictoryOverlay/Center/VictoryCard"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="HeaderRow" type="HBoxContainer" parent="Root/VictoryOverlay/Center/VictoryCard/VBox"]
+layout_mode = 2
+alignment = 1
+theme_override_constants/separation = 8
+
+[node name="VictoryIcon" type="TextureRect" parent="Root/VictoryOverlay/Center/VictoryCard/VBox/HeaderRow"]
+custom_minimum_size = Vector2(24, 24)
+layout_mode = 2
+size_flags_vertical = 4
+stretch_mode = 5
+
+[node name="VictoryTitle" type="Label" parent="Root/VictoryOverlay/Center/VictoryCard/VBox/HeaderRow"]
+layout_mode = 2
+modulate = Color(1.0, 0.88, 0.42, 1)
+text = "VICTORY ACHIEVED"
+
+[node name="VictorySub" type="Label" parent="Root/VictoryOverlay/Center/VictoryCard/VBox"]
+layout_mode = 2
+horizontal_alignment = 1
+text = "Earth Unified Under One Banner"
+
+[node name="HSep" type="HSeparator" parent="Root/VictoryOverlay/Center/VictoryCard/VBox"]
+layout_mode = 2
+
+[node name="VictoryStats" type="Label" parent="Root/VictoryOverlay/Center/VictoryCard/VBox"]
+layout_mode = 2
+horizontal_alignment = 1
+text = "World Control: 80.0%"
+
+[node name="BtnRow" type="HBoxContainer" parent="Root/VictoryOverlay/Center/VictoryCard/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="VictoryNewMatchBtn" type="Button" parent="Root/VictoryOverlay/Center/VictoryCard/VBox/BtnRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Play New Match"
+
+[node name="VictoryInspectBtn" type="Button" parent="Root/VictoryOverlay/Center/VictoryCard/VBox/BtnRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Inspect Map"
+
+[node name="SpectatorBanner" type="PanelContainer" parent="Root"]
+visible = false
+layout_mode = 1
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -260.0
+offset_top = 12.0
+offset_right = 260.0
+offset_bottom = 52.0
+grow_horizontal = 2
+
+[node name="HBox" type="HBoxContainer" parent="Root/SpectatorBanner"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="SpecLabel" type="Label" parent="Root/SpectatorBanner/HBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+modulate = Color(1.0, 0.78, 0.62, 1)
+text = "Eliminated — Spectating Live Match"
+clip_text = true
+
+[node name="SpecContinueBtn" type="Button" parent="Root/SpectatorBanner/HBox"]
+layout_mode = 2
+text = "Spectate"
+
+[node name="SpecNewMatchBtn" type="Button" parent="Root/SpectatorBanner/HBox"]
+layout_mode = 2
+text = "New Match"

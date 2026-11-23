@@ -1,0 +1,57 @@
+[gd_scene load_steps=11 format=3]
+
+[ext_resource type="Script" path="res://scripts/world/world_map.gd" id="1_wm"]
+[ext_resource type="Shader" path="res://resources/shaders/territory_borders.gdshader" id="2_sb"]
+[ext_resource type="Shader" path="res://resources/shaders/political_ownership.gdshader" id="3_sp"]
+[ext_resource type="Script" path="res://scripts/world/capital_markers_layer.gd" id="4_cm"]
+[ext_resource type="Script" path="res://scripts/world/units_layer.gd" id="5_ul"]
+[ext_resource type="Script" path="res://scripts/world/selection_overlay_layer.gd" id="6_so"]
+[ext_resource type="Script" path="res://scripts/world/environment_decor.gd" id="7_ed"]
+[ext_resource type="Script" path="res://scripts/world/world_camera.gd" id="8_cam"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_borders"]
+shader = ExtResource("2_sb")
+shader_parameter/sim_size = Vector2(1024, 512)
+shader_parameter/lut_width = 256.0
+shader_parameter/border_visibility = 1.0
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_political"]
+shader = ExtResource("3_sp")
+shader_parameter/sim_size = Vector2(1024, 512)
+shader_parameter/lut_width = 256.0
+shader_parameter/political_opacity = 0.42
+
+[node name="WorldMap" type="Node2D"]
+script = ExtResource("1_wm")
+
+[node name="Layer1_BaseTerrain" type="Sprite2D" parent="."]
+texture_filter = 1
+centered = false
+
+[node name="Layer2_ProvinceBoundaries" type="Sprite2D" parent="."]
+texture_filter = 1
+material = SubResource("ShaderMaterial_borders")
+centered = false
+
+[node name="Layer3_PoliticalOwnership" type="Sprite2D" parent="."]
+texture_filter = 1
+material = SubResource("ShaderMaterial_political")
+centered = false
+
+[node name="Layer4_CitiesAndInfrastructure" type="Node2D" parent="."]
+texture_filter = 1
+script = ExtResource("4_cm")
+
+[node name="Layer5_Units" type="Node2D" parent="."]
+texture_filter = 1
+script = ExtResource("5_ul")
+
+[node name="Layer6_SelectionOverlay" type="Node2D" parent="."]
+script = ExtResource("6_so")
+
+[node name="Layer7_EnvironmentDecor" type="Node2D" parent="."]
+script = ExtResource("7_ed")
+
+[node name="WorldCamera" type="Camera2D" parent="."]
+position = Vector2(1024, 512)
+script = ExtResource("8_cam")

@@ -1,0 +1,274 @@
+{
+  "version": 2,
+  "mode": "free_world",
+  "sim_width": 1024,
+  "sim_height": 512,
+  "map_width": 2048,
+  "map_height": 1024,
+  "nav_width": 1024,
+  "nav_height": 512,
+  "total_land_cells": 185109,
+  "total_conquerable_area_km2": 157803503.7,
+  "antarctica_land_cells": 50735,
+  "antarctica_area_km2": 13043430.1,
+  "region_labels": [
+    {
+      "name": "North America",
+      "x": 227.6,
+      "y": 130.8
+    },
+    {
+      "name": "United States",
+      "x": 238.9,
+      "y": 147.9
+    },
+    {
+      "name": "Canada",
+      "x": 221.9,
+      "y": 91.0
+    },
+    {
+      "name": "Alaska",
+      "x": 79.6,
+      "y": 74.0
+    },
+    {
+      "name": "Central America",
+      "x": 267.4,
+      "y": 219.0
+    },
+    {
+      "name": "Caribbean Islands",
+      "x": 301.5,
+      "y": 197.7
+    },
+    {
+      "name": "South America",
+      "x": 347.0,
+      "y": 295.8
+    },
+    {
+      "name": "Amazon Basin",
+      "x": 335.6,
+      "y": 267.4
+    },
+    {
+      "name": "Patagonia",
+      "x": 315.7,
+      "y": 384.0
+    },
+    {
+      "name": "Western Europe",
+      "x": 523.4,
+      "y": 119.5
+    },
+    {
+      "name": "British Isles",
+      "x": 504.9,
+      "y": 102.4
+    },
+    {
+      "name": "Scandinavia",
+      "x": 554.7,
+      "y": 76.8
+    },
+    {
+      "name": "Eastern Europe",
+      "x": 591.6,
+      "y": 113.8
+    },
+    {
+      "name": "Mediterranean",
+      "x": 551.8,
+      "y": 142.2
+    },
+    {
+      "name": "North Africa",
+      "x": 546.1,
+      "y": 187.7
+    },
+    {
+      "name": "West Africa",
+      "x": 500.6,
+      "y": 221.9
+    },
+    {
+      "name": "East Africa",
+      "x": 614.4,
+      "y": 250.3
+    },
+    {
+      "name": "Southern Africa",
+      "x": 580.3,
+      "y": 324.3
+    },
+    {
+      "name": "Madagascar",
+      "x": 645.1,
+      "y": 310.0
+    },
+    {
+      "name": "Middle East",
+      "x": 640.0,
+      "y": 182.0
+    },
+    {
+      "name": "Central Asia",
+      "x": 699.7,
+      "y": 133.7
+    },
+    {
+      "name": "Siberia",
+      "x": 790.8,
+      "y": 82.5
+    },
+    {
+      "name": "South Asia",
+      "x": 733.9,
+      "y": 196.3
+    },
+    {
+      "name": "East Asia",
+      "x": 830.6,
+      "y": 156.4
+    },
+    {
+      "name": "Southeast Asia",
+      "x": 807.8,
+      "y": 219.0
+    },
+    {
+      "name": "Japanese Archipelago",
+      "x": 906.0,
+      "y": 152.2
+    },
+    {
+      "name": "Australia",
+      "x": 893.2,
+      "y": 327.1
+    },
+    {
+      "name": "New Zealand",
+      "x": 1001.2,
+      "y": 375.5
+    },
+    {
+      "name": "Greenland",
+      "x": 392.5,
+      "y": 51.2
+    },
+    {
+      "name": "Antarctica / South Pole",
+      "x": 512.0,
+      "y": 489.2
+    },
+    {
+      "name": "Antarctic Peninsula",
+      "x": 330.0,
+      "y": 443.7
+    },
+    {
+      "name": "East Antarctica",
+      "x": 753.8,
+      "y": 472.2
+    }
+  ],
+  "ai_spawn_candidates": [
+    {
+      "x": 233,
+      "y": 145
+    },
+    {
+      "x": 299,
+      "y": 139
+    },
+    {
+      "x": 176,
+      "y": 156
+    },
+    {
+      "x": 370,
+      "y": 316
+    },
+    {
+      "x": 319,
+      "y": 353
+    },
+    {
+      "x": 519,
+      "y": 117
+    },
+    {
+      "x": 550,
+      "y": 107
+    },
+    {
+      "x": 501,
+      "y": 141
+    },
+    {
+      "x": 619,
+      "y": 98
+    },
+    {
+      "x": 563,
+      "y": 87
+    },
+    {
+      "x": 601,
+      "y": 171
+    },
+    {
+      "x": 522,
+      "y": 237
+    },
+    {
+      "x": 592,
+      "y": 331
+    },
+    {
+      "x": 622,
+      "y": 230
+    },
+    {
+      "x": 645,
+      "y": 186
+    },
+    {
+      "x": 732,
+      "y": 175
+    },
+    {
+      "x": 843,
+      "y": 143
+    },
+    {
+      "x": 858,
+      "y": 167
+    },
+    {
+      "x": 798,
+      "y": 217
+    },
+    {
+      "x": 909,
+      "y": 154
+    },
+    {
+      "x": 942,
+      "y": 352
+    },
+    {
+      "x": 841,
+      "y": 347
+    },
+    {
+      "x": 508,
+      "y": 107
+    },
+    {
+      "x": 331,
+      "y": 441
+    }
+  ]
+}

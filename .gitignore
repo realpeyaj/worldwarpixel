@@ -1,0 +1,31 @@
+# Godot 4+ specific ignores
+.godot/
+export_presets.cfg
+builds/
+*.translation
+
+# Python / Tools caches
+__pycache__/
+*.pyc
+tools/cache/
+
+# Environment & credentials
+.env
+*.pem
+*.key
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Internal dev & AI notes
+.agent/
+prompt.txt
+CHANGELOG.md
+GAME_DESIGN_DOCUMENT.md
+KNOWN_ISSUES.md
+PERFORMANCE.md
+ROADMAP.md
+TECHNICAL_ARCHITECTURE.md
+TESTING.md
+
