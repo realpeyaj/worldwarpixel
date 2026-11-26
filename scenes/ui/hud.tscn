@@ -1242,7 +1242,7 @@ text = "▮▮▮▮ --ms"
 visible = false
 layout_mode = 2
 size_flags_horizontal = 3
-text = "ws://151.242.136.36:30041/ws"
+text = "ws://151.242.136.18:30041/ws"
 placeholder_text = "ws://host:30041/ws"
 
 [node name="AssignedCodeRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/MpLobbyCard/VBox"]
@@ -1431,10 +1431,37 @@ layout_mode = 2
 layout_mode = 2
 placeholder_text = "Permanent Username (3-20 chars)"
 
-[node name="AccountPassEdit" type="LineEdit" parent="Root/MenuOverlay/Center/AccountCard/VBox"]
+[node name="PassRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/AccountCard/VBox"]
 layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="AccountPassEdit" type="LineEdit" parent="Root/MenuOverlay/Center/AccountCard/VBox/PassRow"]
+layout_mode = 2
+size_flags_horizontal = 3
 secret = true
 placeholder_text = "Password (4+ chars)"
+
+[node name="PassEyeBtn" type="Button" parent="Root/MenuOverlay/Center/AccountCard/VBox/PassRow"]
+custom_minimum_size = Vector2(36, 0)
+layout_mode = 2
+toggle_mode = true
+tooltip_text = "Show / Hide Password"
+
+[node name="ConfirmPassRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/AccountCard/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="AccountConfirmPassEdit" type="LineEdit" parent="Root/MenuOverlay/Center/AccountCard/VBox/ConfirmPassRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+secret = true
+placeholder_text = "Confirm Password (for Create Account)"
+
+[node name="ConfirmPassEyeBtn" type="Button" parent="Root/MenuOverlay/Center/AccountCard/VBox/ConfirmPassRow"]
+custom_minimum_size = Vector2(36, 0)
+layout_mode = 2
+toggle_mode = true
+tooltip_text = "Show / Hide Password"
 
 [node name="AuthBtnRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/AccountCard/VBox"]
 layout_mode = 2

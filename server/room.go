@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
 	"math/big"
 	"strings"
@@ -31,6 +32,7 @@ const roomAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 type PlayerSlot struct {
 	NationID       int          `json:"nation_id"`
 	Name           string       `json:"name"`
+	TeamID         int          `json:"team_id"`
 	AccountUser    string       `json:"account_username,omitempty"`
 	AvatarHash     string       `json:"avatar_hash,omitempty"`
 	ReconnectToken string       `json:"-"`
@@ -71,6 +73,8 @@ type Room struct {
 	Phase         string
 	Seed          int64
 	AICount       int
+	IsPublic      bool
+	TeamMode      bool
 	CurrentTick   int
 	Players       []*PlayerSlot
 	PendingCmds   []map[string]any
@@ -79,6 +83,7 @@ type Room struct {
 	SpawnDeadline time.Time
 	LastActivity  time.Time
 	Store         *MatchStore
+	AcctSvc       *AccountService
 	stopCh        chan struct{}
 	persistCh     chan BatchRecord
 	tickerRunning bool
@@ -86,16 +91,22 @@ type Room struct {
 }
 
 // NewRoom creates an initialized lobby room with a random match seed.
-func NewRoom(code string, store *MatchStore) *Room {
+func NewRoom(code string, store *MatchStore, acct ...*AccountService) *Room {
+	var acctSvc *AccountService
+	if len(acct) > 0 {
+		acctSvc = acct[0]
+	}
 	return &Room{
 		Code:         code,
 		MatchID:      code + "-" + randHex(6),
 		Phase:        PhaseLobby,
 		Seed:         randSeed(),
 		AICount:      4,
+		IsPublic:     true,
 		SyncHashes:   make(map[int]map[int]int64),
 		LastActivity: time.Now(),
 		Store:        store,
+		AcctSvc:      acctSvc,
 		stopCh:       make(chan struct{}),
 		persistCh:    make(chan BatchRecord, 256),
 	}
@@ -133,9 +144,13 @@ func (r *Room) Summary() map[string]any {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	connectedCount := 0
+	hostName := ""
 	for _, p := range r.Players {
 		if p.Connected {
 			connectedCount++
+			if p.IsHost || hostName == "" {
+				hostName = p.Name
+			}
 		}
 	}
 	return map[string]any{
@@ -146,6 +161,10 @@ func (r *Room) Summary() map[string]any {
 		"max_players": MaxPlayersPerRoom,
 		"ai_count":    r.AICount,
 		"tick":        r.CurrentTick,
+		"is_public":   r.IsPublic,
+		"team_mode":   r.TeamMode,
+		"host_name":   hostName,
+		"joinable":    r.IsPublic && r.Phase == PhaseLobby && len(r.Players) < MaxPlayersPerRoom,
 	}
 }
 
@@ -289,6 +308,7 @@ func (r *Room) snapshotPlayersLocked() []map[string]any {
 		out = append(out, map[string]any{
 			"nation_id":        p.NationID,
 			"name":             p.Name,
+			"team_id":          p.TeamID,
 			"account_username": p.AccountUser,
 			"avatar_hash":      p.AvatarHash,
 			"x":                p.SpawnX,
@@ -307,6 +327,8 @@ func (r *Room) buildLobbyLocked() map[string]any {
 		"room_code": r.Code,
 		"phase":     r.Phase,
 		"ai_count":  r.AICount,
+		"is_public": r.IsPublic,
+		"team_mode": r.TeamMode,
 		"players":   r.snapshotPlayersLocked(),
 	}
 }
@@ -445,13 +467,113 @@ func (r *Room) HandleClientMessage(slot *PlayerSlot, raw []byte) {
 		}
 		r.mu.Unlock()
 
+	case "set_team":
+		if r.Phase != PhaseLobby {
+			r.mu.Unlock()
+			return
+		}
+		if teamVal, ok := asInt(env["team_id"]); ok {
+			if teamVal < 0 {
+				teamVal = 0
+			} else if teamVal > 4 {
+				teamVal = 4
+			}
+			slot.TeamID = teamVal
+		}
+		lobbyMsg := mustJSON(r.buildLobbyLocked())
+		r.mu.Unlock()
+		r.broadcastBytes(lobbyMsg)
+
+	case "set_room_options":
+		if r.Phase != PhaseLobby {
+			r.mu.Unlock()
+			return
+		}
+		if !slot.IsHost {
+			r.mu.Unlock()
+			slot.Send(mustJSON(map[string]any{"type": "error", "message": "Only the host can change room options."}))
+			return
+		}
+		if pub, ok := asBool(env["is_public"]); ok {
+			r.IsPublic = pub
+		}
+		if tm, ok := asBool(env["team_mode"]); ok {
+			r.TeamMode = tm
+			if !tm {
+				for _, p := range r.Players {
+					p.TeamID = 0
+				}
+			}
+		}
+		lobbyMsg := mustJSON(r.buildLobbyLocked())
+		r.mu.Unlock()
+		r.broadcastBytes(lobbyMsg)
+
+	case "map_ping":
+		if r.Phase != PhasePlaying && r.Phase != PhaseSpawning {
+			r.mu.Unlock()
+			return
+		}
+		if !slot.Limiter.Allow() {
+			r.mu.Unlock()
+			return
+		}
+		px, py, err := validSimCoord(env)
+		if err != nil {
+			r.mu.Unlock()
+			return
+		}
+		kind, _ := asString(env["kind"])
+		if kind != "attack" && kind != "defend" && kind != "nuke" {
+			kind = "attack"
+		}
+		pingMsg := mustJSON(map[string]any{
+			"type":           "map_ping",
+			"from_nation_id": slot.NationID,
+			"from_name":      slot.Name,
+			"team_id":        slot.TeamID,
+			"x":              px,
+			"y":              py,
+			"kind":           kind,
+		})
+		r.mu.Unlock()
+		r.broadcastBytes(pingMsg)
+
 	case "match_over":
 		if r.Phase == PhasePlaying {
 			winID, _ := asInt(env["winner_nation_id"])
+			winTeamID, _ := asInt(env["winner_team_id"])
+			pctMap, _ := env["territory_pcts"].(map[string]any)
+			var participants []MatchParticipantResult
+			for _, p := range r.Players {
+				if p.AccountUser == "" {
+					continue
+				}
+				pct := 0.0
+				if pctMap != nil {
+					if v, ok := asFloat(pctMap[fmt.Sprintf("%d", p.NationID)]); ok {
+						pct = v
+					}
+				}
+				participants = append(participants, MatchParticipantResult{
+					AccountUser:  p.AccountUser,
+					NationID:     p.NationID,
+					TeamID:       p.TeamID,
+					TerritoryPct: pct,
+				})
+			}
 			r.Phase = PhaseFinished
 			matchID := r.MatchID
 			store := r.Store
+			acctSvc := r.AcctSvc
 			r.mu.Unlock()
+			if acctSvc != nil && len(participants) > 0 {
+				go func() {
+					ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+					defer cancel()
+					acctSvc.RecordMatchResult(ctx, participants, winID, winTeamID)
+				}()
+			}
 			if store != nil {
 				go func() {
 					ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
@@ -608,9 +730,10 @@ func (r *Room) Stop() {
 
 // RoomManager coordinates active multiplayer rooms and idle cleanup.
 type RoomManager struct {
-	mu    sync.Mutex
-	rooms map[string]*Room
-	store *MatchStore
+	mu      sync.Mutex
+	rooms   map[string]*Room
+	store   *MatchStore
+	acctSvc *AccountService
 }
 
 // NewRoomManager initializes a RoomManager.
@@ -619,6 +742,13 @@ func NewRoomManager(store *MatchStore) *RoomManager {
 		rooms: make(map[string]*Room),
 		store: store,
 	}
+}
+
+// SetAccountService links an AccountService to newly created rooms for post-match stats.
+func (rm *RoomManager) SetAccountService(acct *AccountService) {
+	rm.mu.Lock()
+	rm.acctSvc = acct
+	rm.mu.Unlock()
 }
 
 // CreateOrGetRoom returns an existing room by normalized code or allocates a fresh one.
@@ -645,9 +775,59 @@ func (rm *RoomManager) CreateOrGetRoom(requestedCode string) (*Room, error) {
 	if len(rm.rooms) >= MaxRooms {
 		return nil, errServerFull
 	}
-	room := NewRoom(code, rm.store)
+	room := NewRoom(code, rm.store, rm.acctSvc)
 	rm.rooms[code] = room
 	return room, nil
+}
+
+// QuickPlayRoom returns the fullest joinable public LOBBY room or creates a new public room.
+func (rm *RoomManager) QuickPlayRoom() (*Room, error) {
+	rm.mu.Lock()
+	var best *Room
+	bestCount := -1
+	for _, r := range rm.rooms {
+		r.mu.Lock()
+		joinable := !r.closed && r.IsPublic && r.Phase == PhaseLobby && len(r.Players) < MaxPlayersPerRoom
+		cnt := len(r.Players)
+		r.mu.Unlock()
+		if joinable && cnt > bestCount {
+			best = r
+			bestCount = cnt
+		}
+	}
+	rm.mu.Unlock()
+	if best != nil {
+		return best, nil
+	}
+	return rm.CreateOrGetRoom("")
+}
+
+// FindJoinableRoomForUser returns the room code if username is currently connected to a LOBBY room.
+func (rm *RoomManager) FindJoinableRoomForUser(username string) string {
+	target := strings.ToLower(strings.TrimSpace(username))
+	if target == "" {
+		return ""
+	}
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+	for _, r := range rm.rooms {
+		r.mu.Lock()
+		found := false
+		if !r.closed && r.Phase == PhaseLobby && len(r.Players) < MaxPlayersPerRoom {
+			for _, p := range r.Players {
+				if p.Connected && strings.EqualFold(p.AccountUser, target) {
+					found = true
+					break
+				}
+			}
+		}
+		code := r.Code
+		r.mu.Unlock()
+		if found {
+			return code
+		}
+	}
+	return ""
 }
 
 // ListRooms returns public summaries for active rooms.

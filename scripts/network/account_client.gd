@@ -15,7 +15,7 @@ signal friend_action_result(ok: bool, message: String)
 signal incoming_friend_request_notified(count: int)
 signal incoming_room_invite_notified(from_name: String, room_code: String)
 
-var api_base_url: String = "http://151.242.136.36:30041"
+var api_base_url: String = "http://151.242.136.18:30041"
 var session_token: String = ""
 var username: String = ""
 var is_logged_in: bool = false
@@ -23,6 +23,7 @@ var is_logged_in: bool = false
 var local_avatar_frames: Array[ImageTexture] = []
 var local_avatar_delay_ms: int = 100
 var local_avatar_hash: String = ""
+var local_stats: Dictionary = {"games_played": 0, "wins": 0, "elo": 1000, "rank_title": "Recruit", "best_territory_pct": 0.0}
 
 var remote_avatar_cache: Dictionary = {} # username_lower -> {"frames": Array, "delay_ms": int, "hash": String}
 
@@ -145,10 +146,30 @@ func logout() -> void:
 	session_token = ""
 	username = ""
 	is_logged_in = false
+	local_stats = {"games_played": 0, "wins": 0, "elo": 1000, "rank_title": "Recruit", "best_territory_pct": 0.0}
 	_last_seen_incoming_count = 0
 	_seen_room_invites.clear()
 	_save_account_state()
 	auth_changed.emit(false, "", "Signed out (Guest mode)")
+
+
+func fetch_public_rooms(cb: Callable) -> void:
+	_request_json("/api/rooms", HTTPClient.METHOD_GET, {}, false, func(code: int, data: Dictionary, err_msg: String) -> void:
+		if code == 200:
+			cb.call(true, data.get("rooms", []), "")
+		else:
+			cb.call(false, [], str(data.get("error", err_msg if not err_msg.is_empty() else "Failed to load public rooms.")))
+	)
+
+
+func request_quickplay(cb: Callable) -> void:
+	_request_json("/api/rooms/quickplay", HTTPClient.METHOD_POST, {}, false, func(code: int, data: Dictionary, err_msg: String) -> void:
+		var rcode: String = str(data.get("room_code", "")).strip_edges().to_upper()
+		if code >= 200 and code < 300 and not rcode.is_empty():
+			cb.call(true, rcode, "")
+		else:
+			cb.call(false, "", str(data.get("error", err_msg if not err_msg.is_empty() else "Quick Play unavailable.")))
+	)
 
 
 func import_and_upload_avatar(file_path: String) -> void:
@@ -380,6 +401,14 @@ func _apply_user_profile(u: Dictionary, save_state: bool) -> void:
 	if not uname.is_empty():
 		username = uname
 		is_logged_in = not session_token.is_empty()
+	if u.has("elo") or u.has("games_played"):
+		local_stats = {
+			"games_played": int(u.get("games_played", 0)),
+			"wins": int(u.get("wins", 0)),
+			"elo": int(u.get("elo", 1000)),
+			"rank_title": str(u.get("rank_title", "Recruit")),
+			"best_territory_pct": float(u.get("best_territory_pct", 0.0)),
+		}
 	var b64: String = str(u.get("avatar_b64", ""))
 	if not b64.is_empty():
 		var raw: PackedByteArray = Marshalls.base64_to_raw(b64)

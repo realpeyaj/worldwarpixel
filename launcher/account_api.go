@@ -18,21 +18,27 @@ import (
 const (
 	// Internal server origin used strictly for API calls & TCP latency probes.
 	// Never display this address or port in any launcher UI text or error message.
-	defaultAccountAPIBase = "http://151.242.136.36:30041"
-	defaultManilaHostPort = "151.242.136.36:30041"
+	defaultAccountAPIBase = "http://151.242.136.18:30041"
+	defaultManilaHostPort = "151.242.136.18:30041"
 	apiRequestTimeout     = 8 * time.Second
 )
 
 type apiUserProfile struct {
-	Username      string `json:"username"`
-	Online        bool   `json:"online"`
-	LastSeenUnix  int64  `json:"last_seen_unix"`
-	LastSeenText  string `json:"last_seen_text"`
-	Relation      string `json:"relation,omitempty"`
-	AvatarHash    string `json:"avatar_hash"`
-	AvatarFrames  int    `json:"avatar_frames"`
-	AvatarDelayMs int    `json:"avatar_delay_ms"`
-	AvatarB64     string `json:"avatar_b64,omitempty"`
+	Username         string  `json:"username"`
+	Online           bool    `json:"online"`
+	LastSeenUnix     int64   `json:"last_seen_unix"`
+	LastSeenText     string  `json:"last_seen_text"`
+	Relation         string  `json:"relation,omitempty"`
+	AvatarHash       string  `json:"avatar_hash"`
+	AvatarFrames     int     `json:"avatar_frames"`
+	AvatarDelayMs    int     `json:"avatar_delay_ms"`
+	AvatarB64        string  `json:"avatar_b64,omitempty"`
+	GamesPlayed      int     `json:"games_played"`
+	Wins             int     `json:"wins"`
+	Elo              int     `json:"elo"`
+	RankTitle        string  `json:"rank_title"`
+	BestTerritoryPct float64 `json:"best_territory_pct"`
+	CurrentRoom      string  `json:"current_room,omitempty"`
 }
 
 type apiRoomInvite struct {

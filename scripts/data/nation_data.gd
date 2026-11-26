@@ -4,6 +4,7 @@ extends RefCounted
 
 var id: int = 0
 var name: String = ""
+var team_id: int = 0
 var color: Color = Color.WHITE
 var is_player: bool = false
 var alive: bool = true
@@ -17,13 +18,17 @@ var label_recompute_tick: int = -100
 var owned_cell_count: int = 0
 var owned_area_km2: float = 0.0
 var territory_percent: float = 0.0
+var peak_territory_percent: float = 0.0
 
 var gold: float = 250.0
+var total_gold_earned: float = 0.0
 var gold_per_sec: float = 1.0
 var troops: float = 1500.0
 var max_troops: float = 3200.0
 var troops_per_sec: float = 42.0
 var effective_troops_per_sec: float = 42.0
+var nukes_launched: int = 0
+var nukes_intercepted: int = 0
 
 var structure_ids: Array[int] = []
 

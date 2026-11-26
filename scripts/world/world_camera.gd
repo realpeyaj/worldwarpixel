@@ -21,6 +21,7 @@ var _auto_pan_time: float = 0.0
 var _saved_pos: Vector2 = Vector2(1024.0, 512.0)
 var _saved_zoom: float = 1.0
 var _has_saved_view: bool = false
+var _bookmarks: Dictionary = {} # int slot (1..4) -> {"pos": Vector2, "zoom": float}
 
 
 func _ready() -> void:
@@ -36,6 +37,29 @@ func reset_view() -> void:
 	_recompute_min_zoom()
 	_target_zoom = _min_zoom
 	_target_pos = map_size * 0.5
+
+
+func focus_world_pos(world_pos: Vector2, min_target_zoom: float = -1.0) -> void:
+	_recompute_min_zoom()
+	if min_target_zoom > 0.0:
+		_target_zoom = clampf(maxf(_target_zoom, min_target_zoom), _min_zoom, max_zoom)
+	_target_pos = world_pos
+	_clamp_target_pos()
+
+
+func save_bookmark(slot: int) -> void:
+	_bookmarks[slot] = {"pos": _target_pos, "zoom": _target_zoom}
+
+
+func jump_bookmark(slot: int) -> bool:
+	if not _bookmarks.has(slot):
+		return false
+	var bm: Dictionary = _bookmarks[slot] as Dictionary
+	_recompute_min_zoom()
+	_target_zoom = clampf(float(bm.get("zoom", _target_zoom)), _min_zoom, max_zoom)
+	_target_pos = bm.get("pos", _target_pos) as Vector2
+	_clamp_target_pos()
+	return true
 
 
 func set_auto_pan(enabled: bool, preserve_view: bool = false) -> void:

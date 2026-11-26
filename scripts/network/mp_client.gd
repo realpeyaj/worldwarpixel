@@ -3,14 +3,16 @@ extends RefCounted
 ## Client-side WebSocketPeer manager handling lobby rooms, spawn negotiation,
 ## deterministic 24 Hz command batches, sync hash checks, and token-based reconnect.
 
-const DEFAULT_SERVER_URL := "ws://151.242.136.36:30041/ws"
+const DEFAULT_SERVER_URL := "ws://151.242.136.18:30041/ws"
 
 signal connected_to_room(room_code: String, nation_id: int, token: String, is_host: bool)
 signal lobby_updated(room_code: String, phase: String, players: Array, ai_count: int, is_host: bool)
+signal room_options_updated(is_public: bool, team_mode: bool)
 signal spawn_phase_started(seconds_left: float, players: Array)
 signal match_begun(seed: int, local_nation_id: int, ai_count: int, players: Array)
 signal tick_batch_received(from_tick: int, to_tick: int, commands: Array)
 signal snapshot_received(payload: Dictionary)
+signal map_ping_received(from_nation_id: int, from_name: String, team_id: int, cell: Vector2i, kind: String)
 signal ping_updated(ping_ms: int)
 signal invite_received(from_name: String, room_code: String)
 signal disconnected(reason: String)
@@ -166,6 +168,16 @@ func _handle_message(msg: Dictionary) -> void:
 				int(msg.get("ai_count", 4)),
 				_is_host
 			)
+			room_options_updated.emit(bool(msg.get("is_public", true)), bool(msg.get("team_mode", false)))
+
+		"map_ping":
+			map_ping_received.emit(
+				int(msg.get("from_nation_id", 0)),
+				str(msg.get("from_name", "Commander")),
+				int(msg.get("team_id", 0)),
+				Vector2i(int(msg.get("x", 0)), int(msg.get("y", 0))),
+				str(msg.get("kind", "attack"))
+			)
 
 		"spawn_phase":
 			spawn_phase_started.emit(float(msg.get("seconds_left", 10.0)), msg.get("players", []))
@@ -221,6 +233,18 @@ func send_start_match(ai_count: int) -> void:
 	_send_json({"type": "start_match", "ai_count": ai_count})
 
 
+func send_set_team(team_id: int) -> void:
+	_send_json({"type": "set_team", "team_id": clampi(team_id, 0, 4)})
+
+
+func send_room_options(is_public: bool, team_mode: bool) -> void:
+	_send_json({"type": "set_room_options", "is_public": is_public, "team_mode": team_mode})
+
+
+func send_map_ping(cell: Vector2i, kind: String = "attack") -> void:
+	_send_json({"type": "map_ping", "x": cell.x, "y": cell.y, "kind": kind})
+
+
 func send_pick_spawn(cell: Vector2i) -> void:
 	_send_json({"type": "pick_spawn", "x": cell.x, "y": cell.y})
 
@@ -234,9 +258,14 @@ func send_sync_check(tick: int, state_hash: int) -> void:
 	_send_json({"type": "sync_check", "tick": tick, "hash": state_hash})
 
 
-func send_match_over(winner_nation_id: int) -> void:
+func send_match_over(winner_nation_id: int, winner_team_id: int = 0, territory_pcts: Dictionary = {}) -> void:
 	_in_match = false
-	_send_json({"type": "match_over", "winner_nation_id": winner_nation_id})
+	_send_json({
+		"type": "match_over",
+		"winner_nation_id": winner_nation_id,
+		"winner_team_id": winner_team_id,
+		"territory_pcts": territory_pcts,
+	})
 
 
 func _send_json(payload: Dictionary) -> void:

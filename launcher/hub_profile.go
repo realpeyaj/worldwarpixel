@@ -33,6 +33,10 @@ type localProfile struct {
 	AvatarHash    string
 	AvatarFrames  int
 	AvatarDelayMs int
+	GamesPlayed   int
+	Wins          int
+	Elo           int
+	RankTitle     string
 }
 
 type noteKind int

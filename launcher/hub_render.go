@@ -86,6 +86,8 @@ type hubRenderState struct {
 	CaretVisible     bool
 	InputUser        string
 	InputPass        string
+	InputPassConfirm string
+	ShowPassword     bool
 	InputSearch      string
 	AuthBusy         bool
 	AuthMessage      string
@@ -1062,19 +1064,32 @@ func renderAccountSignedOut(c *canvasBuf, st hubRenderState, hits []hitItem, tex
 		textOp{text: userDisp, rect: image.Rect(uBox.Min.X+12, uBox.Min.Y+2, uBox.Max.X-12, uBox.Max.Y-2), sizePx: 14, col: userCol, align: alignLeft, ellipsis: true},
 	)
 
-	// Password field
+	// Password field + hidden eye toggle
 	pBox := image.Rect(leftX, 272, leftX+fw, 314)
-	hits = append(hits, hitItem{id: "auth_pass", rect: pBox, cursor: true})
+	pInputHit := image.Rect(pBox.Min.X, pBox.Min.Y, pBox.Max.X-40, pBox.Max.Y)
+	pEyeR := image.Rect(pBox.Max.X-40, pBox.Min.Y, pBox.Max.X, pBox.Max.Y)
+	hits = append(hits,
+		hitItem{id: "auth_pass", rect: pInputHit, cursor: true},
+		hitItem{id: "toggle_pass_eye", rect: pEyeR, cursor: true},
+	)
 	pBorder := colBorder
 	if st.FocusField == "auth_pass" {
 		pBorder = colCrimson
-	} else if st.HoverID == "auth_pass" {
+	} else if st.HoverID == "auth_pass" || st.HoverID == "toggle_pass_eye" {
 		pBorder = colBorderHi
 	}
 	c.fillRoundedRect(pBox, 3, colSurface)
 	c.strokeRoundedRect(pBox, 3, pBorder)
+	eyeCol := colStone
+	if st.ShowPassword || st.HoverID == "toggle_pass_eye" {
+		eyeCol = colIvory
+	}
+	drawEyeIcon(c, (pEyeR.Min.X+pEyeR.Max.X)/2, (pEyeR.Min.Y+pEyeR.Max.Y)/2, st.ShowPassword, eyeCol)
 
-	passDisp := strings.Repeat("•", len([]rune(st.InputPass)))
+	passDisp := st.InputPass
+	if !st.ShowPassword {
+		passDisp = strings.Repeat("•", len([]rune(st.InputPass)))
+	}
 	passCol := colIvory
 	if passDisp == "" && st.FocusField != "auth_pass" {
 		passDisp = "Enter password"
@@ -1084,11 +1099,48 @@ func renderAccountSignedOut(c *canvasBuf, st hubRenderState, hits []hitItem, tex
 	}
 	texts = append(texts,
 		textOp{text: "PASSWORD", rect: image.Rect(leftX, 250, leftX+fw, 268), sizePx: 11, bold: true, display: true, col: colStone, align: alignLeft},
-		textOp{text: passDisp, rect: image.Rect(pBox.Min.X+12, pBox.Min.Y+2, pBox.Max.X-12, pBox.Max.Y-2), sizePx: 14, col: passCol, align: alignLeft, ellipsis: true},
+		textOp{text: passDisp, rect: image.Rect(pBox.Min.X+12, pBox.Min.Y+2, pBox.Max.X-44, pBox.Max.Y-2), sizePx: 14, col: passCol, align: alignLeft, ellipsis: true},
 	)
 
+	subTop := 344
+	if st.AuthModeRegister {
+		cpBox := image.Rect(leftX, 354, leftX+fw, 396)
+		cpInputHit := image.Rect(cpBox.Min.X, cpBox.Min.Y, cpBox.Max.X-40, cpBox.Max.Y)
+		cpEyeR := image.Rect(cpBox.Max.X-40, cpBox.Min.Y, cpBox.Max.X, cpBox.Max.Y)
+		hits = append(hits,
+			hitItem{id: "auth_pass_confirm", rect: cpInputHit, cursor: true},
+			hitItem{id: "toggle_pass_eye", rect: cpEyeR, cursor: true},
+		)
+		cpBorder := colBorder
+		if st.FocusField == "auth_pass_confirm" {
+			cpBorder = colCrimson
+		} else if st.HoverID == "auth_pass_confirm" || st.HoverID == "toggle_pass_eye" {
+			cpBorder = colBorderHi
+		}
+		c.fillRoundedRect(cpBox, 3, colSurface)
+		c.strokeRoundedRect(cpBox, 3, cpBorder)
+		drawEyeIcon(c, (cpEyeR.Min.X+cpEyeR.Max.X)/2, (cpEyeR.Min.Y+cpEyeR.Max.Y)/2, st.ShowPassword, eyeCol)
+
+		cpassDisp := st.InputPassConfirm
+		if !st.ShowPassword {
+			cpassDisp = strings.Repeat("•", len([]rune(st.InputPassConfirm)))
+		}
+		cpassCol := colIvory
+		if cpassDisp == "" && st.FocusField != "auth_pass_confirm" {
+			cpassDisp = "Confirm password (min 4 chars)"
+			cpassCol = colMuted
+		} else if st.FocusField == "auth_pass_confirm" && st.CaretVisible {
+			cpassDisp += "|"
+		}
+		texts = append(texts,
+			textOp{text: "CONFIRM PASSWORD", rect: image.Rect(leftX, 332, leftX+fw, 350), sizePx: 11, bold: true, display: true, col: colStone, align: alignLeft},
+			textOp{text: cpassDisp, rect: image.Rect(cpBox.Min.X+12, cpBox.Min.Y+2, cpBox.Max.X-44, cpBox.Max.Y-2), sizePx: 14, col: cpassCol, align: alignLeft, ellipsis: true},
+		)
+		subTop = 422
+	}
+
 	// Submit button
-	subR := image.Rect(leftX, 344, leftX+fw, 392)
+	subR := image.Rect(leftX, subTop, leftX+fw, subTop+48)
 	hits = append(hits, hitItem{id: "auth_submit", rect: subR, cursor: true})
 	subCol := colCrimson
 	if st.AuthBusy {
@@ -1112,7 +1164,7 @@ func renderAccountSignedOut(c *canvasBuf, st hubRenderState, hits []hitItem, tex
 		}
 		texts = append(texts, textOp{
 			text:      st.AuthMessage,
-			rect:      image.Rect(leftX, 408, leftX+fw, 464),
+			rect:      image.Rect(leftX, subTop+62, leftX+fw, subTop+118),
 			sizePx:    13,
 			multiline: true,
 			col:       msgCol,
@@ -1174,9 +1226,23 @@ func renderAccountSignedIn(c *canvasBuf, st hubRenderState, hits []hitItem, text
 	}
 	c.strokeRoundedRect(avR, 3, colBorderHi)
 
+	subStatus := "SIGNED IN · SYNCED WITH GAME CLIENT"
+	subCol := colEmerald
+	if st.Profile.GamesPlayed > 0 || st.Profile.Elo > 0 || st.Profile.RankTitle != "" {
+		rank := st.Profile.RankTitle
+		if rank == "" {
+			rank = "Recruit"
+		}
+		elo := st.Profile.Elo
+		if elo <= 0 {
+			elo = 1000
+		}
+		subStatus = fmt.Sprintf("%s · %d ELO · %dW / %dG", rank, elo, st.Profile.Wins, st.Profile.GamesPlayed)
+		subCol = colBrass
+	}
 	texts = append(texts,
 		textOp{text: "@" + st.Profile.Username, rect: image.Rect(avR.Max.X+18, hdrR.Min.Y+18, hdrR.Min.X+460, hdrR.Min.Y+48), sizePx: 22, bold: true, display: true, col: colIvory, align: alignLeft},
-		textOp{text: "SIGNED IN · SYNCED WITH GAME CLIENT", rect: image.Rect(avR.Max.X+18, hdrR.Min.Y+50, hdrR.Min.X+460, hdrR.Min.Y+72), sizePx: 12, bold: true, display: true, col: colEmerald, align: alignLeft},
+		textOp{text: subStatus, rect: image.Rect(avR.Max.X+18, hdrR.Min.Y+50, hdrR.Min.X+460, hdrR.Min.Y+72), sizePx: 12, bold: true, display: true, col: subCol, align: alignLeft},
 	)
 
 	upBtn := image.Rect(hdrR.Max.X-370, hdrR.Min.Y+28, hdrR.Max.X-230, hdrR.Min.Y+64)
@@ -1283,10 +1349,34 @@ func renderAccountSignedIn(c *canvasBuf, st hubRenderState, hits []hitItem, text
 			seenTxt = "Online"
 		}
 		c.fillCircle(rowR.Min.X+14, rowR.Min.Y+19, 4, dotC)
-		texts = append(texts,
-			textOp{text: fr.Username, rect: image.Rect(rowR.Min.X+26, rowR.Min.Y+4, rowR.Max.X-120, rowR.Max.Y-4), sizePx: 13, bold: true, col: colIvory, align: alignLeft, ellipsis: true},
-			textOp{text: seenTxt, rect: image.Rect(rowR.Max.X-116, rowR.Min.Y+4, rowR.Max.X-12, rowR.Max.Y-4), sizePx: 12, col: dotC, align: alignRight},
-		)
+		if fr.Online && fr.CurrentRoom != "" {
+			joinID := "join_friend:" + fr.CurrentRoom
+			joinR := image.Rect(rowR.Max.X-68, rowR.Min.Y+6, rowR.Max.X-8, rowR.Max.Y-6)
+			if st.HasExe {
+				hits = append(hits, hitItem{id: joinID, rect: joinR, cursor: true})
+			}
+			jBg := colBrass
+			if !st.HasExe {
+				jBg = colSurface
+			} else if st.HoverID == joinID {
+				jBg = colIvory
+			}
+			c.fillRoundedRect(joinR, 2, jBg)
+			jTxtCol := colRail
+			if !st.HasExe {
+				jTxtCol = colMuted
+			}
+			texts = append(texts,
+				textOp{text: fr.Username, rect: image.Rect(rowR.Min.X+26, rowR.Min.Y+4, rowR.Max.X-176, rowR.Max.Y-4), sizePx: 13, bold: true, col: colIvory, align: alignLeft, ellipsis: true},
+				textOp{text: "Room " + fr.CurrentRoom, rect: image.Rect(rowR.Max.X-172, rowR.Min.Y+4, rowR.Max.X-74, rowR.Max.Y-4), sizePx: 11, bold: true, col: colEmerald, align: alignRight},
+				textOp{text: "JOIN", rect: joinR, sizePx: 11, bold: true, display: true, col: jTxtCol, align: alignCenter},
+			)
+		} else {
+			texts = append(texts,
+				textOp{text: fr.Username, rect: image.Rect(rowR.Min.X+26, rowR.Min.Y+4, rowR.Max.X-120, rowR.Max.Y-4), sizePx: 13, bold: true, col: colIvory, align: alignLeft, ellipsis: true},
+				textOp{text: seenTxt, rect: image.Rect(rowR.Max.X-116, rowR.Min.Y+4, rowR.Max.X-12, rowR.Max.Y-4), sizePx: 12, col: dotC, align: alignRight},
+			)
+		}
 		fy += 44
 	}
 
@@ -1449,21 +1539,22 @@ func renderTabSettings(c *canvasBuf, st hubRenderState, hits []hitItem, texts []
 	}{
 		{"GAME INSTALLATION", st.GameDir, "open_folder", "OPEN FOLDER"},
 		{"CLIENT VERSION", fmt.Sprintf("Installed: %s · Latest release: %s", verStr, latestStr), "check", "CHECK UPDATES"},
+		{"VERIFY & REPAIR", "Re-download latest client files and clear stale patches", "repair", "REPAIR FILES"},
 		{"SERVER REGION", pingVal, "", ""},
 		{"ACCOUNT", acctVal, "open_account", "MANAGE ACCOUNT"},
 		{"DIRECT LAUNCH", "Start installed game client without checking remote updates", "offline", "LAUNCH GAME"},
 	}
 
-	y := 96
+	y := 86
 	for _, sc := range rows {
-		cr := image.Rect(leftX, y, hubWidth-32, y+88)
+		cr := image.Rect(leftX, y, hubWidth-32, y+78)
 		c.fillRoundedRect(cr, 3, colSurface)
 		c.strokeRoundedRect(cr, 3, colBorder)
-		c.fillRect(image.Rect(cr.Min.X, cr.Min.Y+16, cr.Min.X+3, cr.Max.Y-16), colBorderHi)
+		c.fillRect(image.Rect(cr.Min.X, cr.Min.Y+14, cr.Min.X+3, cr.Max.Y-14), colBorderHi)
 		texts = append(texts,
 			textOp{
 				text:    sc.title,
-				rect:    image.Rect(cr.Min.X+20, cr.Min.Y+16, cr.Max.X-200, cr.Min.Y+38),
+				rect:    image.Rect(cr.Min.X+20, cr.Min.Y+14, cr.Max.X-200, cr.Min.Y+34),
 				sizePx:  13,
 				bold:    true,
 				display: true,
@@ -1472,7 +1563,7 @@ func renderTabSettings(c *canvasBuf, st hubRenderState, hits []hitItem, texts []
 			},
 			textOp{
 				text:     sc.sub,
-				rect:     image.Rect(cr.Min.X+20, cr.Min.Y+44, cr.Max.X-200, cr.Min.Y+68),
+				rect:     image.Rect(cr.Min.X+20, cr.Min.Y+40, cr.Max.X-200, cr.Min.Y+64),
 				sizePx:   13,
 				col:      colStone,
 				align:    alignLeft,
@@ -1480,8 +1571,8 @@ func renderTabSettings(c *canvasBuf, st hubRenderState, hits []hitItem, texts []
 			},
 		)
 		if sc.btnID != "" {
-			br := image.Rect(cr.Max.X-166, cr.Min.Y+24, cr.Max.X-20, cr.Min.Y+64)
-			disabled := sc.btnID == "offline" && !st.HasExe
+			br := image.Rect(cr.Max.X-166, cr.Min.Y+19, cr.Max.X-20, cr.Min.Y+59)
+			disabled := (sc.btnID == "offline" && !st.HasExe) || (sc.btnID == "repair" && (st.Busy || st.Phase == hubWorking))
 			if !disabled {
 				hits = append(hits, hitItem{id: sc.btnID, rect: br, cursor: true})
 			}
@@ -1507,7 +1598,7 @@ func renderTabSettings(c *canvasBuf, st hubRenderState, hits []hitItem, texts []
 				align:   alignCenter,
 			})
 		}
-		y += 102
+		y += 90
 	}
 	return hits, texts
 }
@@ -1682,6 +1773,19 @@ func (c *canvasBuf) fillCircle(cx, cy, r int, col color.NRGBA) {
 			pc.A = uint8(float64(col.A) * cov)
 			c.blendPx(x, y, pc)
 		}
+	}
+}
+
+func drawEyeIcon(c *canvasBuf, cx, cy int, visible bool, col color.NRGBA) {
+	c.drawThickLine(cx-8, cy, cx-3, cy-4, 0.9, col)
+	c.drawThickLine(cx-3, cy-4, cx+3, cy-4, 0.9, col)
+	c.drawThickLine(cx+3, cy-4, cx+8, cy, 0.9, col)
+	c.drawThickLine(cx-8, cy, cx-3, cy+4, 0.9, col)
+	c.drawThickLine(cx-3, cy+4, cx+3, cy+4, 0.9, col)
+	c.drawThickLine(cx+3, cy+4, cx+8, cy, 0.9, col)
+	c.fillCircle(cx, cy, 2, col)
+	if !visible {
+		c.drawThickLine(cx-7, cy+6, cx+7, cy-6, 1.1, col)
 	}
 }
 

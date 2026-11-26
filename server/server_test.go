@@ -361,3 +361,87 @@ func TestAccountFriendsSearchPresenceAndAvatar(t *testing.T) {
 		t.Fatalf("GET /api/avatar/Alice failed: %d %v", stAv, avRes)
 	}
 }
+
+func TestQuickPlayTeamsPingsAndProfileStats(t *testing.T) {
+	store, err := NewMatchStore(t.Context(), "")
+	if err != nil {
+		t.Fatalf("NewMatchStore failed: %v", err)
+	}
+	acct := NewAccountService(store)
+	rm := NewRoomManager(store)
+	defer rm.StopAll()
+
+	srv := httptest.NewServer(newServerMux(rm, store, acct))
+	defer srv.Close()
+
+	_, r1 := postJSONTest(t, srv.URL+"/api/auth/register", "", map[string]any{"username": "AlphaCmd", "password": "pass123"})
+	_, r2 := postJSONTest(t, srv.URL+"/api/auth/register", "", map[string]any{"username": "BravoCmd", "password": "pass456"})
+	tok1 := r1["token"].(string)
+	tok2 := r2["token"].(string)
+
+	// Host joins room QP101 via WS -> QuickPlay & Friends CurrentRoom should discover it
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws?room=QP101&name=AlphaCmd&account_token=" + tok1
+	c1, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial c1: %v", err)
+	}
+	defer c1.Close()
+	readMsgType(t, c1, "lobby_state")
+
+	// QuickPlay returns existing joinable room QP101
+	stQP, qpRes := postJSONTest(t, srv.URL+"/api/rooms/quickplay", "", map[string]any{})
+	if stQP != http.StatusOK || qpRes["room_code"] != "QP101" {
+		t.Fatalf("expected QuickPlay -> QP101, got status=%d res=%v", stQP, qpRes)
+	}
+
+	// Host enables team_mode & sets team_id=2
+	_ = c1.WriteJSON(map[string]any{"type": "set_room_options", "is_public": true, "team_mode": true})
+	_ = c1.WriteJSON(map[string]any{"type": "set_team", "team_id": 2})
+	lobbyMsg := readMsgType(t, c1, "lobby_state")
+	for i := 0; i < 3; i++ {
+		if b, ok := lobbyMsg["team_mode"].(bool); ok && b {
+			pls := lobbyMsg["players"].([]any)
+			if int(pls[0].(map[string]any)["team_id"].(float64)) == 2 {
+				break
+			}
+		}
+		lobbyMsg = readMsgType(t, c1, "lobby_state")
+	}
+	if !lobbyMsg["team_mode"].(bool) || int(lobbyMsg["players"].([]any)[0].(map[string]any)["team_id"].(float64)) != 2 {
+		t.Fatalf("team_mode or team_id not reflected in lobby_state: %v", lobbyMsg)
+	}
+
+	// Make AlphaCmd & BravoCmd friends -> Bravo sees AlphaCmd's current_room = "QP101"
+	postJSONTest(t, srv.URL+"/api/friends/request", tok1, map[string]any{"username": "BravoCmd"})
+	postJSONTest(t, srv.URL+"/api/friends/respond", tok2, map[string]any{"username": "AlphaCmd", "accept": true})
+	_, ov2 := getJSONTest(t, srv.URL+"/api/friends", tok2)
+	fr2 := ov2["friends"].([]any)[0].(map[string]any)
+	if fr2["current_room"] != "QP101" {
+		t.Fatalf("expected friend current_room=QP101, got %v", fr2)
+	}
+
+	// Start match, send map_ping, finish match, and verify ELO & win increment
+	_ = c1.WriteJSON(map[string]any{"type": "start_match", "ai_count": 2})
+	readMsgType(t, c1, "spawn_phase")
+	_ = c1.WriteJSON(map[string]any{"type": "map_ping", "x": 400, "y": 250, "kind": "defend"})
+	pingEvt := readMsgType(t, c1, "map_ping")
+	if pingEvt["kind"] != "defend" || int(pingEvt["x"].(float64)) != 400 {
+		t.Fatalf("unexpected map_ping broadcast: %v", pingEvt)
+	}
+	_ = c1.WriteJSON(map[string]any{"type": "pick_spawn", "x": 300, "y": 200})
+	readMsgType(t, c1, "match_begin")
+
+	_ = c1.WriteJSON(map[string]any{
+		"type":             "match_over",
+		"winner_nation_id": 1,
+		"winner_team_id":   2,
+		"territory_pcts":   map[string]any{"1": 81.4},
+	})
+	time.Sleep(80 * time.Millisecond)
+
+	_, me1 := getJSONTest(t, srv.URL+"/api/auth/me", tok1)
+	u1 := me1["user"].(map[string]any)
+	if int(u1["wins"].(float64)) != 1 || int(u1["elo"].(float64)) != 1025 || u1["rank_title"] != "Recruit" {
+		t.Fatalf("expected updated match stats (wins=1, elo=1025), got %v", u1)
+	}
+}

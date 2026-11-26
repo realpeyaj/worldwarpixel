@@ -13,6 +13,7 @@ signal warship_move_requested(ship_id: int, cell: Vector2i)
 signal missile_target_staged(kind: String, cell: Vector2i)
 signal missile_launch_requested(kind: String, cell: Vector2i)
 signal missile_mode_cleared
+signal map_ping_requested(cell: Vector2i, kind: String)
 signal context_menu_requested(screen_pos: Vector2, world_pos: Vector2, cell: Vector2i)
 
 const LUT_WIDTH := 256
@@ -140,6 +141,14 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	elif event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
+		if mb.alt_pressed and not mb.pressed and (mb.button_index == MOUSE_BUTTON_LEFT or mb.button_index == MOUSE_BUTTON_RIGHT):
+			if get_viewport().gui_get_hovered_control() == null and _world_state.match_phase == WorldState.PHASE_PLAYING:
+				var p_world: Vector2 = get_global_mouse_position()
+				if p_world.x >= 0.0 and p_world.y >= 0.0 and p_world.x < _world_state.map_size.x and p_world.y < _world_state.map_size.y:
+					var p_kind := "attack" if mb.button_index == MOUSE_BUTTON_LEFT else "defend"
+					map_ping_requested.emit(_world_state.world_to_sim(p_world), p_kind)
+					get_viewport().set_input_as_handled()
+					return
 		if mb.button_index == MOUSE_BUTTON_RIGHT and not mb.pressed:
 			if _missile_mode != "":
 				set_missile_mode("")
@@ -203,11 +212,15 @@ func _handle_map_click(world_pos: Vector2, cell: Vector2i, is_double_click: bool
 
 	if _build_mode != "":
 		if _build_mode == "warship":
-			set_build_mode("")
-			build_mode_cleared.emit()
 			build_requested.emit("warship", cell)
+			if not Input.is_key_pressed(KEY_SHIFT):
+				set_build_mode("")
+				build_mode_cleared.emit()
 			return
 		build_requested.emit(_build_mode, cell)
+		if not Input.is_key_pressed(KEY_SHIFT):
+			set_build_mode("")
+			build_mode_cleared.emit()
 		return
 
 	var pick_r: float = 12.0 / maxf(camera.zoom.x, 0.5)
@@ -292,6 +305,22 @@ func set_political_mode(enabled: bool) -> void:
 
 func reset_camera_view() -> void:
 	camera.reset_view()
+
+
+func focus_world_pos(world_pos: Vector2, min_zoom: float = -1.0) -> void:
+	camera.focus_world_pos(world_pos, min_zoom)
+
+
+func save_camera_bookmark(slot: int) -> void:
+	camera.save_bookmark(slot)
+
+
+func jump_camera_bookmark(slot: int) -> bool:
+	return camera.jump_bookmark(slot)
+
+
+func add_map_ping(cell: Vector2i, kind: String, sender: String = "") -> void:
+	layer6_selection.add_map_ping(cell, kind, sender)
 
 
 func set_home_pan_active(active: bool, preserve_view: bool = false) -> void:

@@ -65,7 +65,11 @@ func NewMatchStore(ctx context.Context, databaseURL string) (*MatchStore, error)
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		PRIMARY KEY (requester, addressee)
-	);`
+	);
+	ALTER TABLE accounts ADD COLUMN IF NOT EXISTS games_played INT NOT NULL DEFAULT 0;
+	ALTER TABLE accounts ADD COLUMN IF NOT EXISTS wins INT NOT NULL DEFAULT 0;
+	ALTER TABLE accounts ADD COLUMN IF NOT EXISTS elo INT NOT NULL DEFAULT 1000;
+	ALTER TABLE accounts ADD COLUMN IF NOT EXISTS best_territory_pct REAL NOT NULL DEFAULT 0;`
 	if _, err := pool.Exec(pCtx, ddl); err != nil {
 		pool.Close()
 		return nil, err

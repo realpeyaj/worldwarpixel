@@ -131,6 +131,9 @@ var trains: Array[Dictionary] = []
 var factory_links: Array[Dictionary] = []
 
 var match_seed: int = 0
+var winner_team_id: int = 0
+var match_history: Array[Dictionary] = []
+var last_player_threat_world_pos: Vector2 = Vector2(-1.0, -1.0)
 var _rng := RandomNumberGenerator.new()
 var _nation_borders: Dictionary = {}     # int -> Dictionary (cell_idx -> true)
 var _nation_coasts: Dictionary = {}      # int -> Dictionary (cell_idx -> true)
@@ -231,6 +234,9 @@ func reset_match() -> void:
 	match_seed = 0
 	player_nation_id = 1
 	winner_nation_id = 0
+	winner_team_id = 0
+	match_history.clear()
+	last_player_threat_world_pos = Vector2(-1.0, -1.0)
 	current_tick = 0
 	match_phase = PHASE_SPAWN_SELECT
 	owner_dirty = true
@@ -510,6 +516,7 @@ func _cmd_start_mp_match(cmd: Dictionary) -> Dictionary:
 						break
 		var col := Color.from_string(palette[i % palette.size()], Color("#3b82f6"))
 		var mp_n := _create_nation(nm, col, true, Vector2i(sx, sy), 56, nid)
+		mp_n.team_id = clampi(int(pd.get("team_id", 0)), 0, 4)
 		_start_land_expansion(mp_n.id, Vector2i(sx, sy), 58.0, 0)
 		spawned_pts.append(Vector2i(sx, sy))
 
@@ -1536,6 +1543,17 @@ func step_tick(tick: int) -> void:
 		elif _economy_dirty and (tick % 6 == 0):
 			_economy_dirty = false
 			_recompute_all_economy_rates()
+		for nid_t: int in nations.keys():
+			var nt: NationData = nations[nid_t]
+			if nt.alive and nt.territory_percent > nt.peak_territory_percent:
+				nt.peak_territory_percent = nt.territory_percent
+		if tick % 72 == 0 and match_history.size() < 180:
+			var snap := {}
+			for nid_s: int in nations.keys():
+				var ns: NationData = nations[nid_s]
+				if ns.alive or ns.territory_percent > 0.0:
+					snap[nid_s] = ns.territory_percent
+			match_history.append({"tick": tick, "nations": snap})
 		_check_victory()
 	simulation_ticked.emit(tick)
 
@@ -1590,7 +1608,9 @@ func _step_economy_and_troops() -> void:
 		if not n.alive:
 			continue
 		var betray_mult: float = 0.65 if n.is_betrayer(current_tick) else 1.0
-		n.gold += n.gold_per_sec * betray_mult * TICK_DT
+		var earned: float = n.gold_per_sec * betray_mult * TICK_DT
+		n.gold += earned
+		n.total_gold_earned += earned
 
 		# OpenFront 1:1 pow(fill, 0.73) * (1 - fill) curve peaking at ~42.2% pop cap
 		var fill: float = clampf(n.troops / maxf(n.max_troops, 1.0), 0.0, 1.0)
@@ -1815,6 +1835,7 @@ func _step_ships() -> void:
 			if n.id == player_nation_id:
 				player_land_conquered.emit(beach_claimed, l_ship.target_owner_id != 0)
 			elif l_ship.target_owner_id == player_nation_id:
+				last_player_threat_world_pos = sim_to_world(l_ship.landing_cell)
 				player_territory_attacked.emit(n.id, beach_claimed)
 		var rem: float = maxf(10.0, l_ship.troops_carried - (6.0 if hit_fallout else 3.0))
 		var push_target: Vector2i = l_ship.target_cell if l_ship.target_cell.x >= 0 else l_ship.landing_cell
@@ -2151,6 +2172,7 @@ func _step_expansions() -> void:
 				elif prev_owner == player_nation_id:
 					player_lost_cells += 1
 					player_attacker_id = order.nation_id
+					last_player_threat_world_pos = Vector2(float(idx % sim_width) + 0.5, float(int(idx / sim_width)) + 0.5) * sim_scale
 			sum_x += float(idx % sim_width)
 			sum_y += float(int(idx / sim_width))
 			any_flipped = true
@@ -2862,12 +2884,29 @@ func _recompute_all_economy_rates() -> void:
 func _check_victory() -> void:
 	if winner_nation_id != 0:
 		return
+	var team_pcts: Dictionary = {}
+	var team_leaders: Dictionary = {}
 	for nid: int in nations.keys():
 		var n: NationData = nations[nid]
 		if n.alive and n.territory_percent >= VICTORY_THRESHOLD_PERCENT:
 			winner_nation_id = n.id
+			winner_team_id = n.team_id
 			match_phase = PHASE_VICTORY
 			victory_reached.emit(n.id, n.territory_percent)
+			return
+		if n.alive and n.team_id > 0:
+			team_pcts[n.team_id] = float(team_pcts.get(n.team_id, 0.0)) + n.territory_percent
+			var cur_lead: NationData = team_leaders.get(n.team_id, null)
+			if cur_lead == null or n.territory_percent > cur_lead.territory_percent:
+				team_leaders[n.team_id] = n
+	for tid: int in team_pcts.keys():
+		var total_pct: float = float(team_pcts[tid])
+		if total_pct >= VICTORY_THRESHOLD_PERCENT:
+			var lead: NationData = team_leaders[tid]
+			winner_nation_id = lead.id
+			winner_team_id = tid
+			match_phase = PHASE_VICTORY
+			victory_reached.emit(lead.id, total_pct)
 			return
 
 
@@ -3035,7 +3074,13 @@ func are_allied(a: int, b: int) -> bool:
 	if a <= 0 or b <= 0 or a == b:
 		return false
 	var na: NationData = nations.get(a, null)
-	return na != null and na.alive and na.alliances.has(b) and int(na.alliances[b]) > current_tick
+	if na == null or not na.alive:
+		return false
+	if na.team_id > 0:
+		var nb: NationData = nations.get(b, null)
+		if nb != null and nb.alive and nb.team_id == na.team_id:
+			return true
+	return na.alliances.has(b) and int(na.alliances[b]) > current_tick
 
 
 func is_embargoed(a: int, b: int) -> bool:
@@ -3236,6 +3281,11 @@ func _cmd_launch_missile(cmd: Dictionary) -> Dictionary:
 	m.blast_radius_sim = MissileUnit.get_blast_radius(kind)
 	m.compute_ballistic_curve(false)
 	missiles[m.id] = m
+	var shooter_n: NationData = nations.get(nid, null)
+	if shooter_n != null:
+		shooter_n.nukes_launched += 1
+	if m.target_nation_id == player_nation_id and nid != player_nation_id:
+		last_player_threat_world_pos = m.target_pos
 	missile_launched.emit(m.id, m.kind)
 	return {"ok": true, "missile_id": m.id, "silo_id": silo.id}
 
@@ -3317,6 +3367,9 @@ func _step_missiles() -> void:
 			if d <= maxf(12.0, step_px):
 				tgt.active = false
 				m.active = false
+				var sam_n: NationData = nations.get(m.nation_id, null)
+				if sam_n != null:
+					sam_n.nukes_intercepted += 1
 				intercepts.append(tgt_vis)
 				done_ids.append(mid)
 				done_ids.append(tgt.id)

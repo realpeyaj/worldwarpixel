@@ -29,6 +29,8 @@ func newServerMux(rm *RoomManager, store *MatchStore, acct ...*AccountService) h
 	} else {
 		accountSvc = NewAccountService(store)
 	}
+	accountSvc.SetRoomLookup(rm.FindJoinableRoomForUser)
+	rm.SetAccountService(accountSvc)
 	RegisterAccountRoutes(mux, accountSvc)
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -49,6 +51,8 @@ func newServerMux(rm *RoomManager, store *MatchStore, acct ...*AccountService) h
 	mux.HandleFunc("POST /api/rooms", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			RoomCode string `json:"room_code"`
+			IsPublic *bool  `json:"is_public"`
+			TeamMode *bool  `json:"team_mode"`
 		}
 		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&body)
 		room, err := rm.CreateOrGetRoom(body.RoomCode)
@@ -56,7 +60,28 @@ func newServerMux(rm *RoomManager, store *MatchStore, acct ...*AccountService) h
 			writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": err.Error()})
 			return
 		}
+		room.mu.Lock()
+		if len(room.Players) == 0 {
+			if body.IsPublic != nil {
+				room.IsPublic = *body.IsPublic
+			}
+			if body.TeamMode != nil {
+				room.TeamMode = *body.TeamMode
+			}
+		}
+		room.mu.Unlock()
 		writeJSON(w, http.StatusCreated, map[string]any{
+			"room_code": room.Code,
+		})
+	})
+
+	mux.HandleFunc("POST /api/rooms/quickplay", func(w http.ResponseWriter, r *http.Request) {
+		room, err := rm.QuickPlayRoom()
+		if err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
 			"room_code": room.Code,
 		})
 	})

@@ -570,9 +570,11 @@ type hubWindow struct {
 	authRegister bool
 	focusField   string
 	caretVisible bool
-	inputUser    string
-	inputPass    string
-	inputSearch  string
+	inputUser        string
+	inputPass        string
+	inputPassConfirm string
+	showPassword     bool
+	inputSearch      string
 	authBusy     bool
 	authMessage  string
 	authIsError  bool
@@ -795,6 +797,8 @@ func (h *hubWindow) paintToDIB() {
 		CaretVisible:     h.caretVisible,
 		InputUser:        h.inputUser,
 		InputPass:        h.inputPass,
+		InputPassConfirm: h.inputPassConfirm,
+		ShowPassword:     h.showPassword,
 		InputSearch:      h.inputSearch,
 		AuthBusy:         h.authBusy,
 		AuthMessage:      h.authMessage,
@@ -910,6 +914,14 @@ func (h *hubWindow) applyAPIUserLocked(tok string, user apiUserProfile) {
 	if user.AvatarDelayMs >= 40 {
 		h.prof.AvatarDelayMs = user.AvatarDelayMs
 	}
+	h.prof.GamesPlayed = user.GamesPlayed
+	h.prof.Wins = user.Wins
+	if user.Elo > 0 {
+		h.prof.Elo = user.Elo
+	}
+	if user.RankTitle != "" {
+		h.prof.RankTitle = user.RankTitle
+	}
 	var avPNG []byte
 	if user.AvatarB64 != "" {
 		if raw, err := base64.StdEncoding.DecodeString(user.AvatarB64); err == nil {
@@ -973,12 +985,29 @@ func (h *hubWindow) runAuthSubmitAsync() {
 	isReg := h.authRegister
 	u := strings.TrimSpace(h.inputUser)
 	p := h.inputPass
+	pConfirm := h.inputPassConfirm
 	if u == "" || p == "" {
 		h.authMessage = "Enter both username and password."
 		h.authIsError = true
 		h.mu.Unlock()
 		h.postRefresh()
 		return
+	}
+	if isReg {
+		if len([]rune(p)) < 4 {
+			h.authMessage = "Password must be at least 4 characters."
+			h.authIsError = true
+			h.mu.Unlock()
+			h.postRefresh()
+			return
+		}
+		if p != pConfirm {
+			h.authMessage = "Passwords do not match."
+			h.authIsError = true
+			h.mu.Unlock()
+			h.postRefresh()
+			return
+		}
 	}
 	h.authBusy = true
 	h.authMessage = ""
@@ -1006,6 +1035,8 @@ func (h *hubWindow) runAuthSubmitAsync() {
 	}
 	h.applyAPIUserLocked(tok, user)
 	h.inputPass = ""
+	h.inputPassConfirm = ""
+	h.showPassword = false
 	h.focusField = ""
 	h.authMessage = "Signed in as @" + h.prof.Username
 	h.authIsError = false
@@ -1279,8 +1310,55 @@ func (h *hubWindow) runInstallOrUpdateAsync() {
 	h.postRefresh()
 }
 
+// runRepairAsync clears stale patches and re-downloads the latest full client archive.
+func (h *hubWindow) runRepairAsync() {
+	h.mu.Lock()
+	if h.busy || h.launching {
+		h.mu.Unlock()
+		return
+	}
+	h.busy = true
+	h.tab = tabGame
+	h.phase = hubWorking
+	h.progTxt = "Verifying installation..."
+	h.progPct = 2
+	cfg := h.cfg
+	h.mu.Unlock()
+	h.postRefresh()
+
+	tag, err := repairGameFiles(context.Background(), cfg, func(status string, pct int) {
+		h.mu.Lock()
+		h.progTxt = status
+		h.progPct = pct
+		h.mu.Unlock()
+		h.postRefresh()
+	})
+
+	h.mu.Lock()
+	h.busy = false
+	h.hasExe = fileExists(filepath.Join(cfg.GameDir, clientExeName))
+	if err != nil {
+		h.status = sanitizeUserError(err)
+		h.progTxt = "Repair interrupted."
+		h.progPct = 0
+		if h.hasExe {
+			h.phase = hubReadyToPlay
+		} else {
+			h.phase = hubNeedsInstall
+		}
+	} else {
+		h.phase = hubReadyToPlay
+		h.plan.Kind = updateNone
+		h.status = fmt.Sprintf("Verified & repaired · Installed %s", tag)
+		h.progTxt = ""
+		h.progPct = 100
+	}
+	h.mu.Unlock()
+	h.postRefresh()
+}
+
 // startPlayAndForeground launches WorldWarPixel-Client.exe, brings its visible window to foreground, then closes the launcher.
-func (h *hubWindow) startPlayAndForeground() {
+func (h *hubWindow) startPlayAndForeground(extraArgs ...string) {
 	h.mu.Lock()
 	if h.launching || h.busy || !h.hasExe {
 		h.mu.Unlock()
@@ -1294,7 +1372,7 @@ func (h *hubWindow) startPlayAndForeground() {
 	h.postRefresh()
 
 	go func() {
-		err := launchGameAndFocus(cfg, launcherHwnd)
+		err := launchGameAndFocus(cfg, launcherHwnd, extraArgs...)
 		if err != nil {
 			h.mu.Lock()
 			h.launching = false
@@ -1309,13 +1387,16 @@ func (h *hubWindow) startPlayAndForeground() {
 	}()
 }
 
-func launchGameAndFocus(cfg launcherConfig, launcherHwnd uintptr) error {
+func launchGameAndFocus(cfg launcherConfig, launcherHwnd uintptr, extraArgs ...string) error {
 	clientExePath := filepath.Join(cfg.GameDir, clientExeName)
 	if !fileExists(clientExePath) {
 		return fmt.Errorf("missing client binary")
 	}
 
-	cmd := exec.Command(clientExePath, cfg.ForwardArgs...)
+	args := make([]string, 0, len(cfg.ForwardArgs)+len(extraArgs))
+	args = append(args, cfg.ForwardArgs...)
+	args = append(args, extraArgs...)
+	cmd := exec.Command(clientExePath, args...)
 	cmd.Dir = cfg.GameDir
 	if err := cmd.Start(); err != nil {
 		return err
@@ -1391,6 +1472,20 @@ func (h *hubWindow) handleClick(id string) {
 		go h.runFriendActionAsync("decline", strings.TrimPrefix(id, "decline_req:"))
 		return
 	}
+	if strings.HasPrefix(id, "join_friend:") {
+		code := strings.TrimSpace(strings.TrimPrefix(id, "join_friend:"))
+		if code != "" {
+			h.mu.Lock()
+			hasExe := h.hasExe
+			busy := h.busy
+			launching := h.launching
+			h.mu.Unlock()
+			if hasExe && !busy && !launching {
+				h.startPlayAndForeground("--join-room=" + code)
+			}
+		}
+		return
+	}
 
 	switch id {
 	case "tab_game":
@@ -1426,6 +1521,7 @@ func (h *hubWindow) handleClick(id string) {
 	case "auth_mode_login":
 		h.mu.Lock()
 		h.authRegister = false
+		h.inputPassConfirm = ""
 		h.authMessage = ""
 		h.focusField = "auth_user"
 		h.mu.Unlock()
@@ -1433,13 +1529,20 @@ func (h *hubWindow) handleClick(id string) {
 	case "auth_mode_register":
 		h.mu.Lock()
 		h.authRegister = true
+		h.inputPassConfirm = ""
 		h.authMessage = ""
 		h.focusField = "auth_user"
 		h.mu.Unlock()
 		procInvalidateRect.Call(h.hwnd, 0, 0)
-	case "auth_user", "auth_pass", "friend_search":
+	case "auth_user", "auth_pass", "auth_pass_confirm", "friend_search":
 		h.mu.Lock()
 		h.focusField = id
+		h.caretVisible = true
+		h.mu.Unlock()
+		procInvalidateRect.Call(h.hwnd, 0, 0)
+	case "toggle_pass_eye":
+		h.mu.Lock()
+		h.showPassword = !h.showPassword
 		h.caretVisible = true
 		h.mu.Unlock()
 		procInvalidateRect.Call(h.hwnd, 0, 0)
@@ -1462,6 +1565,8 @@ func (h *hubWindow) handleClick(id string) {
 	case "check":
 		go h.runCheckAsync()
 		go h.runPingAsync()
+	case "repair":
+		go h.runRepairAsync()
 	case "offline":
 		h.startPlayAndForeground()
 	case "primary":
@@ -1533,6 +1638,14 @@ func (h *hubWindow) appendRunesFocused(s string) {
 			}
 		}
 		h.inputPass = string(cur)
+	case "auth_pass_confirm":
+		cur := []rune(h.inputPassConfirm)
+		for _, r := range clean {
+			if len(cur) < 128 {
+				cur = append(cur, r)
+			}
+		}
+		h.inputPassConfirm = string(cur)
 	case "friend_search":
 		cur := []rune(h.inputSearch)
 		for _, r := range clean {
@@ -1560,6 +1673,11 @@ func (h *hubWindow) handleChar(ch rune) {
 			if len(r) > 0 {
 				h.inputPass = string(r[:len(r)-1])
 			}
+		case "auth_pass_confirm":
+			r := []rune(h.inputPassConfirm)
+			if len(r) > 0 {
+				h.inputPassConfirm = string(r[:len(r)-1])
+			}
 		case "friend_search":
 			r := []rune(h.inputSearch)
 			if len(r) > 0 {
@@ -1574,6 +1692,8 @@ func (h *hubWindow) handleChar(ch rune) {
 		if h.tab == tabAccount && !h.prof.IsAccount {
 			if h.focusField == "auth_user" {
 				h.focusField = "auth_pass"
+			} else if h.focusField == "auth_pass" && h.authRegister {
+				h.focusField = "auth_pass_confirm"
 			} else {
 				h.focusField = "auth_user"
 			}

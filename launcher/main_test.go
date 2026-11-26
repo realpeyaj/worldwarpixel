@@ -637,10 +637,10 @@ func TestRiotHubRenderAndHitTesting(t *testing.T) {
 			ProgText:     "Patch v1.0.1 available",
 			NotesRaw:     "# World War Pixel — Patch Notes\n## v1.0.1 — Balance Update\n- **Naval Trade**: Adjusted sea lane payouts.",
 			PingMs:       -1,
-			Profile:      localProfile{Username: "AdmiralPeyaj", IsAccount: true, Token: "tok"},
+			Profile:      localProfile{Username: "AdmiralPeyaj", IsAccount: true, Token: "tok", GamesPlayed: 4, Wins: 3, Elo: 1085, RankTitle: "Captain"},
 			GameDir:      `C:\Games\WorldWarPixel\game`,
 			Repo:         defaultRepo,
-			Friends:      []apiUserProfile{{Username: "AllyOne", Online: true, LastSeenText: "Online"}},
+			Friends:      []apiUserProfile{{Username: "AllyOne", Online: true, LastSeenText: "Online", CurrentRoom: "ABC123"}},
 			Incoming:     []apiUserProfile{{Username: "Recruit", Online: false, LastSeenText: "2h ago"}},
 			SearchResults: []apiUserProfile{{Username: "Scout99", Relation: "none"}},
 		},
@@ -677,10 +677,50 @@ func TestRiotHubRenderAndHitTesting(t *testing.T) {
 			if tab == tabAccount && !baseState.Profile.IsAccount && !seen["auth_submit"] {
 				t.Fatalf("signed-out account tab missing auth_submit hit region")
 			}
+			if tab == tabAccount && !baseState.Profile.IsAccount && !seen["toggle_pass_eye"] {
+				t.Fatalf("signed-out account tab missing toggle_pass_eye hit region")
+			}
 			if tab == tabAccount && baseState.Profile.IsAccount && !seen["upload_avatar"] {
 				t.Fatalf("signed-in account tab missing upload_avatar hit region")
 			}
+			if tab == tabAccount && baseState.Profile.IsAccount && si == 1 && !seen["join_friend:ABC123"] {
+				t.Fatalf("signed-in account tab missing join_friend:ABC123 hit region")
+			}
+			if tab == tabSettings && !seen["repair"] {
+				t.Fatalf("settings tab missing repair hit region")
+			}
 		}
+	}
+	// Register-mode Confirm Password & Hidden Eye visibility check
+	regState := states[0]
+	regState.Tab = tabAccount
+	regState.AuthModeRegister = true
+	regState.InputPass = "SecretPass99"
+	regState.InputPassConfirm = "SecretPass99"
+	regState.ShowPassword = false
+	regHits, regTexts, _ := renderHubFrame(buf, hubWidth*4, false, regState)
+	regSeen := map[string]bool{}
+	for _, h := range regHits {
+		regSeen[h.id] = true
+	}
+	if !regSeen["auth_pass_confirm"] || !regSeen["toggle_pass_eye"] {
+		t.Fatalf("register-mode account tab missing confirm password or eye hit regions: %v", regSeen)
+	}
+	for _, op := range regTexts {
+		if strings.Contains(op.text, "SecretPass99") {
+			t.Fatalf("password leaked in text ops while ShowPassword is false: %q", op.text)
+		}
+	}
+	regState.ShowPassword = true
+	_, shownTexts, _ := renderHubFrame(buf, hubWidth*4, false, regState)
+	foundPlain := 0
+	for _, op := range shownTexts {
+		if op.text == "SecretPass99" {
+			foundPlain++
+		}
+	}
+	if foundPlain != 2 {
+		t.Fatalf("expected both password and confirm fields to reveal plaintext when ShowPassword=true, got %d", foundPlain)
 	}
 }
 
@@ -762,7 +802,7 @@ func TestAccountAPILoginRegisterAvatarAndProfileSync(t *testing.T) {
 	}
 
 	// Verify transport errors never leak backend IP/port/URL.
-	deadClient := newAccountAPIClient("http://151.242.136.36:30041", &http.Client{Timeout: 50 * time.Millisecond})
+	deadClient := newAccountAPIClient("http://151.242.136.18:30041", &http.Client{Timeout: 1 * time.Nanosecond})
 	_, _, deadErr := deadClient.Login(context.Background(), "a", "b")
 	msg := sanitizeUserError(deadErr)
 	if strings.Contains(msg, "151.242") || strings.Contains(msg, "30041") || strings.Contains(msg, "http") {
@@ -789,5 +829,102 @@ func TestParsePatchReleasesStructured(t *testing.T) {
 	}
 	if rels[0].Items[0].Title != "Launcher Accounts" {
 		t.Fatalf("unexpected item title: %+v", rels[0].Items[0])
+	}
+}
+
+func TestLauncherSelfUpdateAndCleanup(t *testing.T) {
+	dir := t.TempDir()
+	curExe := filepath.Join(dir, launcherExeName)
+	newExe := filepath.Join(dir, "new-"+launcherExeName)
+	if err := os.WriteFile(curExe, []byte("old-launcher-v1"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newExe, []byte("new-launcher-v2"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := applyLauncherSelfUpdate(curExe, newExe); err != nil {
+		t.Fatalf("applyLauncherSelfUpdate failed: %v", err)
+	}
+	gotCur, _ := os.ReadFile(curExe)
+	gotOld, _ := os.ReadFile(curExe + ".old")
+	if string(gotCur) != "new-launcher-v2" || string(gotOld) != "old-launcher-v1" {
+		t.Fatalf("unexpected swap contents: cur=%q old=%q", string(gotCur), string(gotOld))
+	}
+	if fileExists(newExe) {
+		t.Fatalf("staged new launcher exe should be removed after swap")
+	}
+	cleanupOldLauncherExe(curExe)
+	if fileExists(curExe + ".old") {
+		t.Fatalf("cleanupOldLauncherExe should remove .old file")
+	}
+}
+
+func TestRepairGameFilesRestoresClientAndClearsPatches(t *testing.T) {
+	tmpRoot := t.TempDir()
+	gameDir := filepath.Join(tmpRoot, "game")
+	patchDir := filepath.Join(gameDir, patchesDirName)
+	if err := os.MkdirAll(patchDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(gameDir, clientExeName), []byte("corrupted"), 0755)
+	_ = os.WriteFile(filepath.Join(gameDir, versionFileName), []byte("v9.9.9\n"), 0644)
+	_ = os.WriteFile(filepath.Join(patchDir, "stale.pck"), []byte("stale"), 0644)
+
+	var zipBuf bytes.Buffer
+	zw := zip.NewWriter(&zipBuf)
+	w1, _ := zw.Create("game/" + clientExeName)
+	_, _ = w1.Write([]byte("clean-client-exe"))
+	w2, _ := zw.Create("game/" + clientPckName)
+	_, _ = w2.Write([]byte("clean-client-pck"))
+	_ = zw.Close()
+	zipData := zipBuf.Bytes()
+
+	sum := sha256.Sum256(zipData)
+	sumLine := fmt.Sprintf("%s  WorldWarPixel-Windows.zip\n", hex.EncodeToString(sum[:]))
+
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/org/game/releases":
+			_ = json.NewEncoder(w).Encode([]ghRelease{{
+				TagName: "v1.2.0",
+				Name:    "v1.2.0",
+				Assets: []ghAsset{
+					{Name: "WorldWarPixel-Windows.zip", BrowserDownloadURL: srv.URL + "/dl/client.zip", Size: int64(len(zipData))},
+					{Name: "SHA256SUMS.txt", BrowserDownloadURL: srv.URL + "/dl/SHA256SUMS.txt", Size: int64(len(sumLine))},
+				},
+			}})
+		case "/dl/client.zip":
+			_, _ = w.Write(zipData)
+		case "/dl/SHA256SUMS.txt":
+			_, _ = w.Write([]byte(sumLine))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	cfg := launcherConfig{
+		ExeDir:          tmpRoot,
+		GameDir:         gameDir,
+		Repo:            "org/game",
+		APIBase:         srv.URL,
+		HTTPClient:      srv.Client(),
+		CheckTimeout:    2 * time.Second,
+		DownloadTimeout: 10 * time.Second,
+	}
+	tag, err := repairGameFiles(context.Background(), cfg, nil)
+	if err != nil {
+		t.Fatalf("repairGameFiles failed: %v", err)
+	}
+	if tag != "v1.2.0" {
+		t.Fatalf("expected repaired tag v1.2.0, got %q", tag)
+	}
+	if got, _ := os.ReadFile(filepath.Join(gameDir, clientExeName)); string(got) != "clean-client-exe" {
+		t.Fatalf("repaired client exe mismatch: %q", string(got))
+	}
+	if fileExists(filepath.Join(patchDir, "stale.pck")) {
+		t.Fatalf("repairGameFiles should remove stale patches")
 	}
 }

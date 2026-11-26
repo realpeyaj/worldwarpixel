@@ -37,10 +37,17 @@ func _ready() -> void:
 	world_map.missile_target_staged.connect(_on_missile_target_staged)
 	world_map.missile_launch_requested.connect(_on_missile_launch_requested)
 	world_map.missile_mode_cleared.connect(hud.clear_missile_mode)
+	world_map.map_ping_requested.connect(_on_map_ping_requested)
 	world_map.context_menu_requested.connect(hud.open_radial_menu)
 
 	hud.map_mode_toggled.connect(world_map.set_political_mode)
 	hud.reset_view_requested.connect(world_map.reset_camera_view)
+	hud.camera_focus_requested.connect(func(wpos: Vector2, min_z: float) -> void: world_map.focus_world_pos(wpos, min_z))
+	hud.camera_bookmark_save_requested.connect(func(slot: int) -> void: world_map.save_camera_bookmark(slot))
+	hud.camera_bookmark_jump_requested.connect(func(slot: int) -> void:
+		if world_map.jump_camera_bookmark(slot):
+			AudioManager.play_ui_tap()
+	)
 	hud.build_mode_selected.connect(world_map.set_build_mode)
 	hud.missile_mode_selected.connect(world_map.set_missile_mode)
 	hud.close_structure_requested.connect(func() -> void: world_map.set_selected_structure(0))
@@ -62,6 +69,10 @@ func _ready() -> void:
 	hud.mp_connect_requested.connect(_on_mp_connect_requested)
 	hud.mp_disconnect_requested.connect(_on_mp_disconnect_requested)
 	hud.mp_start_match_requested.connect(func(ai_c: int) -> void: mp_client.send_start_match(ai_c))
+	hud.mp_quickplay_requested.connect(_on_mp_quickplay_requested)
+	hud.mp_rooms_refresh_requested.connect(_on_mp_rooms_refresh_requested)
+	hud.mp_team_selected.connect(func(tid: int) -> void: mp_client.send_set_team(tid))
+	hud.mp_room_options_changed.connect(func(is_pub: bool, tm: bool) -> void: mp_client.send_room_options(is_pub, tm))
 	hud.friend_invite_requested.connect(func(f_name: String, r_code: String) -> void:
 		mp_client.send_friend_invite(f_name)
 		account_client.send_room_invite(f_name, r_code)
@@ -106,10 +117,12 @@ func _ready() -> void:
 	account_client.incoming_room_invite_notified.connect(_on_mp_invite_received)
 
 	mp_client.lobby_updated.connect(hud.update_mp_lobby)
+	mp_client.room_options_updated.connect(hud.update_mp_room_options)
 	mp_client.spawn_phase_started.connect(_on_mp_spawn_phase_started)
 	mp_client.match_begun.connect(_on_mp_match_begun)
 	mp_client.tick_batch_received.connect(_on_mp_tick_batch)
 	mp_client.snapshot_received.connect(_on_mp_snapshot_received)
+	mp_client.map_ping_received.connect(_on_map_ping_received)
 	mp_client.ping_updated.connect(hud.update_ping)
 	mp_client.invite_received.connect(_on_mp_invite_received)
 	mp_client.disconnected.connect(_on_mp_disconnected)
@@ -137,6 +150,17 @@ func _ready() -> void:
 	world_state.command_rejected.connect(_on_command_rejected)
 	world_state.nation_eliminated.connect(_on_nation_eliminated)
 	world_state.victory_reached.connect(_on_victory_reached)
+
+	var cli_args: PackedStringArray = OS.get_cmdline_args()
+	var join_code := ""
+	for i in range(cli_args.size()):
+		var arg: String = cli_args[i]
+		if arg.begins_with("--join-room="):
+			join_code = arg.trim_prefix("--join-room=").strip_edges().to_upper()
+		elif arg == "--join-room" and i + 1 < cli_args.size():
+			join_code = cli_args[i + 1].strip_edges().to_upper()
+	if not join_code.is_empty():
+		call_deferred("_auto_join_room_from_cli", join_code)
 
 
 func _exit_tree() -> void:
@@ -331,11 +355,57 @@ func _on_mp_snapshot_received(snap: Dictionary) -> void:
 
 
 func _on_account_auth_changed(logged_in: bool, uname: String, msg: String) -> void:
-	hud.set_account_state(logged_in, uname, msg)
+	hud.set_account_state(logged_in, uname, msg, account_client.local_stats)
 	hud.set_local_avatar(account_client.local_avatar_frames, account_client.local_avatar_delay_ms)
 	_sync_local_player_map_avatar()
 	if not msg.is_empty() and not hud.account_card.visible:
 		hud.show_toast(msg, false)
+
+
+func _auto_join_room_from_cli(code: String) -> void:
+	hud.open_mp_lobby_with_code(code)
+	var cfg: Dictionary = hud.get_spawn_config()
+	_on_mp_connect_requested(hud.get_mp_server_url(), code, str(cfg.get("name", "Commander")))
+
+
+func _on_mp_rooms_refresh_requested() -> void:
+	account_client.fetch_public_rooms(func(ok: bool, rooms: Array, err_msg: String) -> void:
+		if ok:
+			hud.update_public_rooms(rooms)
+		elif not err_msg.is_empty():
+			hud.show_toast(err_msg, true)
+	)
+
+
+func _on_mp_quickplay_requested() -> void:
+	account_client.request_quickplay(func(ok: bool, code: String, err_msg: String) -> void:
+		if ok and not code.is_empty():
+			hud.open_mp_lobby_with_code(code)
+			var cfg: Dictionary = hud.get_spawn_config()
+			_on_mp_connect_requested(hud.get_mp_server_url(), code, str(cfg.get("name", "Commander")))
+		else:
+			hud.show_toast(err_msg if not err_msg.is_empty() else "Quick Play failed.", true)
+			AudioManager.play_error()
+	)
+
+
+func _on_map_ping_requested(cell: Vector2i, kind: String) -> void:
+	if is_multiplayer and mp_client.is_socket_active():
+		mp_client.send_map_ping(cell, kind)
+	else:
+		world_map.add_map_ping(cell, kind, "")
+		AudioManager.play_ui_tap()
+
+
+func _on_map_ping_received(from_nid: int, from_name: String, team_id: int, cell: Vector2i, kind: String) -> void:
+	var local_n: NationData = world_state.get_player_nation()
+	if team_id > 0 and local_n != null and local_n.team_id > 0 and local_n.team_id != team_id:
+		return
+	var label_name: String = "" if from_nid == world_state.player_nation_id else from_name
+	world_map.add_map_ping(cell, kind, label_name)
+	AudioManager.play_ui_tap()
+	if from_nid != world_state.player_nation_id:
+		hud.show_toast("%s pinged %s (click alert to jump)" % [from_name, kind.to_upper()], false, world_state.sim_to_world(cell))
 
 
 func _on_avatar_updated(uname: String, frames: Array, delay_ms: int) -> void:
@@ -378,7 +448,7 @@ func _start_http_ping() -> void:
 	var slash_idx: int = stripped.find("/")
 	if slash_idx >= 0:
 		stripped = stripped.substr(0, slash_idx)
-	var host := "151.242.136.36"
+	var host := "151.242.136.18"
 	var port := 30041
 	var colon_idx: int = stripped.rfind(":")
 	if colon_idx > 0:
@@ -501,6 +571,8 @@ func _on_player_land_conquered(cells_claimed: int, is_contested: bool) -> void:
 
 func _on_player_territory_attacked(_attacker_id: int, _cells_lost: int) -> void:
 	AudioManager.play_under_attack_warning()
+	if world_state.last_player_threat_world_pos.x >= 0.0:
+		hud.show_toast("Territory under attack! Click alert to inspect.", true, world_state.last_player_threat_world_pos)
 
 
 func _on_command_rejected(reason: String) -> void:
@@ -528,15 +600,27 @@ func _on_nation_eliminated(dead_nid: int, conqueror_nid: int) -> void:
 func _on_victory_reached(winner_id: int, pct: float) -> void:
 	var nation: NationData = world_state.get_nation(winner_id)
 	var name_str: String = nation.name if nation != null else "Nation #%d" % winner_id
-	hud.show_toast("VICTORY: %s controls %.1f%% of Earth!" % [name_str, pct], false)
-	if winner_id == world_state.player_nation_id:
+	var p_n: NationData = world_state.get_player_nation()
+	var is_team_win: bool = world_state.winner_team_id > 0 and p_n != null and p_n.team_id == world_state.winner_team_id
+	var is_local_win: bool = (winner_id == world_state.player_nation_id) or is_team_win
+	if world_state.winner_team_id > 0:
+		hud.show_toast("TEAM %d VICTORY (%.1f%% of Earth)!" % [world_state.winner_team_id, pct], false)
+	else:
+		hud.show_toast("VICTORY: %s controls %.1f%% of Earth!" % [name_str, pct], false)
+	if is_local_win:
 		AudioManager.play_victory()
 	else:
 		AudioManager.play_defeat()
 	hud.refresh_all()
 	hud.show_victory_screen(winner_id, pct)
 	if is_multiplayer and mp_client.is_socket_active():
-		mp_client.send_match_over(winner_id)
+		var pcts := {}
+		for nid_k: int in world_state.nations.keys():
+			var nn: NationData = world_state.nations[nid_k]
+			pcts[str(nid_k)] = maxf(nn.peak_territory_percent, nn.territory_percent)
+		mp_client.send_match_over(winner_id, world_state.winner_team_id, pcts)
+		if account_client.is_logged_in:
+			account_client.verify_session()
 
 
 func _on_mp_invite_received(from_name: String, room_code: String) -> void:

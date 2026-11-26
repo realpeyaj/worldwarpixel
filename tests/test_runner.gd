@@ -1564,8 +1564,8 @@ func _run_multiplayer_lockstep_tests(us_spot: Vector2i, eu_spot: Vector2i) -> vo
 	var pong_sig := {"ms": -1}
 	mp.ping_updated.connect(func(ms: int) -> void: pong_sig["ms"] = ms)
 	mp._handle_message({"type": "pong", "t": Time.get_ticks_msec() - 25})
-	_check(mp.DEFAULT_SERVER_URL == "ws://151.242.136.36:30041/ws" and not mp.is_socket_active() and int(pong_sig["ms"]) >= 1 and mp.last_ping_ms == int(pong_sig["ms"]),
-		"MPClient points at ws://151.242.136.36:30041/ws and handles pong RTT cleanly (%dms)" % mp.last_ping_ms)
+	_check(mp.DEFAULT_SERVER_URL == "ws://151.242.136.18:30041/ws" and not mp.is_socket_active() and int(pong_sig["ms"]) >= 1 and mp.last_ping_ms == int(pong_sig["ms"]),
+		"MPClient points at ws://151.242.136.18:30041/ws and handles pong RTT cleanly (%dms)" % mp.last_ping_ms)
 
 	var ws_a := WorldState.new()
 	var ws_b := WorldState.new()
@@ -1653,11 +1653,11 @@ func _run_phase2_account_and_pfp_tests() -> void:
 
 	# 3. AccountClient URL normalization & CapitalMarkersLayer custom PFP binding
 	var ac := AccountClient.new()
-	ac.set_ws_url("ws://151.242.136.36:30041/ws")
+	ac.set_ws_url("ws://151.242.136.18:30041/ws")
 	var cml := CapitalMarkersLayer.new()
 	cml.set_nation_avatar(1, frames_arr, 100)
 	var bound_avatars: Dictionary = cml.get("_nation_avatars")
-	_check(ac.api_base_url == "http://151.242.136.36:30041" and bound_avatars.has(1),
+	_check(ac.api_base_url == "http://151.242.136.18:30041" and bound_avatars.has(1),
 		"AccountClient derives HTTP API URL cleanly & CapitalMarkersLayer binds custom PFP frames")
 	cml.free()
 	ac.free()
@@ -1688,3 +1688,41 @@ func _run_phase2_account_and_pfp_tests() -> void:
 	DirAccess.remove_absolute(tmp_patch_dir)
 	var notes_ok: bool = FileAccess.file_exists("res://PATCH_NOTES.md") and FileAccess.get_file_as_string("res://PATCH_NOTES.md").contains("Patch Notes")
 	_check(pl_ok and notes_ok, "PatchLoader sorts runtime .pck patches & PATCH_NOTES.md is packaged cleanly")
+
+	# 5. SAM placement preview radius + SelectionOverlayLayer & WorldState Team Mode / Telemetry
+	var sam_r1: float = StructureData.get_sam_radius_for_level(1)
+	var ov := SelectionOverlayLayer.new()
+	_check(sam_r1 > 0.0 and ov.has_method("set_build_mode") and ov.has_method("add_map_ping"),
+		"SAM placement range Lv.1 (%.1f px) & tactical ping overlay methods exposed" % sam_r1)
+	ov.free()
+
+	var tws := WorldState.new()
+	tws.load_world()
+	var n1_pos := _find_nearby_land(tws, -98.0, 39.0)
+	var n2_pos := _find_nearby_land(tws, -82.0, 35.0)
+	var n3_pos := _find_nearby_land(tws, 10.0, 48.0)
+	tws.apply_command({
+		"type": "start_mp_match",
+		"seed": 777,
+		"local_nation_id": 1,
+		"ai_count": 0,
+		"players": [
+			{"nation_id": 1, "name": "TeamAlpha1", "team_id": 1, "x": n1_pos.x, "y": n1_pos.y},
+			{"nation_id": 2, "name": "TeamAlpha2", "team_id": 1, "x": n2_pos.x, "y": n2_pos.y},
+			{"nation_id": 3, "name": "TeamBravo1", "team_id": 2, "x": n3_pos.x, "y": n3_pos.y},
+		],
+	})
+	var tn1: NationData = tws.get_nation(1)
+	var tn2: NationData = tws.get_nation(2)
+	var tn3: NationData = tws.get_nation(3)
+	var team_ally_ok: bool = tn1 != null and tn2 != null and tn3 != null and tws.are_allied(1, 2) and not tws.are_allied(1, 3)
+	for t_hist in range(1, 73):
+		tws.step_tick(t_hist)
+	if tn1 != null and tn2 != null:
+		tn1.territory_percent = 50.0
+		tn2.territory_percent = 35.0
+	tws.step_tick(73)
+	var team_win_ok: bool = (tws.match_phase == WorldState.PHASE_VICTORY and tws.winner_team_id == 1)
+	var telemetry_ok: bool = (tn1 != null and tn1.peak_territory_percent >= 50.0 and tws.match_history.size() >= 1)
+	_check(team_ally_ok and team_win_ok and telemetry_ok,
+		"WorldState Team Mode shared alliances/victory & match_history telemetry verified")

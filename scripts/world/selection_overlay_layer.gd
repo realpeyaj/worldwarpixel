@@ -15,6 +15,7 @@ var _naval_preview: Dictionary = {}
 var _elapsed: float = 0.0
 var _cached_fac_key: String = ""
 var _cached_fac_poly: PackedVector2Array = PackedVector2Array()
+var _active_pings: Array[Dictionary] = [] # {"pos": Vector2, "kind": String, "sender": String, "ttl": float, "max_ttl": float}
 
 
 func setup(world_state: WorldState, camera: Camera2D) -> void:
@@ -84,8 +85,33 @@ func _draw_sam_range_circle(st: StructureData, inv_z: float) -> void:
 		draw_arc(st_pos, sr, a0, a0 + sam_step * 0.65, 4, cols[1], 1.6 * inv_z)
 
 
+func add_map_ping(cell: Vector2i, kind: String, sender: String = "") -> void:
+	if _world_state == null:
+		return
+	var pos: Vector2 = _world_state.sim_to_world(cell)
+	_active_pings.append({
+		"pos": pos,
+		"kind": kind,
+		"sender": sender,
+		"ttl": 4.5,
+		"max_ttl": 4.5,
+	})
+	if _active_pings.size() > 16:
+		_active_pings.pop_front()
+	queue_redraw()
+
+
 func _process(delta: float) -> void:
 	_elapsed += delta
+	if not _active_pings.is_empty():
+		var kept: Array[Dictionary] = []
+		for p: Dictionary in _active_pings:
+			var t_left: float = float(p.get("ttl", 0.0)) - delta
+			if t_left > 0.0:
+				p["ttl"] = t_left
+				kept.append(p)
+		_active_pings = kept
+		queue_redraw()
 	if _selected_structure_id > 0 or _selected_ship_id > 0 or _build_mode != "" or _missile_mode != "" or (_world_state != null and _world_state.match_phase == WorldState.PHASE_SPAWN_SELECT):
 		queue_redraw()
 
@@ -177,7 +203,7 @@ func _draw() -> void:
 					draw_arc(pos, blast_r * 0.55, 0.0, TAU, 24, Color(1.0, 0.88, 0.28, 0.92 * pulse), 1.6 * inv_z)
 				_draw_crosshair(pos, 11.0 * inv_z, red_col, inv_z)
 
-	# 3. Build placement validity ring + Defense/Factory range preview (SAM range hidden unless SAM is clicked or in missile mode)
+	# 3. Build placement validity ring + Defense/Factory/SAM range preview
 	elif _world_state.match_phase == WorldState.PHASE_PLAYING and _build_mode != "" and _hover_sim_cell.x >= 0:
 		var pos: Vector2 = _world_state.sim_to_world(_hover_sim_cell)
 		var valid := false
@@ -198,6 +224,23 @@ func _draw() -> void:
 			var dr: float = StructureData.get_defense_radius_for_level(1)
 			draw_circle(pos, dr, Color(0.45, 0.74, 1.0, 0.10))
 			draw_arc(pos, dr, 0.0, TAU, 32, Color(0.45, 0.76, 1.0, 0.68), 1.5 * inv_z)
+		elif _build_mode == StructureData.TYPE_SAM_LAUNCHER:
+			var p_id: int = _world_state.player_nation_id
+			for sid_s: int in _world_state.structures.keys():
+				var sam_st: StructureData = _world_state.structures[sid_s]
+				if sam_st.type == StructureData.TYPE_SAM_LAUNCHER and not sam_st.is_constructing and sam_st.level > 0:
+					if sam_st.nation_id == p_id or _world_state.are_allied(p_id, sam_st.nation_id):
+						_draw_sam_range_circle(sam_st, inv_z)
+			var sr: float = StructureData.get_sam_radius_for_level(1)
+			var fill_sam := Color(0.22, 0.90, 0.54, 0.14) if valid else Color(0.95, 0.28, 0.30, 0.12)
+			var rim_sam := Color(0.28, 0.96, 0.58, 0.88) if valid else Color(1.0, 0.34, 0.34, 0.85)
+			draw_circle(pos, sr, fill_sam)
+			var sam_dashes := 24
+			var sam_step: float = TAU / float(sam_dashes)
+			var sam_rot: float = _elapsed * 0.9
+			for s_i in range(sam_dashes):
+				var a0: float = sam_rot + float(s_i) * sam_step
+				draw_arc(pos, sr, a0, a0 + sam_step * 0.65, 4, rim_sam, 1.6 * inv_z)
 
 		var col := Color(0.28, 0.94, 0.56, 0.92) if valid else Color(0.95, 0.34, 0.34, 0.88)
 		draw_arc(pos, 8.5 * inv_z, 0.0, TAU, 28, col, 1.8 * inv_z)
@@ -234,6 +277,31 @@ func _draw() -> void:
 			draw_arc(p_center, sh.patrol_radius, 0.0, TAU, 36, Color(0.38, 0.92, 1.0, 0.48), 1.4 * inv_z)
 			var ring_z: float = minf(1.0, 1.0 / maxf(z, 0.25))
 			draw_arc(sh.position, 11.0 * ring_z, 0.0, TAU, 24, Color(1.0, 0.88, 0.36, 0.92), 1.5 * ring_z)
+
+	# 7. Active Tactical Map Pings (expanding radar ripples)
+	for p: Dictionary in _active_pings:
+		var p_pos: Vector2 = p.get("pos", Vector2.ZERO)
+		var p_kind: String = str(p.get("kind", "attack"))
+		var max_ttl: float = maxf(0.1, float(p.get("max_ttl", 4.5)))
+		var ttl: float = clampf(float(p.get("ttl", 0.0)), 0.0, max_ttl)
+		var fade: float = clampf(ttl / 1.2, 0.0, 1.0)
+		var age: float = max_ttl - ttl
+		var ping_col := Color(1.0, 0.34, 0.34, 0.95 * fade)
+		if p_kind == "defend":
+			ping_col = Color(0.32, 0.76, 1.0, 0.95 * fade)
+		elif p_kind == "nuke":
+			ping_col = Color(1.0, 0.82, 0.26, 0.95 * fade)
+		var pulse_phase: float = fmod(age * 1.4, 1.0)
+		var outer_r: float = (8.0 + pulse_phase * 26.0) * inv_z
+		draw_arc(p_pos, outer_r, 0.0, TAU, 28, Color(ping_col.r, ping_col.g, ping_col.b, ping_col.a * (1.0 - pulse_phase * 0.65)), 2.0 * inv_z)
+		draw_circle(p_pos, 4.0 * inv_z, ping_col)
+		var font: Font = ThemeDB.fallback_font
+		if font != null:
+			var tag: String = p_kind.to_upper()
+			var sender: String = str(p.get("sender", ""))
+			if not sender.is_empty():
+				tag = "%s (%s)" % [tag, sender]
+			draw_string(font, p_pos + Vector2(10.0 * inv_z, -6.0 * inv_z), tag, HORIZONTAL_ALIGNMENT_LEFT, -1, int(maxf(11.0, 12.0 * inv_z)), ping_col)
 
 
 func _draw_irregular_factory_range(st: StructureData, inv_z: float, fill_col: Color, rim_col: Color) -> void:

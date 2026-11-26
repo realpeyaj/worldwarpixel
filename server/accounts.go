@@ -36,29 +36,47 @@ const (
 
 // AccountRecord represents a persistent player account.
 type AccountRecord struct {
-	Username      string
-	UsernameLower string
-	PasswordHash  string
-	SessionToken  string
-	AvatarPNG     []byte
-	AvatarFrames  int
-	AvatarDelayMs int
-	AvatarHash    string
-	LastSeenAt    time.Time
-	CreatedAt     time.Time
+	Username         string
+	UsernameLower    string
+	PasswordHash     string
+	SessionToken     string
+	AvatarPNG        []byte
+	AvatarFrames     int
+	AvatarDelayMs    int
+	AvatarHash       string
+	GamesPlayed      int
+	Wins             int
+	Elo              int
+	BestTerritoryPct float64
+	LastSeenAt       time.Time
+	CreatedAt        time.Time
 }
 
 // UserProfileDTO is the public representation of an account returned to clients.
 type UserProfileDTO struct {
-	Username      string `json:"username"`
-	Online        bool   `json:"online"`
-	LastSeenUnix  int64  `json:"last_seen_unix"`
-	LastSeenText  string `json:"last_seen_text"`
-	Relation      string `json:"relation,omitempty"`
-	AvatarHash    string `json:"avatar_hash"`
-	AvatarFrames  int    `json:"avatar_frames"`
-	AvatarDelayMs int    `json:"avatar_delay_ms"`
-	AvatarB64     string `json:"avatar_b64,omitempty"`
+	Username         string  `json:"username"`
+	Online           bool    `json:"online"`
+	LastSeenUnix     int64   `json:"last_seen_unix"`
+	LastSeenText     string  `json:"last_seen_text"`
+	Relation         string  `json:"relation,omitempty"`
+	AvatarHash       string  `json:"avatar_hash"`
+	AvatarFrames     int     `json:"avatar_frames"`
+	AvatarDelayMs    int     `json:"avatar_delay_ms"`
+	AvatarB64        string  `json:"avatar_b64,omitempty"`
+	GamesPlayed      int     `json:"games_played"`
+	Wins             int     `json:"wins"`
+	Elo              int     `json:"elo"`
+	RankTitle        string  `json:"rank_title"`
+	BestTerritoryPct float64 `json:"best_territory_pct"`
+	CurrentRoom      string  `json:"current_room,omitempty"`
+}
+
+// MatchParticipantResult records end-of-match stats for an account player.
+type MatchParticipantResult struct {
+	AccountUser  string
+	NationID     int
+	TeamID       int
+	TerritoryPct float64
 }
 
 // RoomInviteDTO represents an ephemeral live room invite from a friend.
@@ -83,6 +101,17 @@ type AccountService struct {
 	tokens      map[string]string         // session_token -> username_lower
 	friendships map[string]*memFriendship // canonical key "a|b" -> friendship
 	invites     map[string][]RoomInviteDTO // target username_lower -> invites
+	roomLookup  func(username string) string
+}
+
+// SetRoomLookup attaches a callback returning an active joinable room code for an account username.
+func (a *AccountService) SetRoomLookup(fn func(username string) string) {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	a.roomLookup = fn
+	a.mu.Unlock()
 }
 
 // NewAccountService initializes AccountService backed by MatchStore (or thread-safe memory if DB is nil).
@@ -189,6 +218,21 @@ func formatLastSeen(lastSeen time.Time, online bool) string {
 	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
 }
 
+func computeRankTitle(elo int) string {
+	switch {
+	case elo >= 1650:
+		return "Marshal"
+	case elo >= 1400:
+		return "General"
+	case elo >= 1200:
+		return "Commander"
+	case elo >= 1050:
+		return "Captain"
+	default:
+		return "Recruit"
+	}
+}
+
 func toProfileDTO(rec *AccountRecord, includeAvatarBytes bool, relation string) UserProfileDTO {
 	online := time.Since(rec.LastSeenAt) <= OnlineThreshold
 	frames := rec.AvatarFrames
@@ -199,18 +243,40 @@ func toProfileDTO(rec *AccountRecord, includeAvatarBytes bool, relation string) 
 	if delay < 40 {
 		delay = 100
 	}
+	elo := rec.Elo
+	if elo <= 0 {
+		elo = 1000
+	}
 	dto := UserProfileDTO{
-		Username:      rec.Username,
-		Online:        online,
-		LastSeenUnix:  rec.LastSeenAt.Unix(),
-		LastSeenText:  formatLastSeen(rec.LastSeenAt, online),
-		Relation:      relation,
-		AvatarHash:    rec.AvatarHash,
-		AvatarFrames:  frames,
-		AvatarDelayMs: delay,
+		Username:         rec.Username,
+		Online:           online,
+		LastSeenUnix:     rec.LastSeenAt.Unix(),
+		LastSeenText:     formatLastSeen(rec.LastSeenAt, online),
+		Relation:         relation,
+		AvatarHash:       rec.AvatarHash,
+		AvatarFrames:     frames,
+		AvatarDelayMs:    delay,
+		GamesPlayed:      rec.GamesPlayed,
+		Wins:             rec.Wins,
+		Elo:              elo,
+		RankTitle:        computeRankTitle(elo),
+		BestTerritoryPct: rec.BestTerritoryPct,
 	}
 	if includeAvatarBytes && len(rec.AvatarPNG) > 0 {
 		dto.AvatarB64 = base64.StdEncoding.EncodeToString(rec.AvatarPNG)
+	}
+	return dto
+}
+
+func (a *AccountService) makeDTO(rec *AccountRecord, includeAvatarBytes bool, relation string) UserProfileDTO {
+	dto := toProfileDTO(rec, includeAvatarBytes, relation)
+	if a != nil && dto.Online {
+		a.mu.RLock()
+		lookup := a.roomLookup
+		a.mu.RUnlock()
+		if lookup != nil {
+			dto.CurrentRoom = lookup(rec.Username)
+		}
 	}
 	return dto
 }
@@ -441,6 +507,7 @@ func (a *AccountService) Register(ctx context.Context, rawUser, password string)
 		SessionToken:  token,
 		AvatarFrames:  1,
 		AvatarDelayMs: 100,
+		Elo:           1000,
 		LastSeenAt:    now,
 		CreatedAt:     now,
 	}
@@ -462,9 +529,9 @@ func (a *AccountService) Login(ctx context.Context, rawUser, password string) (s
 		var rec AccountRecord
 		err := a.store.Pool().QueryRow(ctx, `
 			SELECT username, username_lower, password_hash, COALESCE(avatar_png, ''::bytea),
-			       avatar_frames, avatar_delay_ms, avatar_hash
+			       avatar_frames, avatar_delay_ms, avatar_hash, games_played, wins, elo, best_territory_pct
 			FROM accounts WHERE username_lower = $1`, lower,
-		).Scan(&rec.Username, &rec.UsernameLower, &rec.PasswordHash, &rec.AvatarPNG, &rec.AvatarFrames, &rec.AvatarDelayMs, &rec.AvatarHash)
+		).Scan(&rec.Username, &rec.UsernameLower, &rec.PasswordHash, &rec.AvatarPNG, &rec.AvatarFrames, &rec.AvatarDelayMs, &rec.AvatarHash, &rec.GamesPlayed, &rec.Wins, &rec.Elo, &rec.BestTerritoryPct)
 		if err != nil || !verifyPassword(password, rec.PasswordHash) {
 			return "", UserProfileDTO{}, errInvalidCredentials
 		}
@@ -503,9 +570,9 @@ func (a *AccountService) Authenticate(ctx context.Context, token string, touchPr
 		var rec AccountRecord
 		err := a.store.Pool().QueryRow(ctx, `
 			SELECT username, username_lower, COALESCE(avatar_png, ''::bytea),
-			       avatar_frames, avatar_delay_ms, avatar_hash, last_seen_at
+			       avatar_frames, avatar_delay_ms, avatar_hash, games_played, wins, elo, best_territory_pct, last_seen_at
 			FROM accounts WHERE session_token = $1`, tok,
-		).Scan(&rec.Username, &rec.UsernameLower, &rec.AvatarPNG, &rec.AvatarFrames, &rec.AvatarDelayMs, &rec.AvatarHash, &rec.LastSeenAt)
+		).Scan(&rec.Username, &rec.UsernameLower, &rec.AvatarPNG, &rec.AvatarFrames, &rec.AvatarDelayMs, &rec.AvatarHash, &rec.GamesPlayed, &rec.Wins, &rec.Elo, &rec.BestTerritoryPct, &rec.LastSeenAt)
 		if err != nil {
 			return nil, errUnauthorized
 		}
@@ -568,9 +635,9 @@ func (a *AccountService) UploadAvatar(ctx context.Context, username string, raw 
 			UPDATE accounts
 			SET avatar_png = $2, avatar_frames = $3, avatar_delay_ms = $4, avatar_hash = $5, last_seen_at = NOW()
 			WHERE username_lower = $1
-			RETURNING username, username_lower, COALESCE(avatar_png, ''::bytea), avatar_frames, avatar_delay_ms, avatar_hash, last_seen_at`,
+			RETURNING username, username_lower, COALESCE(avatar_png, ''::bytea), avatar_frames, avatar_delay_ms, avatar_hash, games_played, wins, elo, best_territory_pct, last_seen_at`,
 			lower, pngBytes, frames, delayMs, hashHex,
-		).Scan(&rec.Username, &rec.UsernameLower, &rec.AvatarPNG, &rec.AvatarFrames, &rec.AvatarDelayMs, &rec.AvatarHash, &rec.LastSeenAt)
+		).Scan(&rec.Username, &rec.UsernameLower, &rec.AvatarPNG, &rec.AvatarFrames, &rec.AvatarDelayMs, &rec.AvatarHash, &rec.GamesPlayed, &rec.Wins, &rec.Elo, &rec.BestTerritoryPct, &rec.LastSeenAt)
 		if err != nil {
 			return UserProfileDTO{}, errNotFound
 		}
@@ -600,13 +667,13 @@ func (a *AccountService) GetAvatar(ctx context.Context, username string) (UserPr
 	if a.dbPool() {
 		var rec AccountRecord
 		err := a.store.Pool().QueryRow(ctx, `
-			SELECT username, username_lower, COALESCE(avatar_png, ''::bytea), avatar_frames, avatar_delay_ms, avatar_hash, last_seen_at
+			SELECT username, username_lower, COALESCE(avatar_png, ''::bytea), avatar_frames, avatar_delay_ms, avatar_hash, games_played, wins, elo, best_territory_pct, last_seen_at
 			FROM accounts WHERE username_lower = $1`, lower,
-		).Scan(&rec.Username, &rec.UsernameLower, &rec.AvatarPNG, &rec.AvatarFrames, &rec.AvatarDelayMs, &rec.AvatarHash, &rec.LastSeenAt)
+		).Scan(&rec.Username, &rec.UsernameLower, &rec.AvatarPNG, &rec.AvatarFrames, &rec.AvatarDelayMs, &rec.AvatarHash, &rec.GamesPlayed, &rec.Wins, &rec.Elo, &rec.BestTerritoryPct, &rec.LastSeenAt)
 		if err != nil {
 			return UserProfileDTO{}, errNotFound
 		}
-		return toProfileDTO(&rec, true, ""), nil
+		return a.makeDTO(&rec, true, ""), nil
 	}
 	a.mu.RLock()
 	defer a.mu.RUnlock()
@@ -614,7 +681,7 @@ func (a *AccountService) GetAvatar(ctx context.Context, username string) (UserPr
 	if !ok {
 		return UserProfileDTO{}, errNotFound
 	}
-	return toProfileDTO(rec, true, ""), nil
+	return a.makeDTO(rec, true, ""), nil
 }
 
 // SearchUsers searches the DB/account store by case-insensitive substring/prefix to verify player existence.
@@ -628,7 +695,7 @@ func (a *AccountService) SearchUsers(ctx context.Context, selfUsername, rawQuery
 	if a.dbPool() {
 		rows, err := a.store.Pool().Query(ctx, `
 			SELECT a.username, a.username_lower, COALESCE(a.avatar_png, ''::bytea),
-			       a.avatar_frames, a.avatar_delay_ms, a.avatar_hash, a.last_seen_at,
+			       a.avatar_frames, a.avatar_delay_ms, a.avatar_hash, a.games_played, a.wins, a.elo, a.best_territory_pct, a.last_seen_at,
 			       COALESCE((
 			           SELECT CASE
 			               WHEN f.status = 'accepted' THEN 'friend'
@@ -655,10 +722,10 @@ func (a *AccountService) SearchUsers(ctx context.Context, selfUsername, rawQuery
 		for rows.Next() {
 			var rec AccountRecord
 			var rel string
-			if err := rows.Scan(&rec.Username, &rec.UsernameLower, &rec.AvatarPNG, &rec.AvatarFrames, &rec.AvatarDelayMs, &rec.AvatarHash, &rec.LastSeenAt, &rel); err != nil {
+			if err := rows.Scan(&rec.Username, &rec.UsernameLower, &rec.AvatarPNG, &rec.AvatarFrames, &rec.AvatarDelayMs, &rec.AvatarHash, &rec.GamesPlayed, &rec.Wins, &rec.Elo, &rec.BestTerritoryPct, &rec.LastSeenAt, &rel); err != nil {
 				return nil, err
 			}
-			out = append(out, toProfileDTO(&rec, true, rel))
+			out = append(out, a.makeDTO(&rec, true, rel))
 		}
 		return out, nil
 	}
@@ -909,7 +976,7 @@ func (a *AccountService) GetFriendsOverview(ctx context.Context, selfUsername st
 		rows, err := a.store.Pool().Query(ctx, `
 			SELECT f.requester, f.addressee, f.status,
 			       other.username, other.username_lower, COALESCE(other.avatar_png, ''::bytea),
-			       other.avatar_frames, other.avatar_delay_ms, other.avatar_hash, other.last_seen_at
+			       other.avatar_frames, other.avatar_delay_ms, other.avatar_hash, other.games_played, other.wins, other.elo, other.best_territory_pct, other.last_seen_at
 			FROM friendships f
 			JOIN accounts other ON other.username_lower = CASE
 				WHEN LOWER(f.requester) = $1 THEN LOWER(f.addressee)
@@ -925,18 +992,21 @@ func (a *AccountService) GetFriendsOverview(ctx context.Context, selfUsername st
 		for rows.Next() {
 			var req, addr, st string
 			var rec AccountRecord
-			if err := rows.Scan(&req, &addr, &st, &rec.Username, &rec.UsernameLower, &rec.AvatarPNG, &rec.AvatarFrames, &rec.AvatarDelayMs, &rec.AvatarHash, &rec.LastSeenAt); err != nil {
+			if err := rows.Scan(&req, &addr, &st, &rec.Username, &rec.UsernameLower, &rec.AvatarPNG, &rec.AvatarFrames, &rec.AvatarDelayMs, &rec.AvatarHash, &rec.GamesPlayed, &rec.Wins, &rec.Elo, &rec.BestTerritoryPct, &rec.LastSeenAt); err != nil {
 				return nil, nil, nil, nil, err
 			}
 			if st == "accepted" {
-				friends = append(friends, toProfileDTO(&rec, true, "friend"))
+				friends = append(friends, a.makeDTO(&rec, true, "friend"))
 			} else if strings.EqualFold(req, selfUsername) {
-				outgoing = append(outgoing, toProfileDTO(&rec, true, "outgoing"))
+				outgoing = append(outgoing, a.makeDTO(&rec, true, "outgoing"))
 			} else {
-				incoming = append(incoming, toProfileDTO(&rec, true, "incoming"))
+				incoming = append(incoming, a.makeDTO(&rec, true, "incoming"))
 			}
 		}
 	} else {
+		var friendRecs []*AccountRecord
+		var incomingRecs []*AccountRecord
+		var outgoingRecs []*AccountRecord
 		a.mu.RLock()
 		for _, fs := range a.friendships {
 			var otherLower string
@@ -962,17 +1032,26 @@ func (a *AccountService) GetFriendsOverview(ctx context.Context, selfUsername st
 			if !ok {
 				continue
 			}
-			dto := toProfileDTO(rec, true, rel)
+			cp := *rec
 			switch rel {
 			case "friend":
-				friends = append(friends, dto)
+				friendRecs = append(friendRecs, &cp)
 			case "incoming":
-				incoming = append(incoming, dto)
+				incomingRecs = append(incomingRecs, &cp)
 			case "outgoing":
-				outgoing = append(outgoing, dto)
+				outgoingRecs = append(outgoingRecs, &cp)
 			}
 		}
 		a.mu.RUnlock()
+		for _, r := range friendRecs {
+			friends = append(friends, a.makeDTO(r, true, "friend"))
+		}
+		for _, r := range incomingRecs {
+			incoming = append(incoming, a.makeDTO(r, true, "incoming"))
+		}
+		for _, r := range outgoingRecs {
+			outgoing = append(outgoing, a.makeDTO(r, true, "outgoing"))
+		}
 	}
 
 	SortFriendsList(friends)
@@ -980,6 +1059,54 @@ func (a *AccountService) GetFriendsOverview(ctx context.Context, selfUsername st
 	invites := append([]RoomInviteDTO(nil), a.filterFreshInvitesLocked(selfLower)...)
 	a.mu.Unlock()
 	return friends, incoming, outgoing, invites, nil
+}
+
+// RecordMatchResult updates games_played, wins, ELO, and best_territory_pct for authenticated participants.
+func (a *AccountService) RecordMatchResult(ctx context.Context, players []MatchParticipantResult, winnerNationID, winnerTeamID int) {
+	if a == nil || len(players) == 0 {
+		return
+	}
+	for _, p := range players {
+		lower := normalizeKey(p.AccountUser)
+		if lower == "" {
+			continue
+		}
+		won := (winnerNationID > 0 && p.NationID == winnerNationID) || (winnerTeamID > 0 && p.TeamID == winnerTeamID)
+		winInc := 0
+		eloDelta := -15
+		if won {
+			winInc = 1
+			eloDelta = 25
+		}
+		if a.dbPool() {
+			_, _ = a.store.Pool().Exec(ctx, `
+				UPDATE accounts
+				SET games_played = games_played + 1,
+				    wins = wins + $2,
+				    elo = GREATEST(800, elo + $3),
+				    best_territory_pct = GREATEST(best_territory_pct, $4)
+				WHERE username_lower = $1`,
+				lower, winInc, eloDelta, p.TerritoryPct,
+			)
+			continue
+		}
+		a.mu.Lock()
+		if rec, ok := a.accounts[lower]; ok {
+			rec.GamesPlayed++
+			rec.Wins += winInc
+			if rec.Elo <= 0 {
+				rec.Elo = 1000
+			}
+			rec.Elo += eloDelta
+			if rec.Elo < 800 {
+				rec.Elo = 800
+			}
+			if p.TerritoryPct > rec.BestTerritoryPct {
+				rec.BestTerritoryPct = p.TerritoryPct
+			}
+		}
+		a.mu.Unlock()
+	}
 }
 
 // RegisterAccountRoutes registers all account, DB search, friends, presence, and PFP routes on mux.

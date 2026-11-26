@@ -4,6 +4,9 @@ extends CanvasLayer
 
 signal map_mode_toggled(political_enabled: bool)
 signal reset_view_requested
+signal camera_focus_requested(world_pos: Vector2, min_zoom: float)
+signal camera_bookmark_save_requested(slot: int)
+signal camera_bookmark_jump_requested(slot: int)
 signal build_mode_selected(mode: String)
 signal upgrade_structure_requested(structure_id: int)
 signal cancel_expansion_requested(expansion_id: int)
@@ -26,6 +29,10 @@ signal new_match_requested
 signal mp_connect_requested(ws_url: String, room_code: String, player_name: String)
 signal mp_disconnect_requested
 signal mp_start_match_requested(ai_count: int)
+signal mp_quickplay_requested
+signal mp_rooms_refresh_requested
+signal mp_team_selected(team_id: int)
+signal mp_room_options_changed(is_public: bool, team_mode: bool)
 signal friend_invite_requested(friend_name: String, room_code: String)
 signal account_login_requested(username: String, password: String)
 signal account_register_requested(username: String, password: String)
@@ -43,7 +50,7 @@ const MAX_LEADERBOARD_ROWS := 7
 const FRIENDS_SAVE_PATH := "user://friends.cfg"
 const PROFILE_SAVE_PATH := "user://player_profile.cfg"
 const SERVER_REGIONS := [
-	{"name": "Manila, PH", "url": "ws://151.242.136.36:30041/ws"},
+	{"name": "Manila, PH", "url": "ws://151.242.136.18:30041/ws"},
 ]
 
 var _tex_logo := preload("res://assets/sprites/logo_world_war_pixel.png")
@@ -130,6 +137,19 @@ var _server_friends: Array = []
 var _server_incoming: Array = []
 var _server_outgoing: Array = []
 var _avatar_cache_lookup: Callable = Callable()
+var _account_stats: Dictionary = {}
+var _last_toast_world_pos: Vector2 = Vector2(-1.0, -1.0)
+var _threat_overlay: Control
+var _threat_markers: Array[Dictionary] = []
+var _mp_public_check: CheckBox
+var _mp_team_mode_check: CheckBox
+var _mp_team_option: OptionButton
+var _mp_rooms_list: VBoxContainer
+var _display_mode_option: OptionButton
+var _ui_scale_option: OptionButton
+var _victory_chart: Control
+var _victory_history: Array[Dictionary] = []
+var _mp_syncing_opts: bool = false
 
 @onready var root_control: Control = $Root
 @onready var top_bar: PanelContainer = $Root/TopBar
@@ -260,7 +280,12 @@ var _avatar_cache_lookup: Callable = Callable()
 @onready var account_card: PanelContainer = $Root/MenuOverlay/Center/AccountCard
 @onready var account_back_btn: Button = $Root/MenuOverlay/Center/AccountCard/VBox/HeaderRow/AccountBackBtn
 @onready var account_user_edit: LineEdit = $Root/MenuOverlay/Center/AccountCard/VBox/AccountUserEdit
-@onready var account_pass_edit: LineEdit = $Root/MenuOverlay/Center/AccountCard/VBox/AccountPassEdit
+@onready var pass_row: HBoxContainer = $Root/MenuOverlay/Center/AccountCard/VBox/PassRow
+@onready var account_pass_edit: LineEdit = $Root/MenuOverlay/Center/AccountCard/VBox/PassRow/AccountPassEdit
+@onready var pass_eye_btn: Button = $Root/MenuOverlay/Center/AccountCard/VBox/PassRow/PassEyeBtn
+@onready var confirm_pass_row: HBoxContainer = $Root/MenuOverlay/Center/AccountCard/VBox/ConfirmPassRow
+@onready var account_confirm_pass_edit: LineEdit = $Root/MenuOverlay/Center/AccountCard/VBox/ConfirmPassRow/AccountConfirmPassEdit
+@onready var confirm_pass_eye_btn: Button = $Root/MenuOverlay/Center/AccountCard/VBox/ConfirmPassRow/ConfirmPassEyeBtn
 @onready var login_btn: Button = $Root/MenuOverlay/Center/AccountCard/VBox/AuthBtnRow/LoginBtn
 @onready var register_btn: Button = $Root/MenuOverlay/Center/AccountCard/VBox/AuthBtnRow/RegisterBtn
 @onready var account_card_status: Label = $Root/MenuOverlay/Center/AccountCard/VBox/AccountCardStatus
@@ -383,7 +408,9 @@ func _ready() -> void:
 	_apply_ui_variants_and_icons(icon_back_16, icon_friends_16, icon_mp_16, icon_audio_16)
 	account_back_btn.icon = icon_back_16
 	_populate_spawn_controls()
+	_setup_extra_hud_panels()
 	_load_profile()
+	_apply_saved_display_settings()
 	_populate_server_regions()
 	_load_friends()
 	_init_leaderboard_pool()
@@ -551,6 +578,7 @@ func _ready() -> void:
 		menu_card.visible = false
 		friends_card.visible = false
 		mp_lobby_card.visible = true
+		mp_rooms_refresh_requested.emit()
 	)
 	friends_btn.pressed.connect(func() -> void:
 		save_player_name(menu_name_edit.text)
@@ -617,8 +645,27 @@ func _ready() -> void:
 	)
 	register_btn.pressed.connect(func() -> void:
 		AudioManager.play_ui_tap()
+		var p_txt: String = account_pass_edit.text
+		var c_txt: String = account_confirm_pass_edit.text
+		if p_txt.length() < 4:
+			account_card_status.text = "Password must be at least 4 characters."
+			return
+		if c_txt.is_empty():
+			account_card_status.text = "Please confirm your password to create an account."
+			return
+		if p_txt != c_txt:
+			account_card_status.text = "Passwords do not match."
+			return
 		account_card_status.text = "Creating permanent account..."
-		account_register_requested.emit(account_user_edit.text.strip_edges(), account_pass_edit.text)
+		account_register_requested.emit(account_user_edit.text.strip_edges(), p_txt)
+	)
+	pass_eye_btn.toggled.connect(func(pressed: bool) -> void:
+		AudioManager.play_ui_tap()
+		_set_password_visible(pressed)
+	)
+	confirm_pass_eye_btn.toggled.connect(func(pressed: bool) -> void:
+		AudioManager.play_ui_tap()
+		_set_password_visible(pressed)
 	)
 	logout_btn.pressed.connect(func() -> void:
 		AudioManager.play_ui_tap()
@@ -720,8 +767,11 @@ func _apply_ui_variants_and_icons(icon_back_16: ImageTexture, icon_friends_16: I
 		ThemeFactory.apply_button_variant(btn, "back")
 	for btn: Button in [quit_btn, alliance_decline_btn, logout_btn]:
 		ThemeFactory.apply_button_variant(btn, "danger")
-	for btn: Button in [map_mode_btn, reset_view_btn, hotkeys_btn, audio_btn, menu_btn, lb_toggle_btn, copy_code_btn, mp_friends_btn]:
+	for btn: Button in [map_mode_btn, reset_view_btn, hotkeys_btn, audio_btn, menu_btn, lb_toggle_btn, copy_code_btn, mp_friends_btn, pass_eye_btn, confirm_pass_eye_btn]:
 		ThemeFactory.apply_button_variant(btn, "ghost")
+	pass_eye_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	confirm_pass_eye_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_set_password_visible(false)
 	for btn: Button in [commit_10_btn, commit_25_btn, commit_35_btn, commit_50_btn, commit_75_btn]:
 		ThemeFactory.set_commit_pill_active(btn, false)
 	for btn: Button in [st_close_btn, dip_close_btn, audio_close_btn, dismiss_invite_btn, radial_close_btn]:
@@ -832,21 +882,35 @@ func set_account_error(msg: String) -> void:
 	account_card_status.modulate = Color(1.0, 0.56, 0.52, 1.0)
 
 
-func set_account_state(logged_in: bool, acct_username: String, status_msg: String = "") -> void:
+func set_account_state(logged_in: bool, acct_username: String, status_msg: String = "", stats: Dictionary = {}) -> void:
 	_account_logged_in = logged_in
 	_account_username = acct_username.strip_edges()
+	if not stats.is_empty():
+		_account_stats = stats.duplicate()
+	elif not _account_logged_in:
+		_account_stats.clear()
 	account_card_status.modulate = Color(0.75, 0.86, 0.96, 0.92)
 	if _account_logged_in and not _account_username.is_empty():
 		menu_name_edit.text = _account_username
 		nation_name_edit.text = _account_username
 		menu_name_edit.editable = false
 		nation_name_edit.editable = false
-		account_status_label.text = "%s · Signed In" % _account_username
+		var gp: int = int(_account_stats.get("games_played", 0))
+		var wins_cnt: int = int(_account_stats.get("wins", 0))
+		var elo_val: int = int(_account_stats.get("elo", 1000))
+		var r_title: String = str(_account_stats.get("rank_title", "Recruit"))
+		if gp > 0:
+			account_status_label.text = "%s · %s (%d ELO · %dW-%dL)" % [_account_username, r_title, elo_val, wins_cnt, maxi(0, gp - wins_cnt)]
+		else:
+			account_status_label.text = "%s · %s (%d ELO)" % [_account_username, r_title, elo_val]
 		account_btn.text = "Account"
 		account_user_edit.text = _account_username
 		account_user_edit.editable = false
 		account_pass_edit.text = ""
-		account_pass_edit.visible = false
+		account_confirm_pass_edit.text = ""
+		_set_password_visible(false)
+		pass_row.visible = false
+		confirm_pass_row.visible = false
 		login_btn.visible = false
 		register_btn.visible = false
 		logout_btn.visible = true
@@ -857,12 +921,39 @@ func set_account_state(logged_in: bool, acct_username: String, status_msg: Strin
 		account_status_label.text = "Guest · Sign in for permanent name"
 		account_btn.text = "Sign In"
 		account_user_edit.editable = true
-		account_pass_edit.visible = true
+		pass_row.visible = true
+		confirm_pass_row.visible = true
 		login_btn.visible = true
 		register_btn.visible = true
 		logout_btn.visible = false
 		account_card_status.text = status_msg if not status_msg.is_empty() else "Sign in or create a permanent account."
 	_refresh_friends_ui()
+
+
+func _make_eye_icon(visible_eye: bool) -> ImageTexture:
+	var img := Image.create(16, 16, false, Image.FORMAT_RGBA8)
+	var col := Color(0.86, 0.90, 0.95, 0.95)
+	for y in range(16):
+		var dy := float(y) - 7.5
+		for x in range(16):
+			var dx := float(x) - 7.5
+			var ell: float = (dx * dx) / 42.25 + (dy * dy) / 14.44
+			var in_outline: bool = ell >= 0.56 and ell <= 1.02
+			var in_pupil: bool = (dx * dx + dy * dy) <= 4.6
+			var in_slash: bool = (not visible_eye) and absf(dx + dy) <= 0.85 and absf(dx) <= 5.5
+			if in_outline or in_pupil or in_slash:
+				img.set_pixel(x, y, col)
+	return ImageTexture.create_from_image(img)
+
+
+func _set_password_visible(shown: bool) -> void:
+	account_pass_edit.secret = not shown
+	account_confirm_pass_edit.secret = not shown
+	pass_eye_btn.set_pressed_no_signal(shown)
+	confirm_pass_eye_btn.set_pressed_no_signal(shown)
+	var tex := _make_eye_icon(shown)
+	pass_eye_btn.icon = tex
+	confirm_pass_eye_btn.icon = tex
 
 
 func set_local_avatar(frames: Array, delay_ms: int = 100) -> void:
@@ -1154,7 +1245,9 @@ func _refresh_friends_ui() -> void:
 				row.add_child(_make_avatar_thumb(av.get("frames", []), int(av.get("delay_ms", 100)), Color(0.32, 0.62, 0.96) if online else Color(0.45, 0.50, 0.58)))
 
 				var nm := Label.new()
-				nm.text = f_name
+				var rank_s: String = str(f.get("rank_title", ""))
+				var elo_v: int = int(f.get("elo", 0))
+				nm.text = ("%s (%s · %d)" % [f_name, rank_s, elo_v]) if elo_v > 0 and not rank_s.is_empty() else f_name
 				nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 				nm.clip_text = true
 				row.add_child(nm)
@@ -1273,6 +1366,12 @@ func bind_world_state(world_state: WorldState) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey:
+		var k_any := event as InputEventKey
+		if k_any.pressed and not k_any.echo and k_any.alt_pressed and (k_any.keycode == KEY_ENTER or k_any.keycode == KEY_KP_ENTER):
+			_toggle_fullscreen_hotkey()
+			get_viewport().set_input_as_handled()
+			return
 	if _world_state == null or _world_state.match_phase != WorldState.PHASE_PLAYING:
 		return
 	if event is InputEventKey:
@@ -1299,6 +1398,22 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey:
 		var ke := event as InputEventKey
 		if ke.pressed and not ke.echo:
+			if ke.ctrl_pressed and ke.keycode in [KEY_1, KEY_2, KEY_3, KEY_4]:
+				var b_slot: int = (ke.keycode - KEY_1) + 1
+				camera_bookmark_save_requested.emit(b_slot)
+				show_toast("Saved camera bookmark [%d] (Alt+%d to jump)" % [b_slot, b_slot], false)
+				AudioManager.play_ui_tap()
+				get_viewport().set_input_as_handled()
+				return
+			if ke.alt_pressed and ke.keycode in [KEY_1, KEY_2, KEY_3, KEY_4]:
+				var j_slot: int = (ke.keycode - KEY_1) + 1
+				camera_bookmark_jump_requested.emit(j_slot)
+				get_viewport().set_input_as_handled()
+				return
+			if ke.keycode == KEY_SPACE or ke.keycode == KEY_HOME:
+				_snap_camera_to_capital()
+				get_viewport().set_input_as_handled()
+				return
 			match ke.keycode:
 				KEY_1:
 					_select_build_mode(StructureData.TYPE_TOWN)
@@ -1367,6 +1482,7 @@ func _process(delta: float) -> void:
 		if _exp_timer >= 0.16:
 			_exp_timer = 0.0
 			refresh_expansions()
+	_refresh_offscreen_threats()
 
 
 func get_spawn_config() -> Dictionary:
@@ -1454,13 +1570,88 @@ func update_mp_lobby(room_code: String, phase: String, players: Array, ai_count:
 			var pd := pv as Dictionary
 			var tag: String = " [Spawned]" if bool(pd.get("has_spawn", false)) else ""
 			var host_tag: String = " ★" if bool(pd.get("is_host", false)) else ""
-			names.append(str(pd.get("name", "Player")) + host_tag + tag)
+			var t_id: int = int(pd.get("team_id", 0))
+			var team_tag: String = " [T%d]" % t_id if t_id > 0 else ""
+			names.append(str(pd.get("name", "Player")) + team_tag + host_tag + tag)
 	mp_players_label.text = "Players (%d): %s" % [players.size(), ", ".join(names)] if not names.is_empty() else "Players: --"
 	mp_start_btn.disabled = (not is_host) or (phase != "LOBBY")
+	if _mp_public_check != null:
+		_mp_public_check.disabled = (not is_host) or (phase != "LOBBY")
+	if _mp_team_option != null:
+		_mp_team_option.disabled = (phase != "LOBBY") or (_mp_public_check != null and not _mp_team_option.visible)
 	if not _pending_invite_friend.is_empty() and not _current_room_code.is_empty():
 		var inv_target: String = _pending_invite_friend
 		_pending_invite_friend = ""
 		_on_invite_friend_pressed(inv_target)
+
+
+func open_mp_lobby_with_code(code: String) -> void:
+	menu_card.visible = false
+	friends_card.visible = false
+	account_card.visible = false
+	mp_lobby_card.visible = true
+	menu_overlay.visible = true
+	mp_room_edit.text = code.strip_edges().to_upper()
+	_sync_hud_chrome_visibility()
+
+
+func update_mp_room_options(is_public: bool, team_mode: bool) -> void:
+	_mp_syncing_opts = true
+	if _mp_public_check != null:
+		_mp_public_check.button_pressed = is_public
+	if _mp_team_mode_check != null:
+		_mp_team_mode_check.button_pressed = team_mode
+	if _mp_team_option != null:
+		_mp_team_option.visible = team_mode
+		if not team_mode:
+			_mp_team_option.select(0)
+	_mp_syncing_opts = false
+
+
+func update_public_rooms(rooms: Array) -> void:
+	if _mp_rooms_list == null:
+		return
+	for ch in _mp_rooms_list.get_children():
+		ch.queue_free()
+	var joinable: Array = []
+	for rv: Variant in rooms:
+		if rv is Dictionary and bool((rv as Dictionary).get("joinable", false)):
+			joinable.append(rv)
+	if joinable.is_empty():
+		var empty_lbl := Label.new()
+		empty_lbl.text = "No open public lobbies — click Quick Play or Create Room."
+		empty_lbl.modulate = Color(0.62, 0.70, 0.80, 0.85)
+		empty_lbl.add_theme_font_size_override("font_size", 11)
+		_mp_rooms_list.add_child(empty_lbl)
+		return
+	for r_item: Variant in joinable:
+		var rm := r_item as Dictionary
+		var r_code: String = str(rm.get("code", ""))
+		var h_name: String = str(rm.get("host_name", "Host"))
+		var p_cnt: int = int(rm.get("players", 0))
+		var m_cnt: int = int(rm.get("max_players", 16))
+		var tm_tag := " · Teams" if bool(rm.get("team_mode", false)) else ""
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 6)
+		var lbl := Label.new()
+		lbl.text = "%s · %s (%d/%d%s)" % [r_code, h_name, p_cnt, m_cnt, tm_tag]
+		lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		lbl.clip_text = true
+		lbl.add_theme_font_size_override("font_size", 11)
+		row.add_child(lbl)
+		var j_btn := Button.new()
+		j_btn.text = "Join"
+		ThemeFactory.apply_button_variant(j_btn, "primary")
+		var code_cap := r_code
+		j_btn.pressed.connect(func() -> void:
+			AudioManager.play_ui_tap()
+			mp_room_edit.text = code_cap
+			var cfg: Dictionary = get_spawn_config()
+			save_player_name(str(cfg.get("name", "")))
+			mp_connect_requested.emit(get_mp_server_url(), code_cap, str(cfg.get("name", "Commander")))
+		)
+		row.add_child(j_btn)
+		_mp_rooms_list.add_child(row)
 
 
 func on_mp_spawn_phase(seconds_left: float) -> void:
@@ -2239,11 +2430,13 @@ func refresh_leaderboard() -> void:
 		lb_victory_lbl.visible = false
 
 
-func show_toast(msg: String, is_alert: bool = true) -> void:
+func show_toast(msg: String, is_alert: bool = true, focus_world_pos: Vector2 = Vector2(-1.0, -1.0)) -> void:
 	toast_label.text = msg
 	toast_label.modulate = Color(1.0, 0.74, 0.70) if is_alert else Color(0.70, 0.96, 0.80)
+	_last_toast_world_pos = focus_world_pos
+	toast_panel.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if focus_world_pos.x >= 0.0 else Control.CURSOR_ARROW
 	toast_panel.visible = true
-	_toast_timer = 3.2
+	_toast_timer = 3.6
 
 
 func _on_map_mode_pressed() -> void:
@@ -2327,7 +2520,9 @@ func show_victory_screen(winner_id: int, pct: float) -> void:
 	var winner: NationData = _world_state.get_nation(winner_id)
 	var w_name: String = winner.name if winner != null else "Nation #%d" % winner_id
 	var w_col: Color = winner.color if winner != null else Color.GOLD
-	var is_player_win: bool = (winner_id == _world_state.player_nation_id)
+	var is_player_win: bool = (winner_id == _world_state.player_nation_id) or (
+		_world_state.winner_team_id > 0 and _world_state.get_player_nation() != null and _world_state.get_player_nation().team_id == _world_state.winner_team_id
+	)
 	_victory_avatar_frames.clear()
 	if is_player_win and not _local_avatar_frames.is_empty():
 		_victory_avatar_frames = _local_avatar_frames.duplicate()
@@ -2341,10 +2536,22 @@ func show_victory_screen(winner_id: int, pct: float) -> void:
 			victory_icon.texture = _victory_avatar_frames[0] as Texture2D
 	if _victory_avatar_frames.is_empty():
 		victory_icon.texture = _build_tinted_icon(_tex_banner, _tex_banner_mask, w_col, 24, 24)
-	victory_title.text = "WORLD VICTORY" if is_player_win else "MATCH CONCLUDED"
+	if _world_state.winner_team_id > 0:
+		victory_title.text = "TEAM VICTORY" if is_player_win else "TEAM MATCH CONCLUDED"
+		victory_sub.text = "Team %d unified %.1f%% of Earth!" % [_world_state.winner_team_id, pct]
+	else:
+		victory_title.text = "WORLD VICTORY" if is_player_win else "MATCH CONCLUDED"
+		victory_sub.text = "%s unified %.1f%% of Earth!" % [w_name, pct]
 	victory_title.modulate = Color(1.0, 0.88, 0.42) if is_player_win else Color(0.84, 0.90, 0.98)
-	victory_sub.text = "%s unified %.1f%% of Earth!" % [w_name, pct]
-	if winner != null:
+	var p_n: NationData = _world_state.get_player_nation()
+	if p_n != null:
+		victory_stats.text = "Your Peak: %.1f%%  ·  Earned: %s  ·  Nukes: %d Fired / %d Intercepted" % [
+			maxf(p_n.peak_territory_percent, p_n.territory_percent),
+			StructureData.format_pesos(p_n.total_gold_earned),
+			p_n.nukes_launched,
+			p_n.nukes_intercepted,
+		]
+	elif winner != null:
 		victory_stats.text = "Treasury: %s Pesos  ·  Standing Army: %d  ·  Structures: %d" % [
 			StructureData.format_pesos(winner.gold),
 			int(round(winner.troops)),
@@ -2352,7 +2559,306 @@ func show_victory_screen(winner_id: int, pct: float) -> void:
 		]
 	else:
 		victory_stats.text = "World Control: %.1f%%" % pct
+	_victory_history = _world_state.match_history.duplicate(true)
+	if _victory_chart != null:
+		_victory_chart.visible = _victory_history.size() >= 2
+		_victory_chart.queue_redraw()
 	victory_overlay.visible = true
+
+
+func _setup_extra_hud_panels() -> void:
+	# 1. Click-to-jump on ToastPanel + Fullscreen Off-Screen Threat Arrow Overlay
+	toast_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	toast_panel.gui_input.connect(func(ev: InputEvent) -> void:
+		if ev is InputEventMouseButton and (ev as InputEventMouseButton).pressed and (ev as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
+			if _last_toast_world_pos.x >= 0.0:
+				AudioManager.play_ui_tap()
+				camera_focus_requested.emit(_last_toast_world_pos, 2.2)
+	)
+	_threat_overlay = Control.new()
+	_threat_overlay.name = "ThreatEdgeOverlay"
+	_threat_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_threat_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_threat_overlay.draw.connect(_on_threat_overlay_draw)
+	_threat_overlay.gui_input.connect(_on_threat_overlay_input)
+	root_control.add_child(_threat_overlay)
+	root_control.move_child(_threat_overlay, 0)
+
+	# 2. Extend AudioPopover with persistent Window Mode & UI Scale controls
+	var avbox := audio_popover.get_node_or_null("VBox") as VBoxContainer
+	if avbox != null:
+		var sep := HSeparator.new()
+		avbox.add_child(sep)
+		var disp_row := HBoxContainer.new()
+		var disp_lbl := Label.new()
+		disp_lbl.text = "Display"
+		disp_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		disp_row.add_child(disp_lbl)
+		_display_mode_option = OptionButton.new()
+		_display_mode_option.add_item("Windowed", 0)
+		_display_mode_option.add_item("Borderless", 1)
+		_display_mode_option.add_item("Fullscreen", 2)
+		_display_mode_option.item_selected.connect(func(idx: int) -> void:
+			AudioManager.play_ui_tap()
+			_apply_display_mode(idx, true)
+		)
+		disp_row.add_child(_display_mode_option)
+		avbox.add_child(disp_row)
+
+		var sc_row := HBoxContainer.new()
+		var sc_lbl := Label.new()
+		sc_lbl.text = "UI Scale"
+		sc_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		sc_row.add_child(sc_lbl)
+		_ui_scale_option = OptionButton.new()
+		_ui_scale_option.add_item("90%", 0)
+		_ui_scale_option.add_item("100%", 1)
+		_ui_scale_option.add_item("115%", 2)
+		_ui_scale_option.select(1)
+		_ui_scale_option.item_selected.connect(func(idx: int) -> void:
+			AudioManager.play_ui_tap()
+			_apply_ui_scale(idx, true)
+		)
+		sc_row.add_child(_ui_scale_option)
+		avbox.add_child(sc_row)
+
+	# 3. Extend MpLobbyCard with Quick Play, Public Lobbies browser, and Team Mode controls
+	var mp_vbox := mp_lobby_card.get_node_or_null("VBox") as VBoxContainer
+	if mp_vbox != null:
+		var qp_row := HBoxContainer.new()
+		qp_row.add_theme_constant_override("separation", 6)
+		var qp_btn := Button.new()
+		qp_btn.text = "Quick Play"
+		qp_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		ThemeFactory.apply_button_variant(qp_btn, "primary")
+		qp_btn.pressed.connect(func() -> void:
+			AudioManager.play_ui_tap()
+			mp_status_label.text = "Finding public match..."
+			mp_quickplay_requested.emit()
+		)
+		qp_row.add_child(qp_btn)
+		var ref_btn := Button.new()
+		ref_btn.text = "Refresh Rooms"
+		ThemeFactory.apply_button_variant(ref_btn, "secondary")
+		ref_btn.pressed.connect(func() -> void:
+			AudioManager.play_ui_tap()
+			mp_rooms_refresh_requested.emit()
+		)
+		qp_row.add_child(ref_btn)
+		mp_vbox.add_child(qp_row)
+		mp_vbox.move_child(qp_row, mini(2, mp_vbox.get_child_count() - 1))
+
+		var opt_row := HBoxContainer.new()
+		opt_row.add_theme_constant_override("separation", 8)
+		_mp_public_check = CheckBox.new()
+		_mp_public_check.text = "Public Room"
+		_mp_public_check.button_pressed = true
+		_mp_team_mode_check = CheckBox.new()
+		_mp_team_mode_check.text = "Team Mode"
+		_mp_team_option = OptionButton.new()
+		_mp_team_option.add_item("Free-For-All", 0)
+		for ti in range(1, 5):
+			_mp_team_option.add_item("Team %d" % ti, ti)
+		_mp_team_option.visible = false
+		var emit_opts := func() -> void:
+			if _mp_syncing_opts:
+				return
+			_mp_team_option.visible = _mp_team_mode_check.button_pressed
+			mp_room_options_changed.emit(_mp_public_check.button_pressed, _mp_team_mode_check.button_pressed)
+		_mp_public_check.toggled.connect(func(_v: bool) -> void: emit_opts.call())
+		_mp_team_mode_check.toggled.connect(func(_v: bool) -> void: emit_opts.call())
+		_mp_team_option.item_selected.connect(func(idx: int) -> void:
+			if not _mp_syncing_opts:
+				mp_team_selected.emit(idx)
+		)
+		opt_row.add_child(_mp_public_check)
+		opt_row.add_child(_mp_team_mode_check)
+		opt_row.add_child(_mp_team_option)
+		mp_vbox.add_child(opt_row)
+
+		var scroller := ScrollContainer.new()
+		scroller.custom_minimum_size = Vector2(0, 76)
+		_mp_rooms_list = VBoxContainer.new()
+		_mp_rooms_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		scroller.add_child(_mp_rooms_list)
+		mp_vbox.add_child(scroller)
+
+	# 4. Extend VictoryCard with Territory Timelapse Chart
+	var v_vbox := victory_overlay.get_node_or_null("Center/VictoryCard/VBox") as VBoxContainer
+	if v_vbox != null:
+		_victory_chart = Control.new()
+		_victory_chart.name = "VictoryTerritoryChart"
+		_victory_chart.custom_minimum_size = Vector2(440, 120)
+		_victory_chart.visible = false
+		_victory_chart.draw.connect(_on_victory_chart_draw)
+		v_vbox.add_child(_victory_chart)
+		v_vbox.move_child(_victory_chart, maxi(0, v_vbox.get_child_count() - 2))
+
+
+func _snap_camera_to_capital() -> void:
+	if _world_state == null:
+		return
+	var p_n: NationData = _world_state.get_player_nation()
+	if p_n == null or not p_n.alive:
+		return
+	var cap: Vector2i = p_n.capital_cell
+	if cap.x < 0:
+		cap = _world_state.get_nation_label_cell(p_n.id)
+	if cap.x >= 0:
+		camera_focus_requested.emit(_world_state.sim_to_world(cap), 2.2)
+		AudioManager.play_ui_tap()
+
+
+func _toggle_fullscreen_hotkey() -> void:
+	var cur := DisplayServer.window_get_mode()
+	var next_idx: int = 0 if cur == DisplayServer.WINDOW_MODE_FULLSCREEN else 2
+	if _display_mode_option != null:
+		_display_mode_option.select(next_idx)
+	_apply_display_mode(next_idx, true)
+
+
+func _apply_display_mode(idx: int, save_cfg: bool) -> void:
+	if DisplayServer.get_name() == "headless":
+		return
+	match idx:
+		1:
+			DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, true)
+			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_MAXIMIZED)
+		2:
+			DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, false)
+			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+		_:
+			DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, false)
+			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+	if save_cfg:
+		var cfg := ConfigFile.new()
+		cfg.load(PROFILE_SAVE_PATH)
+		cfg.set_value("display", "mode", idx)
+		cfg.save(PROFILE_SAVE_PATH)
+
+
+func _apply_ui_scale(idx: int, save_cfg: bool) -> void:
+	var scales := [0.90, 1.0, 1.15]
+	var factor: float = scales[clampi(idx, 0, scales.size() - 1)]
+	if DisplayServer.get_name() != "headless":
+		get_tree().root.content_scale_factor = factor
+	if save_cfg:
+		var cfg := ConfigFile.new()
+		cfg.load(PROFILE_SAVE_PATH)
+		cfg.set_value("display", "ui_scale_idx", idx)
+		cfg.save(PROFILE_SAVE_PATH)
+
+
+func _apply_saved_display_settings() -> void:
+	var cfg := ConfigFile.new()
+	if cfg.load(PROFILE_SAVE_PATH) != OK:
+		return
+	var d_idx: int = clampi(int(cfg.get_value("display", "mode", 0)), 0, 2)
+	var s_idx: int = clampi(int(cfg.get_value("display", "ui_scale_idx", 1)), 0, 2)
+	if _display_mode_option != null:
+		_display_mode_option.select(d_idx)
+	if _ui_scale_option != null:
+		_ui_scale_option.select(s_idx)
+	if d_idx != 0:
+		_apply_display_mode(d_idx, false)
+	if s_idx != 1:
+		_apply_ui_scale(s_idx, false)
+
+
+func _refresh_offscreen_threats() -> void:
+	if _threat_overlay == null:
+		return
+	_threat_markers.clear()
+	if _world_state == null or _world_state.match_phase != WorldState.PHASE_PLAYING or menu_overlay.visible:
+		_threat_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_threat_overlay.queue_redraw()
+		return
+	var vp_rect: Rect2 = get_viewport().get_visible_rect()
+	var xform: Transform2D = get_viewport().get_canvas_transform()
+	var p_id: int = _world_state.player_nation_id
+	var candidates: Array[Dictionary] = []
+
+	for mid: int in _world_state.missiles.keys():
+		var m: MissileUnit = _world_state.missiles[mid]
+		if m.active and m.kind != MissileUnit.KIND_SAM and m.nation_id != p_id and m.target_nation_id == p_id:
+			candidates.append({"world": m.pos, "label": "NUKE"})
+	for sid: int in _world_state.ships.keys():
+		var sh: ShipUnit = _world_state.ships[sid]
+		if sh.active and sh.kind == ShipUnit.KIND_LANDING and sh.nation_id != p_id and sh.target_owner_id == p_id:
+			candidates.append({"world": sh.position, "label": "LANDING"})
+	if _world_state.last_player_threat_world_pos.x >= 0.0 and candidates.is_empty():
+		candidates.append({"world": _world_state.last_player_threat_world_pos, "label": "ATTACK"})
+
+	for item: Dictionary in candidates:
+		var wp: Vector2 = item["world"] as Vector2
+		var sp: Vector2 = xform * wp
+		if vp_rect.grow(-24.0).has_point(sp):
+			continue
+		var center: Vector2 = vp_rect.size * 0.5
+		var dir: Vector2 = (sp - center).normalized()
+		var edge_pos := Vector2(
+			clampf(center.x + dir.x * (vp_rect.size.x * 0.44), 28.0, vp_rect.size.x - 28.0),
+			clampf(center.y + dir.y * (vp_rect.size.y * 0.40), 58.0, vp_rect.size.y - 110.0)
+		)
+		_threat_markers.append({"screen": edge_pos, "dir": dir, "world": wp, "label": item["label"]})
+		if _threat_markers.size() >= 4:
+			break
+	_threat_overlay.mouse_filter = Control.MOUSE_FILTER_PASS if not _threat_markers.is_empty() else Control.MOUSE_FILTER_IGNORE
+	_threat_overlay.queue_redraw()
+
+
+func _on_threat_overlay_draw() -> void:
+	if _threat_markers.is_empty():
+		return
+	var font: Font = ThemeDB.fallback_font
+	for mk: Dictionary in _threat_markers:
+		var sp: Vector2 = mk["screen"] as Vector2
+		var dir: Vector2 = mk["dir"] as Vector2
+		var perp := Vector2(-dir.y, dir.x)
+		var tri := PackedVector2Array([sp + dir * 13.0, sp - dir * 8.0 + perp * 9.0, sp - dir * 8.0 - perp * 9.0])
+		_threat_overlay.draw_colored_polygon(tri, Color(1.0, 0.28, 0.34, 0.94))
+		if font != null:
+			_threat_overlay.draw_string(font, sp + Vector2(-18.0, 22.0), str(mk["label"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1.0, 0.78, 0.72, 0.96))
+
+
+func _on_threat_overlay_input(ev: InputEvent) -> void:
+	if ev is InputEventMouseButton and (ev as InputEventMouseButton).pressed and (ev as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
+		var click_pos: Vector2 = (ev as InputEventMouseButton).position
+		for mk: Dictionary in _threat_markers:
+			if click_pos.distance_to(mk["screen"] as Vector2) <= 22.0:
+				AudioManager.play_ui_tap()
+				camera_focus_requested.emit(mk["world"] as Vector2, 2.2)
+				get_viewport().set_input_as_handled()
+				return
+
+
+func _on_victory_chart_draw() -> void:
+	if _victory_chart == null or _victory_history.size() < 2 or _world_state == null:
+		return
+	var sz: Vector2 = _victory_chart.size
+	var plot := Rect2(Vector2(34.0, 12.0), Vector2(maxf(40.0, sz.x - 46.0), maxf(30.0, sz.y - 30.0)))
+	_victory_chart.draw_rect(Rect2(Vector2.ZERO, sz), Color(0.06, 0.08, 0.11, 0.85), true)
+	_victory_chart.draw_rect(Rect2(Vector2.ZERO, sz), Color(0.24, 0.30, 0.38, 0.9), false, 1.0)
+	for g in [0.25, 0.5, 0.75, 1.0]:
+		var gy: float = plot.position.y + plot.size.y * (1.0 - g)
+		_victory_chart.draw_line(Vector2(plot.position.x, gy), Vector2(plot.end.x, gy), Color(0.22, 0.26, 0.34, 0.5), 1.0)
+	var font: Font = ThemeDB.fallback_font
+	if font != null:
+		_victory_chart.draw_string(font, Vector2(6.0, plot.position.y + 10.0), "80%", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.68, 0.74, 0.82))
+		_victory_chart.draw_string(font, Vector2(6.0, plot.end.y), "0%", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.68, 0.74, 0.82))
+
+	var n_count: int = _victory_history.size()
+	for nid: int in _world_state.nations.keys():
+		var nd: NationData = _world_state.nations[nid]
+		var pts := PackedVector2Array()
+		for i in range(n_count):
+			var snap: Dictionary = _victory_history[i].get("nations", {}) as Dictionary
+			var pct_v: float = float(snap.get(nid, 0.0))
+			var px: float = plot.position.x + (float(i) / float(maxi(1, n_count - 1))) * plot.size.x
+			var py: float = plot.end.y - clampf(pct_v / 85.0, 0.0, 1.0) * plot.size.y
+			pts.append(Vector2(px, py))
+		if pts.size() >= 2:
+			_victory_chart.draw_polyline(pts, nd.color, 2.4 if nid == _world_state.player_nation_id else 1.4, true)
 
 
 func _on_radial_wheel_draw() -> void:

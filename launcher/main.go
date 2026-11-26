@@ -28,6 +28,7 @@ const (
 	patchesDirName   = "patches"
 	clientExeName    = "WorldWarPixel-Client.exe"
 	clientPckName    = "WorldWarPixel-Client.pck"
+	launcherExeName  = "WorldWarPixel.exe"
 	versionFileName  = "version.txt"
 	patchNotesName   = "PATCH_NOTES.md"
 	userAgent        = "WorldWarPixel-Launcher/2.0"
@@ -106,6 +107,7 @@ func run(args []string) int {
 		showErrorBox("World War Pixel", fmt.Sprintf("Failed to resolve launcher path: %v", err))
 		return 1
 	}
+	cleanupOldLauncherExe(exePath)
 	exeDir := filepath.Dir(exePath)
 
 	skipUpdate, waitForChild, openHub, forwardArgs := parseArgs(args)
@@ -911,12 +913,154 @@ func executeUpdatePlan(ctx context.Context, cfg launcherConfig, plan updatePlan,
 		if err := applyStagedUpdate(stageDir, cfg.GameDir, plan.TagName); err != nil {
 			return err
 		}
+		if strings.HasSuffix(strings.ToLower(plan.Payload.Name), ".zip") && cfg.ExeDir != "" {
+			stagedLauncher := filepath.Join(tmpDir, launcherExeName)
+			if found, err := maybeExtractLauncherUpdate(payloadPath, stagedLauncher, maxPayloadBytes); err == nil && found {
+				targetLauncher := filepath.Join(cfg.ExeDir, launcherExeName)
+				if fileExists(targetLauncher) {
+					_ = applyLauncherSelfUpdate(targetLauncher, stagedLauncher)
+				}
+			}
+		}
 	}
 
 	if onStatus != nil {
 		onStatus(fmt.Sprintf("Ready · World War Pixel %s installed.", plan.TagName), 100)
 	}
 	return nil
+}
+
+func cleanupOldLauncherExe(exePath string) {
+	if exePath == "" {
+		return
+	}
+	_ = os.Remove(exePath + ".old")
+}
+
+// applyLauncherSelfUpdate swaps the running Windows launcher binary safely via .old rename.
+func applyLauncherSelfUpdate(currentExePath, newExePath string) error {
+	if currentExePath == "" || newExePath == "" || !fileExists(newExePath) {
+		return nil
+	}
+	absCur, err1 := filepath.Abs(currentExePath)
+	absNew, err2 := filepath.Abs(newExePath)
+	if err1 == nil && err2 == nil && strings.EqualFold(absCur, absNew) {
+		return nil
+	}
+	oldExe := currentExePath + ".old"
+	_ = os.Remove(oldExe)
+	hadCur := fileExists(currentExePath)
+	if hadCur {
+		if err := os.Rename(currentExePath, oldExe); err != nil {
+			return fmt.Errorf("failed to stage launcher binary rename: %w", err)
+		}
+	}
+	if err := copyFile(newExePath, currentExePath); err != nil {
+		if hadCur {
+			_ = os.Remove(currentExePath)
+			_ = os.Rename(oldExe, currentExePath)
+		}
+		return err
+	}
+	_ = os.Remove(newExePath)
+	return nil
+}
+
+func maybeExtractLauncherUpdate(zipPath, destExePath string, maxBytes int64) (bool, error) {
+	r, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return false, err
+	}
+	defer r.Close()
+
+	for _, f := range r.File {
+		norm, err := sanitizeZipPath(f.Name)
+		if err != nil || f.FileInfo().IsDir() {
+			continue
+		}
+		if !strings.EqualFold(norm, launcherExeName) {
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(destExePath), 0755); err != nil {
+			return false, err
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return false, err
+		}
+		outFile, err := os.OpenFile(destExePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+		if err != nil {
+			rc.Close()
+			return false, err
+		}
+		n, copyErr := io.Copy(outFile, io.LimitReader(rc, maxBytes+1))
+		closeErr := outFile.Close()
+		rc.Close()
+		if copyErr != nil {
+			return false, copyErr
+		}
+		if closeErr != nil {
+			return false, closeErr
+		}
+		if n > maxBytes {
+			_ = os.Remove(destExePath)
+			return false, fmt.Errorf("launcher binary exceeds %d byte safety limit", maxBytes)
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
+func buildRepairPlan(ctx context.Context, cfg launcherConfig) (updatePlan, error) {
+	client := cfg.HTTPClient
+	if client == nil {
+		client = &http.Client{}
+	}
+	if cfg.CheckTimeout <= 0 {
+		cfg.CheckTimeout = checkTimeout
+	}
+
+	plan := updatePlan{
+		Kind:         updateNone,
+		LocalVersion: readLocalVersion(filepath.Join(cfg.GameDir, versionFileName)),
+		HasClient:    fileExists(filepath.Join(cfg.GameDir, clientExeName)),
+	}
+
+	releases, statusCode, err := fetchReleases(ctx, client, cfg.APIBase, cfg.Repo, cfg.CheckTimeout)
+	if err != nil || statusCode == http.StatusNotFound || len(releases) == 0 {
+		if err != nil {
+			return plan, err
+		}
+		return plan, fmt.Errorf("no published release found in %s", cfg.Repo)
+	}
+
+	latest := releases[0]
+	plan.TagName = latest.TagName
+	plan.ReleaseNotes = formatPatchNotes(releases, cfg.GameDir, cfg.ExeDir)
+
+	kind, payload, checksum := selectPatchOrClientAssets(latest.Assets, false)
+	if payload == nil || kind == updateNone {
+		return plan, fmt.Errorf("release %s does not include a downloadable Windows client archive", latest.TagName)
+	}
+	plan.Kind = kind
+	plan.Payload = payload
+	plan.Checksum = checksum
+	return plan, nil
+}
+
+func repairGameFiles(ctx context.Context, cfg launcherConfig, onStatus func(status string, pct int)) (string, error) {
+	if onStatus != nil {
+		onStatus("Verifying latest release manifest...", 4)
+	}
+	plan, err := buildRepairPlan(ctx, cfg)
+	if err != nil {
+		return "", err
+	}
+	_ = os.RemoveAll(filepath.Join(cfg.GameDir, patchesDirName))
+	if err := executeUpdatePlan(ctx, cfg, plan, onStatus); err != nil {
+		return "", err
+	}
+	return plan.TagName, nil
 }
 
 func checkAndUpdate(ctx context.Context, cfg launcherConfig, ui progressUI) error {
