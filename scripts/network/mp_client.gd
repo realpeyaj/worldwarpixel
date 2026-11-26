@@ -8,11 +8,13 @@ const DEFAULT_SERVER_URL := "ws://151.242.136.18:30041/ws"
 signal connected_to_room(room_code: String, nation_id: int, token: String, is_host: bool)
 signal lobby_updated(room_code: String, phase: String, players: Array, ai_count: int, is_host: bool)
 signal room_options_updated(is_public: bool, team_mode: bool)
+signal room_modifiers_updated(options: Dictionary)
 signal spawn_phase_started(seconds_left: float, players: Array)
 signal match_begun(seed: int, local_nation_id: int, ai_count: int, players: Array)
 signal tick_batch_received(from_tick: int, to_tick: int, commands: Array)
 signal snapshot_received(payload: Dictionary)
 signal map_ping_received(from_nation_id: int, from_name: String, team_id: int, cell: Vector2i, kind: String)
+signal chat_msg_received(from_nation_id: int, from_name: String, team_id: int, channel: String, text: String)
 signal ping_updated(ping_ms: int)
 signal invite_received(from_name: String, room_code: String)
 signal disconnected(reason: String)
@@ -31,17 +33,27 @@ var _seq: int = 0
 var _was_connected: bool = false
 var _in_match: bool = false
 var _manual_disconnect: bool = false
+var _spectate: bool = false
+var is_spectator: bool = false
+var last_match_options: Dictionary = {}
 var _reconnect_timer: float = 0.0
 var _reconnect_attempts: int = 0
 var last_ping_ms: int = -1
 var _ping_timer: float = 0.0
 
 
-func connect_to_room(ws_url: String, room_code: String, player_name: String, reconnect_token: String = "", account_token: String = "") -> int:
+static func resolve_default_ws_url() -> String:
+	var env_url: String = OS.get_environment("WWP_SERVER_URL").strip_edges()
+	if not env_url.is_empty():
+		return env_url
+	return DEFAULT_SERVER_URL
+
+
+func connect_to_room(ws_url: String, room_code: String, player_name: String, reconnect_token: String = "", account_token: String = "", spectate: bool = false) -> int:
 	disconnect_from_server(false)
 	var clean_url: String = ws_url.strip_edges()
 	if clean_url.is_empty():
-		clean_url = DEFAULT_SERVER_URL
+		clean_url = resolve_default_ws_url()
 	_last_url = clean_url
 	_last_room = room_code.strip_edges().to_upper()
 	_last_name = player_name.strip_edges()
@@ -49,6 +61,8 @@ func connect_to_room(ws_url: String, room_code: String, player_name: String, rec
 		_last_name = "Commander"
 	_reconnect_token = reconnect_token
 	_account_token = account_token.strip_edges()
+	_spectate = spectate
+	is_spectator = spectate
 	_seq = 0
 	_was_connected = false
 	_in_match = false
@@ -65,6 +79,8 @@ func _open_socket() -> int:
 	var full_url: String = "%s%sroom=%s&name=%s" % [
 		_last_url, sep, _last_room.uri_encode(), _last_name.uri_encode()
 	]
+	if _spectate:
+		full_url += "&spectate=1"
 	if not _reconnect_token.is_empty():
 		full_url += "&token=" + _reconnect_token.uri_encode()
 	if not _account_token.is_empty():
@@ -153,6 +169,7 @@ func _handle_message(msg: Dictionary) -> void:
 			_local_nation_id = int(msg.get("nation_id", 1))
 			_reconnect_token = str(msg.get("reconnect_token", _reconnect_token))
 			_is_host = bool(msg.get("is_host", false))
+			is_spectator = bool(msg.get("spectator", _spectate))
 			connected_to_room.emit(_room_code, _local_nation_id, _reconnect_token, _is_host)
 
 		"lobby_state":
@@ -161,6 +178,8 @@ func _handle_message(msg: Dictionary) -> void:
 			for pv: Variant in players:
 				if pv is Dictionary and int((pv as Dictionary).get("nation_id", 0)) == _local_nation_id:
 					_is_host = bool((pv as Dictionary).get("is_host", _is_host))
+			if msg.get("options") is Dictionary:
+				last_match_options = (msg.get("options") as Dictionary).duplicate()
 			lobby_updated.emit(
 				_room_code,
 				str(msg.get("phase", "LOBBY")),
@@ -169,6 +188,7 @@ func _handle_message(msg: Dictionary) -> void:
 				_is_host
 			)
 			room_options_updated.emit(bool(msg.get("is_public", true)), bool(msg.get("team_mode", false)))
+			room_modifiers_updated.emit(last_match_options)
 
 		"map_ping":
 			map_ping_received.emit(
@@ -179,11 +199,22 @@ func _handle_message(msg: Dictionary) -> void:
 				str(msg.get("kind", "attack"))
 			)
 
+		"chat_msg":
+			chat_msg_received.emit(
+				int(msg.get("from_nation_id", 0)),
+				str(msg.get("from_name", "Commander")),
+				int(msg.get("team_id", 0)),
+				str(msg.get("channel", "all")),
+				str(msg.get("text", ""))
+			)
+
 		"spawn_phase":
 			spawn_phase_started.emit(float(msg.get("seconds_left", 10.0)), msg.get("players", []))
 
 		"match_begin":
 			_in_match = true
+			if msg.get("options") is Dictionary:
+				last_match_options = (msg.get("options") as Dictionary).duplicate()
 			match_begun.emit(
 				int(msg.get("seed", 1)),
 				_local_nation_id,
@@ -200,6 +231,10 @@ func _handle_message(msg: Dictionary) -> void:
 
 		"match_snapshot":
 			_in_match = true
+			if msg.has("spectator"):
+				is_spectator = bool(msg.get("spectator", false))
+			if msg.get("options") is Dictionary:
+				last_match_options = (msg.get("options") as Dictionary).duplicate()
 			snapshot_received.emit(msg)
 
 		"pong":
@@ -239,6 +274,20 @@ func send_set_team(team_id: int) -> void:
 
 func send_room_options(is_public: bool, team_mode: bool) -> void:
 	_send_json({"type": "set_room_options", "is_public": is_public, "team_mode": team_mode})
+
+
+func send_room_modifiers(opts: Dictionary) -> void:
+	var payload := {"type": "set_room_options"}
+	for k: String in opts.keys():
+		payload[k] = opts[k]
+	_send_json(payload)
+
+
+func send_chat_message(channel: String, text: String) -> void:
+	var clean: String = text.strip_edges()
+	if clean.is_empty():
+		return
+	_send_json({"type": "chat_msg", "channel": channel, "text": clean.substr(0, 160)})
 
 
 func send_map_ping(cell: Vector2i, kind: String = "attack") -> void:

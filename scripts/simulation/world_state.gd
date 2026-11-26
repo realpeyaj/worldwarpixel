@@ -132,6 +132,10 @@ var factory_links: Array[Dictionary] = []
 
 var match_seed: int = 0
 var winner_team_id: int = 0
+var game_speed: float = 1.0
+var no_nukes: bool = false
+var ai_difficulty: String = "normal"
+var start_preset: String = "standard"
 var match_history: Array[Dictionary] = []
 var last_player_threat_world_pos: Vector2 = Vector2(-1.0, -1.0)
 var _rng := RandomNumberGenerator.new()
@@ -235,6 +239,10 @@ func reset_match() -> void:
 	player_nation_id = 1
 	winner_nation_id = 0
 	winner_team_id = 0
+	game_speed = 1.0
+	no_nukes = false
+	ai_difficulty = "normal"
+	start_preset = "standard"
 	match_history.clear()
 	last_player_threat_world_pos = Vector2(-1.0, -1.0)
 	current_tick = 0
@@ -444,6 +452,16 @@ func _spawn_ai_nations(ai_count: int, spawned_pts: Array[Vector2i], palette: Arr
 		ai_idx += 1
 
 
+func _apply_match_options(opts: Dictionary) -> void:
+	var spd: float = float(opts.get("game_speed", 1.0))
+	game_speed = spd if spd in [1.0, 1.5, 2.0] else 1.0
+	no_nukes = bool(opts.get("no_nukes", false))
+	var diff: String = str(opts.get("ai_difficulty", "normal")).to_lower()
+	ai_difficulty = diff if diff in ["normal", "hard", "brutal"] else "normal"
+	var preset: String = str(opts.get("start_preset", "standard")).to_lower()
+	start_preset = preset if preset in ["standard", "fast", "sandbox"] else "standard"
+
+
 func _cmd_spawn_player(cmd: Dictionary) -> Dictionary:
 	if match_phase != PHASE_SPAWN_SELECT:
 		return _reject("Match has already started.")
@@ -451,6 +469,8 @@ func _cmd_spawn_player(cmd: Dictionary) -> Dictionary:
 	var sy: int = int(cmd.get("y", -1))
 	if not is_land_cell(sx, sy):
 		return _reject("Cannot spawn in ocean or lakes — click any landmass (including islands or Antarctica).")
+
+	_apply_match_options(cmd.get("options", cmd) as Dictionary)
 
 	var p_name: String = str(cmd.get("name", "Terran Vanguard")).strip_edges()
 	if p_name.is_empty():
@@ -480,6 +500,7 @@ func _cmd_spawn_player(cmd: Dictionary) -> Dictionary:
 
 func _cmd_start_mp_match(cmd: Dictionary) -> Dictionary:
 	reset_match()
+	_apply_match_options(cmd.get("options", cmd) as Dictionary)
 	match_seed = int(cmd.get("seed", 1))
 	_rng.seed = match_seed
 
@@ -547,6 +568,14 @@ func _create_nation(n_name: String, col: Color, is_player: bool, center: Vector2
 	n.gold = 125000.0
 	n.troops = 1500.0
 	n.max_troops = 3200.0
+	if start_preset == "fast":
+		n.gold = 500000.0
+		n.troops = 3000.0
+		n.max_troops = 5500.0
+	elif start_preset == "sandbox":
+		n.gold = 5000000.0
+		n.troops = 6000.0
+		n.max_troops = 10000.0
 	nations[nid] = n
 	_nation_borders[nid] = {}
 	_nation_coasts[nid] = {}
@@ -1399,6 +1428,8 @@ func can_place_structure(nid: int, s_type: String, sx: int, sy: int) -> Dictiona
 		StructureData.TYPE_SAM_LAUNCHER,
 	]):
 		return {"ok": false, "reason": "Unknown structure type."}
+	if no_nukes and (s_type == StructureData.TYPE_MISSILE_SILO or s_type == StructureData.TYPE_SAM_LAUNCHER):
+		return {"ok": false, "reason": "Silos and SAMs are disabled (Conventional Mode)."}
 	var nation: NationData = nations.get(nid, null)
 	if nation == null or not nation.alive:
 		return {"ok": false, "reason": "Invalid nation."}
@@ -3141,7 +3172,8 @@ func _cmd_build_warship(cmd: Dictionary) -> Dictionary:
 	var start_w: Vector2 = sea_pathfinder.nav_to_world(port.water_cell)
 	ship.position = start_w
 	ship.patrol_center = start_w
-	ship.speed_px_per_sec = 18.5 + float(port.level) * 0.55
+	ship.base_speed_px_per_sec = (18.5 + float(port.level) * 0.55) * 0.55
+	ship.refresh_warship_speed()
 	ship.hp = 100.0
 	ship.max_hp = 100.0
 	ship.manual_moving = false
@@ -3230,6 +3262,8 @@ func find_ready_silo(nid: int, target_cell: Vector2i, preferred_sid: int = 0) ->
 func _cmd_launch_missile(cmd: Dictionary) -> Dictionary:
 	if match_phase != PHASE_PLAYING:
 		return _reject("Match is not active.")
+	if no_nukes:
+		return _reject("Nuclear missiles are disabled (Conventional Mode).")
 	var nid: int = int(cmd.get("nation_id", 0))
 	var nation: NationData = nations.get(nid, null)
 	if nation == null or not nation.alive:

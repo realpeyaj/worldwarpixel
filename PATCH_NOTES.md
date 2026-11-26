@@ -1,5 +1,12 @@
 # World War Pixel — Patch Notes
 
+## v1.2.0 — Placement Previews, Global Rankings, Modifiers, Replays & Combat Balance
+- **Actual In-Game Missiles & Exact Blast Previews**: Rendered rotating SAM interceptors, tactical Atom missiles, heavy H-Bombs, MIRV carrier buses, and re-entry sub-warheads along ballistic arcs while previewing exact destroyed crater zones (and MIRV spreads) before launch.
+- **Factory & Defense Placement Previews**: Hovering a Factory now previews dotted road connections (`+N links`), and hovering a Defense Post shows its exact fortification ring.
+- **Global Leaderboard, Match History & Replays**: Added Top Commanders ELO rankings and personal Match History with deterministic Replay playback (`1× / 2× / 4×`) in-game and in the Launcher Hub.
+- **Live Spectators, Lobby Modifiers & Team Chat**: Hosts can customize Game Speed (`1× / 1.5× / 2×`), Conventional Mode (`No Nukes`), AI Difficulty (`Normal / Hard / Brutal`), and Starting Economy; players can spectate live public matches and communicate via `[ALL]` / `[TEAM]` chat (`Enter` / `Tab`) and Quick Comms.
+- **Warship Balance, Audio & Account Security**: Reduced Warship base speed by 45% (+5% per level-up), upgraded missile launch & anti-air SAM audio, and added **Change Password** across both the launcher and in-game menu.
+
 ## v1.1.0 — Quick Play, Team Mode, Tactical QoL & Account Security
 - **Public Lobbies, Quick Play & Team Mode**: Browse open rooms, click **Quick Play** to auto-join or host an open match, toggle **Team Mode** for shared team alliances/victory, and join friends' rooms straight from the launcher Friends roster.
 - **Tactical Map Pings & Threat Navigation**: Ping coordinates (`Alt + Click`) for teammates, jump straight to attack alerts via toast click or off-screen edge arrows, and see live Lv.1 + allied SAM interception domes before placing a SAM.

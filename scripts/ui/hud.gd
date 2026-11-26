@@ -33,9 +33,17 @@ signal mp_quickplay_requested
 signal mp_rooms_refresh_requested
 signal mp_team_selected(team_id: int)
 signal mp_room_options_changed(is_public: bool, team_mode: bool)
+signal mp_room_modifiers_changed(options: Dictionary)
+signal mp_spectate_requested(room_code: String)
+signal chat_send_requested(channel: String, text: String)
+signal leaderboard_open_requested
+signal watch_replay_requested(match_id: String)
+signal replay_speed_changed(mult: float)
+signal exit_replay_requested
 signal friend_invite_requested(friend_name: String, room_code: String)
 signal account_login_requested(username: String, password: String)
 signal account_register_requested(username: String, password: String)
+signal account_change_password_requested(current_password: String, new_password: String)
 signal account_logout_requested
 signal pfp_file_selected(file_path: String)
 signal friend_search_requested(query: String)
@@ -150,6 +158,34 @@ var _ui_scale_option: OptionButton
 var _victory_chart: Control
 var _victory_history: Array[Dictionary] = []
 var _mp_syncing_opts: bool = false
+var _mp_speed_opt: OptionButton
+var _mp_nonukes_check: CheckBox
+var _mp_diff_opt: OptionButton
+var _mp_preset_opt: OptionButton
+var _sp_speed_opt: OptionButton
+var _sp_nonukes_check: CheckBox
+var _sp_diff_opt: OptionButton
+var _sp_preset_opt: OptionButton
+var _chat_panel: PanelContainer
+var _chat_log: RichTextLabel
+var _chat_input: LineEdit
+var _chat_chan_btn: Button
+var _chat_channel: String = "all"
+var _chat_active: bool = false
+var _rankings_card: PanelContainer
+var _rankings_rows: VBoxContainer
+var _rankings_tab_lb: Button
+var _rankings_tab_hist: Button
+var _rankings_mode: String = "leaderboard"
+var _cached_leaderboard: Array = []
+var _cached_my_matches: Array = []
+var _sec_box: VBoxContainer
+var _sec_cur_edit: LineEdit
+var _sec_new_edit: LineEdit
+var _sec_conf_edit: LineEdit
+var _sec_status_lbl: Label
+var _sec_eye_btn: Button
+var _replay_controls_row: HBoxContainer
 
 @onready var root_control: Control = $Root
 @onready var top_bar: PanelContainer = $Root/TopBar
@@ -914,6 +950,10 @@ func set_account_state(logged_in: bool, acct_username: String, status_msg: Strin
 		login_btn.visible = false
 		register_btn.visible = false
 		logout_btn.visible = true
+		if _sec_box != null:
+			_sec_box.visible = true
+			if _sec_status_lbl != null:
+				_sec_status_lbl.text = ""
 		account_card_status.text = status_msg if not status_msg.is_empty() else "Signed in as %s (permanent name locked)." % _account_username
 	else:
 		menu_name_edit.editable = true
@@ -926,6 +966,12 @@ func set_account_state(logged_in: bool, acct_username: String, status_msg: Strin
 		login_btn.visible = true
 		register_btn.visible = true
 		logout_btn.visible = false
+		if _sec_box != null:
+			_sec_box.visible = false
+			if _sec_cur_edit != null:
+				_sec_cur_edit.text = ""
+				_sec_new_edit.text = ""
+				_sec_conf_edit.text = ""
 		account_card_status.text = status_msg if not status_msg.is_empty() else "Sign in or create a permanent account."
 	_refresh_friends_ui()
 
@@ -1372,6 +1418,16 @@ func _unhandled_input(event: InputEvent) -> void:
 			_toggle_fullscreen_hotkey()
 			get_viewport().set_input_as_handled()
 			return
+		if k_any.pressed and not k_any.echo and _chat_active and _chat_input != null and _chat_panel != null and _chat_panel.visible and not menu_overlay.visible:
+			if k_any.keycode == KEY_ENTER or k_any.keycode == KEY_KP_ENTER:
+				if not _chat_input.has_focus():
+					_chat_input.grab_focus()
+					get_viewport().set_input_as_handled()
+					return
+			elif k_any.keycode == KEY_TAB and _chat_input.has_focus():
+				_toggle_chat_channel()
+				get_viewport().set_input_as_handled()
+				return
 	if _world_state == null or _world_state.match_phase != WorldState.PHASE_PLAYING:
 		return
 	if event is InputEventKey:
@@ -1492,7 +1548,28 @@ func get_spawn_config() -> Dictionary:
 	var ai_id: int = ai_count_option.get_selected_id()
 	if ai_id < 0:
 		ai_id = 6
-	return {"name": n_name, "ai_count": ai_id}
+	var spd := 1.0
+	if _sp_speed_opt != null:
+		var spds := [1.0, 1.5, 2.0]
+		spd = spds[clampi(_sp_speed_opt.selected, 0, spds.size() - 1)]
+	var diff := "normal"
+	if _sp_diff_opt != null:
+		var diffs := ["normal", "hard", "brutal"]
+		diff = diffs[clampi(_sp_diff_opt.selected, 0, diffs.size() - 1)]
+	var preset := "standard"
+	if _sp_preset_opt != null:
+		var presets := ["standard", "fast", "sandbox"]
+		preset = presets[clampi(_sp_preset_opt.selected, 0, presets.size() - 1)]
+	return {
+		"name": n_name,
+		"ai_count": ai_id,
+		"options": {
+			"game_speed": spd,
+			"no_nukes": _sp_nonukes_check != null and _sp_nonukes_check.button_pressed,
+			"ai_difficulty": diff,
+			"start_preset": preset,
+		},
+	}
 
 
 func set_commit_ratio(ratio: float) -> void:
@@ -1539,6 +1616,8 @@ func _sync_hud_chrome_visibility() -> void:
 		world_min_btn.visible = _leaderboard_minimized
 		action_dock.visible = is_playing and not _is_spectating
 		spawn_banner.visible = (_world_state != null and _world_state.match_phase == WorldState.PHASE_SPAWN_SELECT)
+	if _chat_panel != null:
+		_chat_panel.visible = (not in_menu) and _chat_active
 	menu_visibility_changed.emit(in_menu)
 
 
@@ -1552,6 +1631,8 @@ func open_menu() -> void:
 	friends_card.visible = false
 	account_card.visible = false
 	patch_notes_card.visible = false
+	if _rankings_card != null:
+		_rankings_card.visible = false
 	menu_card.visible = true
 	menu_overlay.visible = true
 	_sync_hud_chrome_visibility()
@@ -1579,6 +1660,12 @@ func update_mp_lobby(room_code: String, phase: String, players: Array, ai_count:
 		_mp_public_check.disabled = (not is_host) or (phase != "LOBBY")
 	if _mp_team_option != null:
 		_mp_team_option.disabled = (phase != "LOBBY") or (_mp_public_check != null and not _mp_team_option.visible)
+	for ctrl: Control in [_mp_speed_opt, _mp_nonukes_check, _mp_diff_opt, _mp_preset_opt]:
+		if ctrl != null:
+			if ctrl is OptionButton:
+				(ctrl as OptionButton).disabled = (not is_host) or (phase != "LOBBY")
+			elif ctrl is CheckBox:
+				(ctrl as CheckBox).disabled = (not is_host) or (phase != "LOBBY")
 	if not _pending_invite_friend.is_empty() and not _current_room_code.is_empty():
 		var inv_target: String = _pending_invite_friend
 		_pending_invite_friend = ""
@@ -1589,6 +1676,9 @@ func open_mp_lobby_with_code(code: String) -> void:
 	menu_card.visible = false
 	friends_card.visible = false
 	account_card.visible = false
+	patch_notes_card.visible = false
+	if _rankings_card != null:
+		_rankings_card.visible = false
 	mp_lobby_card.visible = true
 	menu_overlay.visible = true
 	mp_room_edit.text = code.strip_edges().to_upper()
@@ -1608,47 +1698,69 @@ func update_mp_room_options(is_public: bool, team_mode: bool) -> void:
 	_mp_syncing_opts = false
 
 
+func update_mp_room_modifiers(opts: Dictionary) -> void:
+	_mp_syncing_opts = true
+	if _mp_speed_opt != null:
+		var spd: float = float(opts.get("game_speed", 1.0))
+		_mp_speed_opt.select(2 if spd >= 1.9 else (1 if spd >= 1.4 else 0))
+	if _mp_nonukes_check != null:
+		_mp_nonukes_check.button_pressed = bool(opts.get("no_nukes", false))
+	if _mp_diff_opt != null:
+		var diff: String = str(opts.get("ai_difficulty", "normal"))
+		_mp_diff_opt.select(2 if diff == "brutal" else (1 if diff == "hard" else 0))
+	if _mp_preset_opt != null:
+		var preset: String = str(opts.get("start_preset", "standard"))
+		_mp_preset_opt.select(2 if preset == "sandbox" else (1 if preset == "fast" else 0))
+	_mp_syncing_opts = false
+
+
 func update_public_rooms(rooms: Array) -> void:
 	if _mp_rooms_list == null:
 		return
 	for ch in _mp_rooms_list.get_children():
 		ch.queue_free()
-	var joinable: Array = []
+	var shown_rooms: Array = []
 	for rv: Variant in rooms:
-		if rv is Dictionary and bool((rv as Dictionary).get("joinable", false)):
-			joinable.append(rv)
-	if joinable.is_empty():
+		if rv is Dictionary and (bool((rv as Dictionary).get("joinable", false)) or bool((rv as Dictionary).get("spectatable", false))):
+			shown_rooms.append(rv)
+	if shown_rooms.is_empty():
 		var empty_lbl := Label.new()
-		empty_lbl.text = "No open public lobbies — click Quick Play or Create Room."
+		empty_lbl.text = "No open or live public rooms — click Quick Play or Create Room."
 		empty_lbl.modulate = Color(0.62, 0.70, 0.80, 0.85)
 		empty_lbl.add_theme_font_size_override("font_size", 11)
 		_mp_rooms_list.add_child(empty_lbl)
 		return
-	for r_item: Variant in joinable:
+	for r_item: Variant in shown_rooms:
 		var rm := r_item as Dictionary
 		var r_code: String = str(rm.get("code", ""))
 		var h_name: String = str(rm.get("host_name", "Host"))
 		var p_cnt: int = int(rm.get("players", 0))
 		var m_cnt: int = int(rm.get("max_players", 16))
+		var can_join: bool = bool(rm.get("joinable", false))
 		var tm_tag := " · Teams" if bool(rm.get("team_mode", false)) else ""
+		var live_tag := "" if can_join else " · LIVE"
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override("separation", 6)
 		var lbl := Label.new()
-		lbl.text = "%s · %s (%d/%d%s)" % [r_code, h_name, p_cnt, m_cnt, tm_tag]
+		lbl.text = "%s · %s (%d/%d%s%s)" % [r_code, h_name, p_cnt, m_cnt, tm_tag, live_tag]
 		lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		lbl.clip_text = true
 		lbl.add_theme_font_size_override("font_size", 11)
 		row.add_child(lbl)
 		var j_btn := Button.new()
-		j_btn.text = "Join"
-		ThemeFactory.apply_button_variant(j_btn, "primary")
+		j_btn.text = "Join" if can_join else "Spectate"
+		ThemeFactory.apply_button_variant(j_btn, "primary" if can_join else "secondary")
 		var code_cap := r_code
+		var join_cap := can_join
 		j_btn.pressed.connect(func() -> void:
 			AudioManager.play_ui_tap()
 			mp_room_edit.text = code_cap
 			var cfg: Dictionary = get_spawn_config()
 			save_player_name(str(cfg.get("name", "")))
-			mp_connect_requested.emit(get_mp_server_url(), code_cap, str(cfg.get("name", "Commander")))
+			if join_cap:
+				mp_connect_requested.emit(get_mp_server_url(), code_cap, str(cfg.get("name", "Commander")))
+			else:
+				mp_spectate_requested.emit(code_cap)
 		)
 		row.add_child(j_btn)
 		_mp_rooms_list.add_child(row)
@@ -1675,6 +1787,9 @@ func on_mp_disconnected(reason: String) -> void:
 
 
 func get_mp_server_url() -> String:
+	var env_u: String = OS.get_environment("WWP_SERVER_URL").strip_edges()
+	if not env_u.is_empty():
+		return env_u
 	var idx: int = clampi(server_option.selected, 0, SERVER_REGIONS.size() - 1)
 	var u: String = str(SERVER_REGIONS[idx]["url"]).strip_edges()
 	return u if not u.is_empty() else MPClient.DEFAULT_SERVER_URL
@@ -1715,11 +1830,153 @@ func enter_spectator_mode(conqueror_name: String = "") -> void:
 	diplomacy_panel.visible = false
 	radial_menu.visible = false
 	radial_sub_picker.visible = false
+	if _replay_controls_row != null:
+		_replay_controls_row.visible = false
 	var by_str: String = (" by %s" % conqueror_name) if not conqueror_name.is_empty() else ""
 	spec_label.text = "Your Nation Was Conquered%s — Spectating Live Match" % by_str
+	spec_continue_btn.visible = true
+	spec_new_match_btn.text = "New Match"
 	spectator_banner.visible = true
 	_sync_hud_chrome_visibility()
 	refresh_player_bar()
+
+
+func enter_live_spectate_mode(room_code: String) -> void:
+	_is_spectating = true
+	menu_overlay.visible = false
+	clear_build_mode()
+	clear_missile_mode()
+	if _replay_controls_row != null:
+		_replay_controls_row.visible = false
+	spec_label.text = "Spectating Live Room %s" % room_code
+	spec_continue_btn.visible = false
+	spec_new_match_btn.text = "Leave"
+	spectator_banner.visible = true
+	set_chat_active(true)
+	_sync_hud_chrome_visibility()
+	refresh_all()
+
+
+func enter_replay_mode(title_txt: String) -> void:
+	_is_spectating = true
+	menu_overlay.visible = false
+	clear_build_mode()
+	clear_missile_mode()
+	spec_label.text = "REPLAY · %s" % title_txt
+	spec_continue_btn.visible = false
+	spec_new_match_btn.text = "Exit Replay"
+	spectator_banner.visible = true
+	if _replay_controls_row != null:
+		_replay_controls_row.visible = true
+	set_chat_active(false)
+	_sync_hud_chrome_visibility()
+	refresh_all()
+
+
+func set_chat_active(active: bool) -> void:
+	_chat_active = active
+	if not active and _chat_log != null:
+		_chat_log.text = ""
+	if _chat_panel != null:
+		_chat_panel.visible = active and (not menu_overlay.visible)
+
+
+func append_chat_message(from_name: String, channel: String, text: String) -> void:
+	if _chat_log == null:
+		return
+	var prefix := "[TEAM] " if channel == "team" else ""
+	var col_hex := "#5ce1e6" if channel == "team" else "#e8edf5"
+	_chat_log.append_text("[color=%s]%s[b]%s:[/b] %s[/color]\n" % [col_hex, prefix, from_name, text])
+
+
+func set_password_change_result(ok: bool, msg: String) -> void:
+	if _sec_status_lbl != null:
+		_sec_status_lbl.text = msg
+		_sec_status_lbl.modulate = Color(0.45, 0.96, 0.62) if ok else Color(1.0, 0.45, 0.45)
+	if ok and _sec_cur_edit != null:
+		_sec_cur_edit.text = ""
+		_sec_new_edit.text = ""
+		_sec_conf_edit.text = ""
+
+
+func update_rankings_data(leaderboard: Array, my_matches: Array) -> void:
+	_cached_leaderboard = leaderboard.duplicate(true)
+	_cached_my_matches = my_matches.duplicate(true)
+	if _rankings_card != null and _rankings_card.visible:
+		_render_rankings_rows()
+
+
+func _render_rankings_rows() -> void:
+	if _rankings_rows == null:
+		return
+	for ch in _rankings_rows.get_children():
+		ch.queue_free()
+	if _rankings_mode == "history":
+		if _cached_my_matches.is_empty():
+			var empty_h := Label.new()
+			empty_h.text = "No recorded multiplayer matches yet (sign in to track history & replays)."
+			empty_h.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			empty_h.modulate = Color(0.68, 0.76, 0.86, 0.88)
+			_rankings_rows.add_child(empty_h)
+			return
+		for mv: Variant in _cached_my_matches:
+			if not (mv is Dictionary):
+				continue
+			var m := mv as Dictionary
+			var won: bool = bool(m.get("won", false))
+			var pct: float = float(m.get("territory_pct", 0.0))
+			var rcode: String = str(m.get("room_code", "ROOM"))
+			var mid: String = str(m.get("match_id", ""))
+			var row := HBoxContainer.new()
+			row.add_theme_constant_override("separation", 6)
+			var lbl := Label.new()
+			lbl.text = "%s · Room %s · %.1f%%" % ["WIN" if won else "LOSS", rcode, pct]
+			lbl.modulate = Color(0.42, 0.96, 0.62) if won else Color(0.95, 0.54, 0.50)
+			lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			lbl.clip_text = true
+			row.add_child(lbl)
+			if not mid.is_empty():
+				var r_btn := Button.new()
+				r_btn.text = "Watch Replay"
+				ThemeFactory.apply_button_variant(r_btn, "secondary")
+				var mid_cap := mid
+				r_btn.pressed.connect(func() -> void:
+					AudioManager.play_ui_tap()
+					watch_replay_requested.emit(mid_cap)
+				)
+				row.add_child(r_btn)
+			_rankings_rows.add_child(row)
+		return
+
+	if _cached_leaderboard.is_empty():
+		var empty_l := Label.new()
+		empty_l.text = "No ranked commanders found yet."
+		empty_l.modulate = Color(0.68, 0.76, 0.86, 0.88)
+		_rankings_rows.add_child(empty_l)
+		return
+	var rank_i := 0
+	for uv: Variant in _cached_leaderboard:
+		if not (uv is Dictionary):
+			continue
+		rank_i += 1
+		var u := uv as Dictionary
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		var pos_l := Label.new()
+		pos_l.text = "#%d" % rank_i
+		pos_l.custom_minimum_size = Vector2(30, 0)
+		pos_l.modulate = Color(0.96, 0.82, 0.34) if rank_i <= 3 else Color(0.76, 0.82, 0.90)
+		row.add_child(pos_l)
+		var nm_l := Label.new()
+		nm_l.text = "%s · %s" % [str(u.get("username", "Commander")), str(u.get("rank_title", "Recruit"))]
+		nm_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		nm_l.clip_text = true
+		row.add_child(nm_l)
+		var elo_l := Label.new()
+		elo_l.text = "%d ELO · %dW/%dG" % [int(u.get("elo", 1000)), int(u.get("wins", 0)), int(u.get("games_played", 0))]
+		elo_l.modulate = Color(0.66, 0.92, 0.78)
+		row.add_child(elo_l)
+		_rankings_rows.add_child(row)
 
 
 func on_match_started() -> void:
@@ -2693,6 +2950,305 @@ func _setup_extra_hud_panels() -> void:
 		_victory_chart.draw.connect(_on_victory_chart_draw)
 		v_vbox.add_child(_victory_chart)
 		v_vbox.move_child(_victory_chart, maxi(0, v_vbox.get_child_count() - 2))
+
+	# 5. Singleplayer Match Modifiers + Global Rankings/Replays button on MenuCard
+	var m_vbox := menu_card.get_node_or_null("VBox") as VBoxContainer
+	if m_vbox != null:
+		var sp_mod := HBoxContainer.new()
+		sp_mod.add_theme_constant_override("separation", 6)
+		_sp_speed_opt = OptionButton.new()
+		_sp_speed_opt.add_item("1× Speed", 0)
+		_sp_speed_opt.add_item("1.5× Speed", 1)
+		_sp_speed_opt.add_item("2× Speed", 2)
+		_sp_diff_opt = OptionButton.new()
+		_sp_diff_opt.add_item("AI: Normal", 0)
+		_sp_diff_opt.add_item("AI: Hard", 1)
+		_sp_diff_opt.add_item("AI: Brutal", 2)
+		_sp_preset_opt = OptionButton.new()
+		_sp_preset_opt.add_item("Standard", 0)
+		_sp_preset_opt.add_item("Fast Start", 1)
+		_sp_preset_opt.add_item("Sandbox", 2)
+		_sp_nonukes_check = CheckBox.new()
+		_sp_nonukes_check.text = "No Nukes"
+		sp_mod.add_child(_sp_speed_opt)
+		sp_mod.add_child(_sp_diff_opt)
+		sp_mod.add_child(_sp_preset_opt)
+		sp_mod.add_child(_sp_nonukes_check)
+		m_vbox.add_child(sp_mod)
+		m_vbox.move_child(sp_mod, play_btn.get_index())
+
+		var social_row := m_vbox.get_node_or_null("SocialRow") as HBoxContainer
+		if social_row != null:
+			var rank_btn := Button.new()
+			rank_btn.text = "Rankings"
+			ThemeFactory.apply_button_variant(rank_btn, "secondary")
+			rank_btn.pressed.connect(func() -> void:
+				AudioManager.play_ui_tap()
+				menu_card.visible = false
+				if _rankings_card != null:
+					_rankings_card.visible = true
+				leaderboard_open_requested.emit()
+				_render_rankings_rows()
+			)
+			social_row.add_child(rank_btn)
+
+	# 6. Host Modifiers row inside MpLobbyCard
+	if mp_vbox != null:
+		var mod_row := HBoxContainer.new()
+		mod_row.add_theme_constant_override("separation", 6)
+		_mp_speed_opt = OptionButton.new()
+		_mp_speed_opt.add_item("1×", 0)
+		_mp_speed_opt.add_item("1.5×", 1)
+		_mp_speed_opt.add_item("2×", 2)
+		_mp_diff_opt = OptionButton.new()
+		_mp_diff_opt.add_item("AI Normal", 0)
+		_mp_diff_opt.add_item("AI Hard", 1)
+		_mp_diff_opt.add_item("AI Brutal", 2)
+		_mp_preset_opt = OptionButton.new()
+		_mp_preset_opt.add_item("Standard", 0)
+		_mp_preset_opt.add_item("Fast Start", 1)
+		_mp_preset_opt.add_item("Sandbox", 2)
+		_mp_nonukes_check = CheckBox.new()
+		_mp_nonukes_check.text = "No Nukes"
+		var emit_mods := func() -> void:
+			if _mp_syncing_opts:
+				return
+			var spds := [1.0, 1.5, 2.0]
+			var diffs := ["normal", "hard", "brutal"]
+			var presets := ["standard", "fast", "sandbox"]
+			mp_room_modifiers_changed.emit({
+				"game_speed": spds[clampi(_mp_speed_opt.selected, 0, 2)],
+				"ai_difficulty": diffs[clampi(_mp_diff_opt.selected, 0, 2)],
+				"start_preset": presets[clampi(_mp_preset_opt.selected, 0, 2)],
+				"no_nukes": _mp_nonukes_check.button_pressed,
+			})
+		_mp_speed_opt.item_selected.connect(func(_i: int) -> void: emit_mods.call())
+		_mp_diff_opt.item_selected.connect(func(_i: int) -> void: emit_mods.call())
+		_mp_preset_opt.item_selected.connect(func(_i: int) -> void: emit_mods.call())
+		_mp_nonukes_check.toggled.connect(func(_v: bool) -> void: emit_mods.call())
+		mod_row.add_child(_mp_speed_opt)
+		mod_row.add_child(_mp_diff_opt)
+		mod_row.add_child(_mp_preset_opt)
+		mod_row.add_child(_mp_nonukes_check)
+		mp_vbox.add_child(mod_row)
+
+	# 7. Global Leaderboard & Match History/Replays Modal Card
+	var center_node := menu_overlay.get_node_or_null("Center") as CenterContainer
+	if center_node != null:
+		_rankings_card = PanelContainer.new()
+		_rankings_card.visible = false
+		_rankings_card.custom_minimum_size = Vector2(520, 400)
+		ThemeFactory.apply_panel_variant(_rankings_card, "card")
+		var rvbox := VBoxContainer.new()
+		rvbox.add_theme_constant_override("separation", 8)
+		_rankings_card.add_child(rvbox)
+
+		var rhdr := HBoxContainer.new()
+		var rback := Button.new()
+		rback.text = "Back"
+		ThemeFactory.apply_button_variant(rback, "back")
+		rback.pressed.connect(func() -> void:
+			AudioManager.play_ui_tap()
+			_rankings_card.visible = false
+			menu_card.visible = true
+		)
+		rhdr.add_child(rback)
+		var rtitle := Label.new()
+		rtitle.text = "GLOBAL RANKINGS & REPLAYS"
+		rtitle.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		rtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		rhdr.add_child(rtitle)
+		var rref := Button.new()
+		rref.text = "Refresh"
+		ThemeFactory.apply_button_variant(rref, "secondary")
+		rref.pressed.connect(func() -> void:
+			AudioManager.play_ui_tap()
+			leaderboard_open_requested.emit()
+		)
+		rhdr.add_child(rref)
+		rvbox.add_child(rhdr)
+
+		var rtabs := HBoxContainer.new()
+		rtabs.add_theme_constant_override("separation", 6)
+		_rankings_tab_lb = Button.new()
+		_rankings_tab_lb.text = "Top Commanders"
+		_rankings_tab_lb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		ThemeFactory.apply_button_variant(_rankings_tab_lb, "primary")
+		_rankings_tab_hist = Button.new()
+		_rankings_tab_hist.text = "Match History & Replays"
+		_rankings_tab_hist.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		ThemeFactory.apply_button_variant(_rankings_tab_hist, "secondary")
+		_rankings_tab_lb.pressed.connect(func() -> void:
+			AudioManager.play_ui_tap()
+			_rankings_mode = "leaderboard"
+			ThemeFactory.apply_button_variant(_rankings_tab_lb, "primary")
+			ThemeFactory.apply_button_variant(_rankings_tab_hist, "secondary")
+			_render_rankings_rows()
+		)
+		_rankings_tab_hist.pressed.connect(func() -> void:
+			AudioManager.play_ui_tap()
+			_rankings_mode = "history"
+			ThemeFactory.apply_button_variant(_rankings_tab_lb, "secondary")
+			ThemeFactory.apply_button_variant(_rankings_tab_hist, "primary")
+			_render_rankings_rows()
+		)
+		rtabs.add_child(_rankings_tab_lb)
+		rtabs.add_child(_rankings_tab_hist)
+		rvbox.add_child(rtabs)
+
+		var rscroll := ScrollContainer.new()
+		rscroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		_rankings_rows = VBoxContainer.new()
+		_rankings_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_rankings_rows.add_theme_constant_override("separation", 6)
+		rscroll.add_child(_rankings_rows)
+		rvbox.add_child(rscroll)
+		center_node.add_child(_rankings_card)
+
+	# 8. In-Game Change Password Security section inside AccountCard
+	var acct_vbox := account_card.get_node_or_null("VBox") as VBoxContainer
+	if acct_vbox != null:
+		_sec_box = VBoxContainer.new()
+		_sec_box.visible = false
+		_sec_box.add_theme_constant_override("separation", 6)
+		_sec_box.add_child(HSeparator.new())
+		var sec_lbl := Label.new()
+		sec_lbl.text = "ACCOUNT SECURITY · CHANGE PASSWORD"
+		sec_lbl.modulate = Color(0.84, 0.88, 0.96, 0.92)
+		_sec_box.add_child(sec_lbl)
+		_sec_cur_edit = LineEdit.new()
+		_sec_cur_edit.secret = true
+		_sec_cur_edit.placeholder_text = "Current Password"
+		var new_row := HBoxContainer.new()
+		new_row.add_theme_constant_override("separation", 6)
+		_sec_new_edit = LineEdit.new()
+		_sec_new_edit.secret = true
+		_sec_new_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_sec_new_edit.placeholder_text = "New Password (4+ chars)"
+		_sec_eye_btn = Button.new()
+		_sec_eye_btn.custom_minimum_size = Vector2(36, 0)
+		_sec_eye_btn.toggle_mode = true
+		_sec_eye_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_sec_eye_btn.icon = _make_eye_icon(false)
+		ThemeFactory.apply_button_variant(_sec_eye_btn, "ghost")
+		_sec_conf_edit = LineEdit.new()
+		_sec_conf_edit.secret = true
+		_sec_conf_edit.placeholder_text = "Confirm New Password"
+		_sec_eye_btn.toggled.connect(func(shown: bool) -> void:
+			AudioManager.play_ui_tap()
+			_sec_cur_edit.secret = not shown
+			_sec_new_edit.secret = not shown
+			_sec_conf_edit.secret = not shown
+			_sec_eye_btn.icon = _make_eye_icon(shown)
+		)
+		new_row.add_child(_sec_new_edit)
+		new_row.add_child(_sec_eye_btn)
+		var sec_btn := Button.new()
+		sec_btn.text = "Update Password"
+		ThemeFactory.apply_button_variant(sec_btn, "secondary")
+		_sec_status_lbl = Label.new()
+		_sec_status_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		sec_btn.pressed.connect(func() -> void:
+			AudioManager.play_ui_tap()
+			if _sec_new_edit.text.length() < 4:
+				set_password_change_result(false, "New password must be at least 4 characters.")
+				return
+			if _sec_new_edit.text != _sec_conf_edit.text:
+				set_password_change_result(false, "New passwords do not match.")
+				return
+			_sec_status_lbl.text = "Updating password..."
+			account_change_password_requested.emit(_sec_cur_edit.text, _sec_new_edit.text)
+		)
+		_sec_box.add_child(_sec_cur_edit)
+		_sec_box.add_child(new_row)
+		_sec_box.add_child(_sec_conf_edit)
+		_sec_box.add_child(sec_btn)
+		_sec_box.add_child(_sec_status_lbl)
+		acct_vbox.add_child(_sec_box)
+
+	# 9. In-Game Multiplayer Chat & Quick Comms Panel
+	_chat_panel = PanelContainer.new()
+	_chat_panel.visible = false
+	_chat_panel.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	_chat_panel.offset_left = 14.0
+	_chat_panel.offset_top = -270.0
+	_chat_panel.offset_right = 356.0
+	_chat_panel.offset_bottom = -114.0
+	ThemeFactory.apply_panel_variant(_chat_panel, "flat")
+	var cvbox := VBoxContainer.new()
+	cvbox.add_theme_constant_override("separation", 4)
+	_chat_panel.add_child(cvbox)
+
+	_chat_log = RichTextLabel.new()
+	_chat_log.bbcode_enabled = true
+	_chat_log.scroll_following = true
+	_chat_log.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_chat_log.add_theme_font_size_override("normal_font_size", 11)
+	cvbox.add_child(_chat_log)
+
+	var quick_row := HBoxContainer.new()
+	quick_row.add_theme_constant_override("separation", 4)
+	for q_item: Array in [["Need ₱", "Need Pesos support!"], ["Attack!", "Coordinate attack now!"], ["Nuking", "Launching strategic strike!"], ["Defend", "Defend border / coast!"]]:
+		var qb := Button.new()
+		qb.text = str(q_item[0])
+		ThemeFactory.apply_button_variant(qb, "ghost")
+		qb.add_theme_font_size_override("font_size", 10)
+		var q_msg := str(q_item[1])
+		qb.pressed.connect(func() -> void:
+			AudioManager.play_ui_tap()
+			chat_send_requested.emit(_chat_channel, q_msg)
+		)
+		quick_row.add_child(qb)
+	cvbox.add_child(quick_row)
+
+	var cin_row := HBoxContainer.new()
+	cin_row.add_theme_constant_override("separation", 4)
+	_chat_chan_btn = Button.new()
+	_chat_chan_btn.text = "[ALL]"
+	ThemeFactory.apply_button_variant(_chat_chan_btn, "secondary")
+	_chat_chan_btn.pressed.connect(func() -> void:
+		AudioManager.play_ui_tap()
+		_toggle_chat_channel()
+	)
+	_chat_input = LineEdit.new()
+	_chat_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_chat_input.placeholder_text = "Enter to chat (Tab: All/Team)..."
+	_chat_input.text_submitted.connect(func(txt: String) -> void:
+		var clean: String = txt.strip_edges()
+		if not clean.is_empty():
+			chat_send_requested.emit(_chat_channel, clean)
+		_chat_input.text = ""
+		_chat_input.release_focus()
+	)
+	cin_row.add_child(_chat_chan_btn)
+	cin_row.add_child(_chat_input)
+	cvbox.add_child(cin_row)
+	root_control.add_child(_chat_panel)
+
+	# 10. Replay Speed Controls inside SpectatorBanner
+	var sp_hbox := spectator_banner.get_node_or_null("HBox") as HBoxContainer
+	if sp_hbox != null:
+		_replay_controls_row = HBoxContainer.new()
+		_replay_controls_row.visible = false
+		_replay_controls_row.add_theme_constant_override("separation", 4)
+		for spd_v: float in [1.0, 2.0, 4.0]:
+			var sb := Button.new()
+			sb.text = "%d×" % int(spd_v)
+			ThemeFactory.apply_button_variant(sb, "secondary")
+			var sv_cap := spd_v
+			sb.pressed.connect(func() -> void:
+				AudioManager.play_ui_tap()
+				replay_speed_changed.emit(sv_cap)
+			)
+			_replay_controls_row.add_child(sb)
+		sp_hbox.add_child(_replay_controls_row)
+		sp_hbox.move_child(_replay_controls_row, maxi(1, sp_hbox.get_child_count() - 2))
+
+
+func _toggle_chat_channel() -> void:
+	_chat_channel = "team" if _chat_channel == "all" else "all"
+	if _chat_chan_btn != null:
+		_chat_chan_btn.text = "[TEAM]" if _chat_channel == "team" else "[ALL]"
 
 
 func _snap_camera_to_capital() -> void:

@@ -18,7 +18,8 @@ var waypoints: PackedVector2Array = PackedVector2Array()
 var waypoint_index: int = 0
 var position: Vector2 = Vector2.ZERO
 var heading: float = 0.0
-var speed_px_per_sec: float = 44.0
+var base_speed_px_per_sec: float = 10.5
+var speed_px_per_sec: float = 10.5
 
 var gold_value: float = 15000.0
 var is_foreign_trade: bool = false
@@ -51,6 +52,12 @@ static func get_warship_cost(owned_warships: int) -> float:
 	return minf(WARSHIP_MAX_COST, round(WARSHIP_BASE_COST * pow(2.0, mini(owned_warships, 4))))
 
 
+func refresh_warship_speed() -> void:
+	if kind != KIND_WARSHIP or base_speed_px_per_sec <= 0.0:
+		return
+	speed_px_per_sec = base_speed_px_per_sec * (1.0 + 0.05 * float(maxi(1, ship_level) - 1))
+
+
 func add_xp(points: int) -> bool:
 	xp += points
 	var old_level: int = ship_level
@@ -62,6 +69,7 @@ func add_xp(points: int) -> bool:
 		max_hp = 140.0
 	if ship_level > old_level:
 		hp = minf(max_hp, hp + 35.0)
+		refresh_warship_speed()
 		return true
 	return false
 

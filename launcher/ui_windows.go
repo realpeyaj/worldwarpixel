@@ -581,6 +581,13 @@ type hubWindow struct {
 	friends      []apiUserProfile
 	incoming     []apiUserProfile
 	searchRes    []apiUserProfile
+	accountSubTab   string
+	leaderboard     []apiUserProfile
+	myMatches       []apiMatchHistoryEntry
+	inputSecCur     string
+	inputSecNew     string
+	inputSecConfirm string
+	showSecPassword bool
 
 	hoverID  string
 	pressID  string
@@ -806,6 +813,13 @@ func (h *hubWindow) paintToDIB() {
 		Friends:          h.friends,
 		Incoming:         h.incoming,
 		SearchResults:    h.searchRes,
+		AccountSubTab:    h.accountSubTab,
+		Leaderboard:      h.leaderboard,
+		MyMatches:        h.myMatches,
+		InputSecCur:      h.inputSecCur,
+		InputSecNew:      h.inputSecNew,
+		InputSecConfirm:  h.inputSecConfirm,
+		ShowSecPassword:  h.showSecPassword,
 	}
 	h.mu.Unlock()
 
@@ -1131,6 +1145,76 @@ func (h *hubWindow) runFriendActionAsync(action, target string) {
 	if strings.TrimSpace(h.inputSearch) != "" {
 		h.runSearchAsync()
 	}
+}
+
+func (h *hubWindow) runRefreshRankingsAsync() {
+	h.mu.Lock()
+	tok := h.prof.Token
+	h.mu.Unlock()
+	lb, errLB := h.acctAPI.Leaderboard(context.Background(), 15)
+	var matches []apiMatchHistoryEntry
+	if tok != "" {
+		if ms, errM := h.acctAPI.MyMatches(context.Background(), tok, 10); errM == nil {
+			matches = ms
+		}
+	}
+	h.mu.Lock()
+	if errLB == nil {
+		h.leaderboard = lb
+	}
+	if matches != nil {
+		h.myMatches = matches
+	}
+	h.mu.Unlock()
+	h.postRefresh()
+}
+
+func (h *hubWindow) runChangePasswordAsync() {
+	h.mu.Lock()
+	if h.authBusy || h.prof.Token == "" {
+		h.mu.Unlock()
+		return
+	}
+	tok := h.prof.Token
+	curP := h.inputSecCur
+	newP := h.inputSecNew
+	confP := h.inputSecConfirm
+	if curP == "" || len([]rune(newP)) < 4 {
+		h.authMessage = "Enter current password and a 4+ char new password."
+		h.authIsError = true
+		h.mu.Unlock()
+		h.postRefresh()
+		return
+	}
+	if newP != confP {
+		h.authMessage = "New passwords do not match."
+		h.authIsError = true
+		h.mu.Unlock()
+		h.postRefresh()
+		return
+	}
+	h.authBusy = true
+	h.authMessage = ""
+	h.authIsError = false
+	h.mu.Unlock()
+	h.postRefresh()
+
+	msg, err := h.acctAPI.ChangePassword(context.Background(), tok, curP, newP)
+	h.mu.Lock()
+	h.authBusy = false
+	if err != nil {
+		h.authMessage = sanitizeUserError(err)
+		h.authIsError = true
+	} else {
+		h.authMessage = msg
+		h.authIsError = false
+		h.inputSecCur = ""
+		h.inputSecNew = ""
+		h.inputSecConfirm = ""
+		h.showSecPassword = false
+	}
+	h.mu.Unlock()
+	h.postRefresh()
 }
 
 func (h *hubWindow) pickAndUploadAvatar() {
@@ -1534,12 +1618,42 @@ func (h *hubWindow) handleClick(id string) {
 		h.focusField = "auth_user"
 		h.mu.Unlock()
 		procInvalidateRect.Call(h.hwnd, 0, 0)
-	case "auth_user", "auth_pass", "auth_pass_confirm", "friend_search":
+	case "auth_user", "auth_pass", "auth_pass_confirm", "friend_search", "sec_cur", "sec_new", "sec_confirm":
 		h.mu.Lock()
 		h.focusField = id
 		h.caretVisible = true
 		h.mu.Unlock()
 		procInvalidateRect.Call(h.hwnd, 0, 0)
+	case "acct_sub_search":
+		h.mu.Lock()
+		h.accountSubTab = "search"
+		h.authMessage = ""
+		h.mu.Unlock()
+		procInvalidateRect.Call(h.hwnd, 0, 0)
+	case "acct_sub_leaderboard":
+		h.mu.Lock()
+		h.accountSubTab = "leaderboard"
+		h.authMessage = ""
+		h.focusField = ""
+		h.mu.Unlock()
+		procInvalidateRect.Call(h.hwnd, 0, 0)
+		go h.runRefreshRankingsAsync()
+	case "acct_sub_security":
+		h.mu.Lock()
+		h.accountSubTab = "security"
+		h.authMessage = ""
+		h.focusField = "sec_cur"
+		h.caretVisible = true
+		h.mu.Unlock()
+		procInvalidateRect.Call(h.hwnd, 0, 0)
+	case "toggle_sec_eye":
+		h.mu.Lock()
+		h.showSecPassword = !h.showSecPassword
+		h.caretVisible = true
+		h.mu.Unlock()
+		procInvalidateRect.Call(h.hwnd, 0, 0)
+	case "sec_submit":
+		go h.runChangePasswordAsync()
 	case "toggle_pass_eye":
 		h.mu.Lock()
 		h.showPassword = !h.showPassword
@@ -1654,6 +1768,30 @@ func (h *hubWindow) appendRunesFocused(s string) {
 			}
 		}
 		h.inputSearch = string(cur)
+	case "sec_cur":
+		cur := []rune(h.inputSecCur)
+		for _, r := range clean {
+			if len(cur) < 128 {
+				cur = append(cur, r)
+			}
+		}
+		h.inputSecCur = string(cur)
+	case "sec_new":
+		cur := []rune(h.inputSecNew)
+		for _, r := range clean {
+			if len(cur) < 128 {
+				cur = append(cur, r)
+			}
+		}
+		h.inputSecNew = string(cur)
+	case "sec_confirm":
+		cur := []rune(h.inputSecConfirm)
+		for _, r := range clean {
+			if len(cur) < 128 {
+				cur = append(cur, r)
+			}
+		}
+		h.inputSecConfirm = string(cur)
 	}
 	h.caretVisible = true
 }
@@ -1683,6 +1821,21 @@ func (h *hubWindow) handleChar(ch rune) {
 			if len(r) > 0 {
 				h.inputSearch = string(r[:len(r)-1])
 			}
+		case "sec_cur":
+			r := []rune(h.inputSecCur)
+			if len(r) > 0 {
+				h.inputSecCur = string(r[:len(r)-1])
+			}
+		case "sec_new":
+			r := []rune(h.inputSecNew)
+			if len(r) > 0 {
+				h.inputSecNew = string(r[:len(r)-1])
+			}
+		case "sec_confirm":
+			r := []rune(h.inputSecConfirm)
+			if len(r) > 0 {
+				h.inputSecConfirm = string(r[:len(r)-1])
+			}
 		}
 		h.caretVisible = true
 		h.mu.Unlock()
@@ -1698,6 +1851,15 @@ func (h *hubWindow) handleChar(ch rune) {
 				h.focusField = "auth_user"
 			}
 			h.caretVisible = true
+		} else if h.tab == tabAccount && h.prof.IsAccount && h.accountSubTab == "security" {
+			if h.focusField == "sec_cur" {
+				h.focusField = "sec_new"
+			} else if h.focusField == "sec_new" {
+				h.focusField = "sec_confirm"
+			} else {
+				h.focusField = "sec_cur"
+			}
+			h.caretVisible = true
 		}
 		h.mu.Unlock()
 		procInvalidateRect.Call(h.hwnd, 0, 0)
@@ -1706,9 +1868,12 @@ func (h *hubWindow) handleChar(ch rune) {
 		tab := h.tab
 		ff := h.focusField
 		isAcct := h.prof.IsAccount
+		sub := h.accountSubTab
 		h.mu.Unlock()
 		if tab == tabAccount && !isAcct {
 			go h.runAuthSubmitAsync()
+		} else if tab == tabAccount && isAcct && sub == "security" {
+			go h.runChangePasswordAsync()
 		} else if tab == tabAccount && isAcct && ff == "friend_search" {
 			go h.runSearchAsync()
 		}

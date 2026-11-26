@@ -53,6 +53,19 @@ type apiFriendsOverview struct {
 	RoomInvites      []apiRoomInvite  `json:"room_invites"`
 }
 
+type apiMatchHistoryEntry struct {
+	MatchID        string  `json:"match_id"`
+	RoomCode       string  `json:"room_code"`
+	Seed           int64   `json:"seed"`
+	Status         string  `json:"status"`
+	WinnerNationID int     `json:"winner_nation_id"`
+	WinnerTeamID   int     `json:"winner_team_id"`
+	TerritoryPct   float64 `json:"territory_pct"`
+	Won            bool    `json:"won"`
+	PlayerCount    int     `json:"player_count"`
+	AICount        int     `json:"ai_count"`
+}
+
 type serverError struct {
 	msg string
 }
@@ -70,6 +83,15 @@ func newAccountAPIClient(baseURL string, client *http.Client) *accountAPIClient 
 	base := strings.TrimSpace(baseURL)
 	if base == "" {
 		base = strings.TrimSpace(os.Getenv("WWP_ACCOUNT_API"))
+	}
+	if base == "" {
+		wsEnv := strings.TrimSpace(os.Getenv("WWP_SERVER_URL"))
+		if wsEnv != "" {
+			wsEnv = strings.Replace(wsEnv, "wss://", "https://", 1)
+			wsEnv = strings.Replace(wsEnv, "ws://", "http://", 1)
+			wsEnv = strings.TrimSuffix(strings.TrimRight(wsEnv, "/"), "/ws")
+			base = wsEnv
+		}
 	}
 	if base == "" {
 		base = defaultAccountAPIBase
@@ -237,4 +259,34 @@ func (c *accountAPIClient) RespondFriendRequest(ctx context.Context, token, from
 		"accept":   accept,
 	}, &res)
 	return res.Message, err
+}
+
+func (c *accountAPIClient) ChangePassword(ctx context.Context, token, curPass, newPass string) (string, error) {
+	var res struct {
+		Message string `json:"message"`
+	}
+	err := c.doJSON(ctx, http.MethodPost, "/api/auth/change_password", token, map[string]string{
+		"current_password": curPass,
+		"new_password":     newPass,
+	}, &res)
+	if err == nil && res.Message == "" {
+		res.Message = "Password updated."
+	}
+	return res.Message, err
+}
+
+func (c *accountAPIClient) Leaderboard(ctx context.Context, limit int) ([]apiUserProfile, error) {
+	var res struct {
+		Leaderboard []apiUserProfile `json:"leaderboard"`
+	}
+	err := c.doJSON(ctx, http.MethodGet, fmt.Sprintf("/api/leaderboard?limit=%d", limit), "", nil, &res)
+	return res.Leaderboard, err
+}
+
+func (c *accountAPIClient) MyMatches(ctx context.Context, token string, limit int) ([]apiMatchHistoryEntry, error) {
+	var res struct {
+		Matches []apiMatchHistoryEntry `json:"matches"`
+	}
+	err := c.doJSON(ctx, http.MethodGet, fmt.Sprintf("/api/me/matches?limit=%d", limit), token, nil, &res)
+	return res.Matches, err
 }

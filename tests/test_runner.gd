@@ -1726,3 +1726,41 @@ func _run_phase2_account_and_pfp_tests() -> void:
 	var telemetry_ok: bool = (tn1 != null and tn1.peak_territory_percent >= 50.0 and tws.match_history.size() >= 1)
 	_check(team_ally_ok and team_win_ok and telemetry_ok,
 		"WorldState Team Mode shared alliances/victory & match_history telemetry verified")
+
+	# 6. Warship -45% speed nerf +5%/lvl scaling, no_nukes modifier, SimulationClock speed, and new missile/SAM SFX
+	var test_ship := ShipUnit.new()
+	test_ship.kind = ShipUnit.KIND_WARSHIP
+	test_ship.base_speed_px_per_sec = 10.48 # ~55% of legacy ~19.05
+	test_ship.refresh_warship_speed()
+	var spd_l1: float = test_ship.speed_px_per_sec
+	test_ship.add_xp(2) # Lv.2 (+5%)
+	var spd_l2: float = test_ship.speed_px_per_sec
+	test_ship.add_xp(3) # Lv.3 (+10% vs base)
+	var spd_l3: float = test_ship.speed_px_per_sec
+	_check(is_equal_approx(spd_l2, spd_l1 * 1.05) and is_equal_approx(spd_l3, spd_l1 * 1.10),
+		"Warship speed reduced (-45%% base) and scales +5%% per level (%.2f -> %.2f -> %.2f)" % [spd_l1, spd_l2, spd_l3])
+
+	var mod_ws := WorldState.new()
+	mod_ws.load_world()
+	mod_ws.apply_command({
+		"type": "start_mp_match",
+		"seed": 888,
+		"local_nation_id": 1,
+		"ai_count": 0,
+		"options": {"game_speed": 2.0, "no_nukes": true, "ai_difficulty": "brutal", "start_preset": "fast"},
+		"players": [{"nation_id": 1, "name": "CmdMod", "x": n1_pos.x, "y": n1_pos.y}],
+	})
+	var silo_chk: Dictionary = mod_ws.can_place_structure(1, StructureData.TYPE_MISSILE_SILO, n1_pos.x, n1_pos.y)
+	var nuke_rej: Dictionary = mod_ws.apply_command({"type": "launch_missile", "nation_id": 1, "missile_kind": MissileUnit.KIND_ATOM, "x": n3_pos.x, "y": n3_pos.y})
+	var sc2 := SimulationClock.new()
+	sc2.speed_multiplier = 2.0
+	var adv_ticks: int = sc2.advance(0.125) # 2x -> 6 ticks instead of 3
+	_check(mod_ws.no_nukes and not bool(silo_chk.get("ok", true)) and not bool(nuke_rej.get("ok", true)) and mod_ws.get_nation(1).gold >= 500000.0 and adv_ticks == 6,
+		"Match modifiers (No Nukes, Fast Start, 2x clock speed=%d ticks/125ms) enforced cleanly" % adv_ticks)
+
+	var new_sfx_ok := true
+	for wname: String in ["res://assets/audio/sfx/missile_launch.wav", "res://assets/audio/sfx/sam_launch.wav", "res://assets/audio/sfx/sam_intercept.wav", "res://assets/audio/sfx/silo_nuke_launch.wav"]:
+		var st_wav: AudioStreamWAV = load(wname) as AudioStreamWAV
+		if st_wav == null or not st_wav.stereo or st_wav.mix_rate != 44100:
+			new_sfx_ok = false
+	_check(new_sfx_ok, "Updated MP3 missile launch & resounded SAM launch/intercept load as 44.1kHz stereo WAVs")

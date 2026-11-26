@@ -722,6 +722,41 @@ func TestRiotHubRenderAndHitTesting(t *testing.T) {
 	if foundPlain != 2 {
 		t.Fatalf("expected both password and confirm fields to reveal plaintext when ShowPassword=true, got %d", foundPlain)
 	}
+
+	// Signed-in right-pane subtabs: Leaderboard + Security Change Password masking
+	lbState := states[1]
+	lbState.Tab = tabAccount
+	lbState.AccountSubTab = "leaderboard"
+	lbState.Leaderboard = []apiUserProfile{{Username: "Champ", RankTitle: "Marshal", Elo: 1280, Wins: 10, GamesPlayed: 12}}
+	lbState.MyMatches = []apiMatchHistoryEntry{{MatchID: "m1", RoomCode: "XYZ12", Won: true, TerritoryPct: 81.2}}
+	lbHits, _, _ := renderHubFrame(buf, hubWidth*4, false, lbState)
+	lbSeen := map[string]bool{}
+	for _, h := range lbHits {
+		lbSeen[h.id] = true
+	}
+	if !lbSeen["acct_sub_search"] || !lbSeen["acct_sub_leaderboard"] || !lbSeen["acct_sub_security"] {
+		t.Fatalf("signed-in account tab missing subtab hit regions: %v", lbSeen)
+	}
+
+	secState := states[1]
+	secState.Tab = tabAccount
+	secState.AccountSubTab = "security"
+	secState.InputSecNew = "NewSecret9"
+	secState.InputSecConfirm = "NewSecret9"
+	secState.ShowSecPassword = false
+	secHits, secTexts, _ := renderHubFrame(buf, hubWidth*4, false, secState)
+	secSeen := map[string]bool{}
+	for _, h := range secHits {
+		secSeen[h.id] = true
+	}
+	if !secSeen["sec_cur"] || !secSeen["sec_new"] || !secSeen["sec_confirm"] || !secSeen["toggle_sec_eye"] || !secSeen["sec_submit"] {
+		t.Fatalf("security subtab missing hit regions: %v", secSeen)
+	}
+	for _, op := range secTexts {
+		if strings.Contains(op.text, "NewSecret9") {
+			t.Fatalf("security password leaked while ShowSecPassword=false: %q", op.text)
+		}
+	}
 }
 
 func TestAccountAPILoginRegisterAvatarAndProfileSync(t *testing.T) {
@@ -748,6 +783,16 @@ func TestAccountAPILoginRegisterAvatarAndProfileSync(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(apiFriendsOverview{
 				Friends: []apiUserProfile{{Username: "AllyPrime", Online: true, LastSeenText: "Online"}},
 			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/auth/change_password":
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "message": "Password updated."})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/leaderboard":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"leaderboard": []apiUserProfile{{Username: "CommanderAce", Elo: 1120, Wins: 5, GamesPlayed: 6, RankTitle: "Captain"}},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/me/matches":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"matches": []apiMatchHistoryEntry{{MatchID: "m1", RoomCode: "ROOM1", Won: true, TerritoryPct: 80.5}},
+			})
 		default:
 			http.NotFound(w, r)
 		}
@@ -768,6 +813,15 @@ func TestAccountAPILoginRegisterAvatarAndProfileSync(t *testing.T) {
 	ov, err := client.FriendsOverview(context.Background(), tok)
 	if err != nil || len(ov.Friends) != 1 || ov.Friends[0].Username != "AllyPrime" {
 		t.Fatalf("friends overview mismatch: ov=%+v err=%v", ov, err)
+	}
+	if msgPW, errPW := client.ChangePassword(context.Background(), tok, "secret", "newsecret9"); errPW != nil || msgPW != "Password updated." {
+		t.Fatalf("ChangePassword mismatch: msg=%q err=%v", msgPW, errPW)
+	}
+	if lb, errLB := client.Leaderboard(context.Background(), 10); errLB != nil || len(lb) != 1 || lb[0].Elo != 1120 {
+		t.Fatalf("Leaderboard mismatch: lb=%+v err=%v", lb, errLB)
+	}
+	if ms, errMS := client.MyMatches(context.Background(), tok, 10); errMS != nil || len(ms) != 1 || ms[0].RoomCode != "ROOM1" {
+		t.Fatalf("MyMatches mismatch: ms=%+v err=%v", ms, errMS)
 	}
 
 	// Verify profile INI persistence preserves existing unrelated sections/keys.

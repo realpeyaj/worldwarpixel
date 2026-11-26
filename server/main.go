@@ -86,12 +86,22 @@ func newServerMux(rm *RoomManager, store *MatchStore, acct ...*AccountService) h
 		})
 	})
 
+	mux.HandleFunc("GET /api/matches/{id}/replay", func(w http.ResponseWriter, r *http.Request) {
+		rep, err := store.GetMatchReplay(r.Context(), r.PathValue("id"))
+		if err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "Replay not found"})
+			return
+		}
+		writeJSON(w, http.StatusOK, rep)
+	})
+
 	mux.HandleFunc("GET /ws", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		roomCode := q.Get("room")
 		playerName := q.Get("name")
 		token := q.Get("token")
 		acctToken := q.Get("account_token")
+		spectate := q.Get("spectate") == "1" || q.Get("spectate") == "true"
 
 		var authedRec *AccountRecord
 		if acctToken != "" {
@@ -123,13 +133,19 @@ func newServerMux(rm *RoomManager, store *MatchStore, acct ...*AccountService) h
 			}
 		}
 
-		slot, reconnected, err := room.Join(playerName, token, sendFn)
+		var slot *PlayerSlot
+		var reconnected bool
+		if spectate {
+			slot, err = room.JoinSpectator(playerName, sendFn)
+		} else {
+			slot, reconnected, err = room.Join(playerName, token, sendFn)
+		}
 		if err != nil {
 			_ = conn.WriteMessage(websocket.TextMessage, mustJSON(map[string]any{"type": "error", "message": err.Error()}))
 			_ = conn.Close()
 			return
 		}
-		if authedRec != nil {
+		if authedRec != nil && !spectate {
 			room.mu.Lock()
 			slot.AccountUser = authedRec.Username
 			slot.AvatarHash = authedRec.AvatarHash
@@ -164,7 +180,11 @@ func newServerMux(rm *RoomManager, store *MatchStore, acct ...*AccountService) h
 			}
 		}()
 
-		room.SendWelcomeAndState(slot, reconnected)
+		if spectate {
+			room.SendSpectatorWelcome(slot)
+		} else {
+			room.SendWelcomeAndState(slot, reconnected)
+		}
 
 		_ = conn.SetReadDeadline(time.Now().Add(65 * time.Second))
 		conn.SetPongHandler(func(string) error {
@@ -182,9 +202,13 @@ func newServerMux(rm *RoomManager, store *MatchStore, acct ...*AccountService) h
 		}
 
 		close(doneCh)
-		room.Detach(slot.NationID, func(p *PlayerSlot) bool {
-			return p == slot
-		})
+		if spectate {
+			room.DetachSpectator(slot)
+		} else {
+			room.Detach(slot.NationID, func(p *PlayerSlot) bool {
+				return p == slot
+			})
+		}
 	})
 
 	return mux

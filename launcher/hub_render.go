@@ -95,6 +95,13 @@ type hubRenderState struct {
 	Friends          []apiUserProfile
 	Incoming         []apiUserProfile
 	SearchResults    []apiUserProfile
+	AccountSubTab    string // "search", "leaderboard", "security"
+	Leaderboard      []apiUserProfile
+	MyMatches        []apiMatchHistoryEntry
+	InputSecCur      string
+	InputSecNew      string
+	InputSecConfirm  string
+	ShowSecPassword  bool
 }
 
 type hubAssets struct {
@@ -1380,95 +1387,217 @@ func renderAccountSignedIn(c *canvasBuf, st hubRenderState, hits []hitItem, text
 		fy += 44
 	}
 
-	// Right Pane: Player Database Search
+	// Right Pane: Switchable Views (SEARCH | LEADERBOARD | SECURITY)
 	c.fillRoundedRect(rightPane, 3, colSurface)
 	c.strokeRoundedRect(rightPane, 3, colBorder)
-	texts = append(texts, textOp{
-		text:    "PLAYER DATABASE SEARCH",
-		rect:    image.Rect(rightPane.Min.X+18, rightPane.Min.Y+14, rightPane.Max.X-18, rightPane.Min.Y+36),
-		sizePx:  13,
-		bold:    true,
-		display: true,
-		col:     colIvory,
-		align:   alignLeft,
-	})
+	subTab := st.AccountSubTab
+	if subTab == "" {
+		subTab = "search"
+	}
+	subTabs := []struct {
+		id, label string
+		x0, x1    int
+	}{
+		{"acct_sub_search", "PLAYER SEARCH", rightPane.Min.X + 18, rightPane.Min.X + 152},
+		{"acct_sub_leaderboard", "LEADERBOARD", rightPane.Min.X + 162, rightPane.Min.X + 292},
+		{"acct_sub_security", "SECURITY", rightPane.Min.X + 302, rightPane.Min.X + 410},
+	}
+	for _, tb := range subTabs {
+		tbR := image.Rect(tb.x0, rightPane.Min.Y+8, tb.x1, rightPane.Min.Y+42)
+		hits = append(hits, hitItem{id: tb.id, rect: tbR, cursor: true})
+		active := (tb.id == "acct_sub_"+subTab)
+		tCol := colStone
+		if active {
+			tCol = colIvory
+			c.fillRect(image.Rect(tbR.Min.X, rightPane.Min.Y+40, tbR.Max.X, rightPane.Min.Y+43), colCrimson)
+		} else if st.HoverID == tb.id {
+			tCol = colIvory
+		}
+		texts = append(texts, textOp{text: tb.label, rect: tbR, sizePx: 12, bold: true, display: true, col: tCol, align: alignCenter})
+	}
 	c.fillRect(image.Rect(rightPane.Min.X+18, rightPane.Min.Y+42, rightPane.Max.X-18, rightPane.Min.Y+43), colBorder)
 
-	sBox := image.Rect(rightPane.Min.X+18, rightPane.Min.Y+54, rightPane.Max.X-114, rightPane.Min.Y+92)
-	sBtn := image.Rect(rightPane.Max.X-106, rightPane.Min.Y+54, rightPane.Max.X-18, rightPane.Min.Y+92)
-	hits = append(hits,
-		hitItem{id: "friend_search", rect: sBox, cursor: true},
-		hitItem{id: "do_search", rect: sBtn, cursor: true},
-	)
-	sBorder := colBorder
-	if st.FocusField == "friend_search" {
-		sBorder = colCrimson
-	}
-	c.fillRoundedRect(sBox, 3, colHeaderBar)
-	c.strokeRoundedRect(sBox, 3, sBorder)
-	sBg := colCrimson
-	if st.HoverID == "do_search" {
-		sBg = colCrimsonHi
-	}
-	c.fillRoundedRect(sBtn, 3, sBg)
-
-	sDisp := st.InputSearch
-	sCol := colIvory
-	if sDisp == "" && st.FocusField != "friend_search" {
-		sDisp = "Search exact or partial username..."
-		sCol = colMuted
-	} else if st.FocusField == "friend_search" && st.CaretVisible {
-		sDisp += "|"
-	}
-	texts = append(texts,
-		textOp{text: sDisp, rect: image.Rect(sBox.Min.X+10, sBox.Min.Y+2, sBox.Max.X-10, sBox.Max.Y-2), sizePx: 13, col: sCol, align: alignLeft, ellipsis: true},
-		textOp{text: "SEARCH", rect: sBtn, sizePx: 12, bold: true, display: true, col: colWhite, align: alignCenter},
-	)
-
-	sy := rightPane.Min.Y + 106
 	msgReserve := 0
 	if st.AuthMessage != "" {
 		msgReserve = 34
 	}
-	for _, u := range st.SearchResults {
-		if sy+42 > rightPane.Max.Y-12-msgReserve {
-			break
-		}
-		rowR := image.Rect(rightPane.Min.X+18, sy, rightPane.Max.X-18, sy+38)
-		c.fillRoundedRect(rowR, 2, colHeaderBar)
-		texts = append(texts, textOp{
-			text:     u.Username,
-			rect:     image.Rect(rowR.Min.X+12, rowR.Min.Y+4, rowR.Max.X-128, rowR.Max.Y-4),
-			sizePx:   13,
-			bold:     true,
-			col:      colIvory,
-			align:    alignLeft,
-			ellipsis: true,
-		})
-		switch u.Relation {
-		case "friend":
-			texts = append(texts, textOp{text: "FRIENDS", rect: image.Rect(rowR.Max.X-110, rowR.Min.Y+4, rowR.Max.X-12, rowR.Max.Y-4), sizePx: 11, bold: true, display: true, col: colEmerald, align: alignRight})
-		case "outgoing":
-			texts = append(texts, textOp{text: "SENT", rect: image.Rect(rowR.Max.X-110, rowR.Min.Y+4, rowR.Max.X-12, rowR.Max.Y-4), sizePx: 11, bold: true, display: true, col: colStone, align: alignRight})
-		case "incoming":
-			accID := "accept_req:" + u.Username
-			accR := image.Rect(rowR.Max.X-84, rowR.Min.Y+6, rowR.Max.X-8, rowR.Max.Y-6)
-			hits = append(hits, hitItem{id: accID, rect: accR, cursor: true})
-			c.fillRoundedRect(accR, 2, colEmerald)
-			texts = append(texts, textOp{text: "ACCEPT", rect: accR, sizePx: 11, bold: true, display: true, col: colRail, align: alignCenter})
-		default:
-			addID := "add_friend:" + u.Username
-			addR := image.Rect(rowR.Max.X-106, rowR.Min.Y+6, rowR.Max.X-8, rowR.Max.Y-6)
-			hits = append(hits, hitItem{id: addID, rect: addR, cursor: true})
-			aBg := colElevated
-			if st.HoverID == addID {
-				aBg = colHoverSurf
+	if subTab == "leaderboard" {
+		ly := rightPane.Min.Y + 54
+		texts = append(texts, textOp{text: "TOP COMMANDERS (ELO)", rect: image.Rect(rightPane.Min.X+18, ly, rightPane.Max.X-18, ly+20), sizePx: 11, bold: true, display: true, col: colBrass, align: alignLeft})
+		ly += 24
+		for i, u := range st.Leaderboard {
+			if i >= 4 || ly+38 > rightPane.Max.Y-120 {
+				break
 			}
-			c.fillRoundedRect(addR, 2, aBg)
-			c.strokeRoundedRect(addR, 2, colBorderHi)
-			texts = append(texts, textOp{text: "+ ADD FRIEND", rect: addR, sizePx: 11, bold: true, display: true, col: colIvory, align: alignCenter})
+			rowR := image.Rect(rightPane.Min.X+18, ly, rightPane.Max.X-18, ly+32)
+			c.fillRoundedRect(rowR, 2, colHeaderBar)
+			rTitle := u.RankTitle
+			if rTitle == "" {
+				rTitle = "Recruit"
+			}
+			eloVal := u.Elo
+			if eloVal <= 0 {
+				eloVal = 1000
+			}
+			texts = append(texts,
+				textOp{text: fmt.Sprintf("#%d  %s · %s", i+1, u.Username, rTitle), rect: image.Rect(rowR.Min.X+10, rowR.Min.Y+2, rowR.Max.X-128, rowR.Max.Y-2), sizePx: 12, bold: true, col: colIvory, align: alignLeft, ellipsis: true},
+				textOp{text: fmt.Sprintf("%d ELO · %dW/%dG", eloVal, u.Wins, u.GamesPlayed), rect: image.Rect(rowR.Max.X-124, rowR.Min.Y+2, rowR.Max.X-10, rowR.Max.Y-2), sizePx: 11, col: colEmerald, align: alignRight},
+			)
+			ly += 36
 		}
-		sy += 44
+		ly += 6
+		texts = append(texts, textOp{text: "RECENT MATCHES", rect: image.Rect(rightPane.Min.X+18, ly, rightPane.Max.X-18, ly+20), sizePx: 11, bold: true, display: true, col: colStone, align: alignLeft})
+		ly += 24
+		if len(st.MyMatches) == 0 {
+			texts = append(texts, textOp{text: "No recorded multiplayer matches yet.", rect: image.Rect(rightPane.Min.X+18, ly, rightPane.Max.X-18, ly+24), sizePx: 12, col: colMuted, align: alignLeft})
+		}
+		for _, m := range st.MyMatches {
+			if ly+32 > rightPane.Max.Y-12-msgReserve {
+				break
+			}
+			rowR := image.Rect(rightPane.Min.X+18, ly, rightPane.Max.X-18, ly+28)
+			c.fillRoundedRect(rowR, 2, colHeaderBar)
+			resTag := "LOSS"
+			resCol := colCrimsonHi
+			if m.Won {
+				resTag = "WIN"
+				resCol = colEmerald
+			}
+			texts = append(texts,
+				textOp{text: fmt.Sprintf("%s · Room %s", resTag, m.RoomCode), rect: image.Rect(rowR.Min.X+10, rowR.Min.Y+2, rowR.Max.X-110, rowR.Max.Y-2), sizePx: 12, bold: true, col: resCol, align: alignLeft, ellipsis: true},
+				textOp{text: fmt.Sprintf("%.1f%% Land", m.TerritoryPct), rect: image.Rect(rowR.Max.X-106, rowR.Min.Y+2, rowR.Max.X-10, rowR.Max.Y-2), sizePx: 11, col: colStone, align: alignRight},
+			)
+			ly += 32
+		}
+	} else if subTab == "security" {
+		secFields := []struct {
+			id, lbl, val, ph string
+			y                int
+			eye              bool
+		}{
+			{"sec_cur", "CURRENT PASSWORD", st.InputSecCur, "Enter current password", rightPane.Min.Y + 74, false},
+			{"sec_new", "NEW PASSWORD", st.InputSecNew, "New password (min 4 chars)", rightPane.Min.Y + 148, true},
+			{"sec_confirm", "CONFIRM NEW PASSWORD", st.InputSecConfirm, "Re-enter new password", rightPane.Min.Y + 222, true},
+		}
+		secEyeCol := colStone
+		if st.ShowSecPassword || st.HoverID == "toggle_sec_eye" {
+			secEyeCol = colIvory
+		}
+		for _, sf := range secFields {
+			texts = append(texts, textOp{text: sf.lbl, rect: image.Rect(rightPane.Min.X+18, sf.y-20, rightPane.Max.X-18, sf.y-2), sizePx: 11, bold: true, display: true, col: colStone, align: alignLeft})
+			fR := image.Rect(rightPane.Min.X+18, sf.y, rightPane.Max.X-18, sf.y+38)
+			inR := fR
+			if sf.eye {
+				inR = image.Rect(fR.Min.X, fR.Min.Y, fR.Max.X-40, fR.Max.Y)
+				eR := image.Rect(fR.Max.X-40, fR.Min.Y, fR.Max.X, fR.Max.Y)
+				hits = append(hits, hitItem{id: "toggle_sec_eye", rect: eR, cursor: true})
+			}
+			hits = append(hits, hitItem{id: sf.id, rect: inR, cursor: true})
+			bd := colBorder
+			if st.FocusField == sf.id {
+				bd = colCrimson
+			}
+			c.fillRoundedRect(fR, 3, colHeaderBar)
+			c.strokeRoundedRect(fR, 3, bd)
+			if sf.eye {
+				drawEyeIcon(c, fR.Max.X-20, (fR.Min.Y+fR.Max.Y)/2, st.ShowSecPassword, secEyeCol)
+			}
+			disp := sf.val
+			if !st.ShowSecPassword {
+				disp = strings.Repeat("•", len([]rune(sf.val)))
+			}
+			dCol := colIvory
+			if disp == "" && st.FocusField != sf.id {
+				disp = sf.ph
+				dCol = colMuted
+			} else if st.FocusField == sf.id && st.CaretVisible {
+				disp += "|"
+			}
+			texts = append(texts, textOp{text: disp, rect: image.Rect(fR.Min.X+10, fR.Min.Y+2, inR.Max.X-6, fR.Max.Y-2), sizePx: 13, col: dCol, align: alignLeft, ellipsis: true})
+		}
+		updR := image.Rect(rightPane.Min.X+18, rightPane.Min.Y+282, rightPane.Max.X-18, rightPane.Min.Y+324)
+		hits = append(hits, hitItem{id: "sec_submit", rect: updR, cursor: true})
+		uBg := colCrimson
+		if st.AuthBusy {
+			uBg = colElevated
+		} else if st.HoverID == "sec_submit" {
+			uBg = colCrimsonHi
+		}
+		c.fillRoundedRect(updR, 3, uBg)
+		texts = append(texts, textOp{text: "UPDATE PASSWORD", rect: updR, sizePx: 13, bold: true, display: true, col: colWhite, align: alignCenter})
+	} else {
+		sBox := image.Rect(rightPane.Min.X+18, rightPane.Min.Y+54, rightPane.Max.X-114, rightPane.Min.Y+92)
+		sBtn := image.Rect(rightPane.Max.X-106, rightPane.Min.Y+54, rightPane.Max.X-18, rightPane.Min.Y+92)
+		hits = append(hits,
+			hitItem{id: "friend_search", rect: sBox, cursor: true},
+			hitItem{id: "do_search", rect: sBtn, cursor: true},
+		)
+		sBorder := colBorder
+		if st.FocusField == "friend_search" {
+			sBorder = colCrimson
+		}
+		c.fillRoundedRect(sBox, 3, colHeaderBar)
+		c.strokeRoundedRect(sBox, 3, sBorder)
+		sBg := colCrimson
+		if st.HoverID == "do_search" {
+			sBg = colCrimsonHi
+		}
+		c.fillRoundedRect(sBtn, 3, sBg)
+
+		sDisp := st.InputSearch
+		sCol := colIvory
+		if sDisp == "" && st.FocusField != "friend_search" {
+			sDisp = "Search exact or partial username..."
+			sCol = colMuted
+		} else if st.FocusField == "friend_search" && st.CaretVisible {
+			sDisp += "|"
+		}
+		texts = append(texts,
+			textOp{text: sDisp, rect: image.Rect(sBox.Min.X+10, sBox.Min.Y+2, sBox.Max.X-10, sBox.Max.Y-2), sizePx: 13, col: sCol, align: alignLeft, ellipsis: true},
+			textOp{text: "SEARCH", rect: sBtn, sizePx: 12, bold: true, display: true, col: colWhite, align: alignCenter},
+		)
+
+		sy := rightPane.Min.Y + 106
+		for _, u := range st.SearchResults {
+			if sy+42 > rightPane.Max.Y-12-msgReserve {
+				break
+			}
+			rowR := image.Rect(rightPane.Min.X+18, sy, rightPane.Max.X-18, sy+38)
+			c.fillRoundedRect(rowR, 2, colHeaderBar)
+			texts = append(texts, textOp{
+				text:     u.Username,
+				rect:     image.Rect(rowR.Min.X+12, rowR.Min.Y+4, rowR.Max.X-128, rowR.Max.Y-4),
+				sizePx:   13,
+				bold:     true,
+				col:      colIvory,
+				align:    alignLeft,
+				ellipsis: true,
+			})
+			switch u.Relation {
+			case "friend":
+				texts = append(texts, textOp{text: "FRIENDS", rect: image.Rect(rowR.Max.X-110, rowR.Min.Y+4, rowR.Max.X-12, rowR.Max.Y-4), sizePx: 11, bold: true, display: true, col: colEmerald, align: alignRight})
+			case "outgoing":
+				texts = append(texts, textOp{text: "SENT", rect: image.Rect(rowR.Max.X-110, rowR.Min.Y+4, rowR.Max.X-12, rowR.Max.Y-4), sizePx: 11, bold: true, display: true, col: colStone, align: alignRight})
+			case "incoming":
+				accID := "accept_req:" + u.Username
+				accR := image.Rect(rowR.Max.X-84, rowR.Min.Y+6, rowR.Max.X-8, rowR.Max.Y-6)
+				hits = append(hits, hitItem{id: accID, rect: accR, cursor: true})
+				c.fillRoundedRect(accR, 2, colEmerald)
+				texts = append(texts, textOp{text: "ACCEPT", rect: accR, sizePx: 11, bold: true, display: true, col: colRail, align: alignCenter})
+			default:
+				addID := "add_friend:" + u.Username
+				addR := image.Rect(rowR.Max.X-106, rowR.Min.Y+6, rowR.Max.X-8, rowR.Max.Y-6)
+				hits = append(hits, hitItem{id: addID, rect: addR, cursor: true})
+				aBg := colElevated
+				if st.HoverID == addID {
+					aBg = colHoverSurf
+				}
+				c.fillRoundedRect(addR, 2, aBg)
+				c.strokeRoundedRect(addR, 2, colBorderHi)
+				texts = append(texts, textOp{text: "+ ADD FRIEND", rect: addR, sizePx: 11, bold: true, display: true, col: colIvory, align: alignCenter})
+			}
+			sy += 44
+		}
 	}
 
 	if st.AuthMessage != "" {

@@ -10,10 +10,6 @@ const WARSHIP_DIAMOND_HALF_WID := 3.5
 
 var _tex_train: Texture2D = preload("res://assets/sprites/icon_train.png")
 var _tex_train_mask: Texture2D = preload("res://assets/sprites/icon_train_mask.png")
-var _tex_missile: Texture2D = preload("res://assets/sprites/icon_missile.png")
-var _tex_atom: Texture2D = preload("res://assets/sprites/icon_atom.png")
-var _tex_hbomb: Texture2D = preload("res://assets/sprites/icon_hbomb.png")
-var _tex_mirv: Texture2D = preload("res://assets/sprites/icon_mirv.png")
 
 var _world_state: WorldState
 var _camera: Camera2D
@@ -285,9 +281,9 @@ func _draw() -> void:
 			continue
 		var is_sam: bool = (m.kind == MissileUnit.KIND_SAM)
 		if is_sam:
-			draw_line(m.start_pos, m.pos, Color(0.38, 0.94, 1.0, 0.68), 1.2 * ship_scale)
-			draw_circle(m.pos, 2.2 * ship_scale, Color(0.45, 0.96, 1.0, 1.0))
-			draw_circle(m.pos, 1.2 * ship_scale, Color(1.0, 0.95, 0.78, 1.0))
+			var t_sam: float = maxf(0.0, m.progress - 0.55)
+			draw_line(m.start_pos.lerp(m.pos, t_sam), m.pos, Color(0.45, 0.94, 1.0, 0.55), 1.0 * ship_scale)
+			_draw_actual_missile(m, ship_scale, false)
 		else:
 			var is_mini: bool = (m.kind == MissileUnit.KIND_MIRV_WARHEAD)
 			var is_intercepted: bool = targeted_by_sam.has(m.id)
@@ -315,13 +311,14 @@ func _draw() -> void:
 			if m.ground_pos != Vector2.ZERO and not is_mini:
 				draw_circle(m.ground_pos, 1.4 * ship_scale, Color(0.04, 0.05, 0.08, 0.30))
 
-			# OpenFront 1:1 Rotating Dashed Nuke Telegraph Circle at target impact zone
+			# Exact destroyed blast radius telegraph at impact zone (1:1 with _detonate_missile)
 			var tele_col := Color(1.0, 0.18, 0.16, 0.86)
 			if m.nation_id == _world_state.player_nation_id:
 				tele_col = Color(0.16, 0.96, 0.38, 0.84)
 			elif _world_state.are_allied(_world_state.player_nation_id, m.nation_id):
 				tele_col = Color(1.0, 0.92, 0.20, 0.84)
-			var tele_r: float = (12.0 * inv_z) if m.kind == MissileUnit.KIND_MIRV else maxf(float(m.blast_radius_sim) * 2.0, 5.0 * inv_z)
+			var sim_s: float = _world_state.sim_scale
+			var tele_r: float = (12.0 * inv_z) if m.kind == MissileUnit.KIND_MIRV else (float(m.blast_radius_sim) * sim_s)
 			var tele_pulse: float = 0.82 + 0.12 * sin(_elapsed * 3.5)
 			if not is_mini:
 				draw_circle(m.target_pos, tele_r, Color(tele_col.r, tele_col.g, tele_col.b, 0.11 * tele_pulse))
@@ -332,29 +329,12 @@ func _draw() -> void:
 				var a0: float = rot_base + float(di) * seg_step
 				draw_arc(m.target_pos, tele_r, a0, a0 + seg_step * 0.62, 4, Color(tele_col.r, tele_col.g, tele_col.b, tele_col.a * tele_pulse), (1.0 if is_mini else 1.4) * inv_z)
 
-			if is_intercepted:
-				var xr: float = (3.5 if is_mini else 5.5) * ship_scale
-				var x_col := Color(1.0, 0.31, 0.31, 0.95)
-				draw_line(m.pos - Vector2(xr, xr), m.pos + Vector2(xr, xr), x_col, 1.3 * ship_scale)
-				draw_line(m.pos - Vector2(xr, -xr), m.pos + Vector2(xr, -xr), x_col, 1.3 * ship_scale)
-
-			# OpenFront 1:1 H-Bomb golden glow halo
+			# H-Bomb warm halo in flight
 			if m.kind == MissileUnit.KIND_HYDROGEN:
-				draw_circle(m.pos, 9.5 * ship_scale, Color(1.0, 0.72, 0.15, 0.28))
-				draw_circle(m.pos, 5.5 * ship_scale, Color(1.0, 0.84, 0.30, 0.42))
+				draw_circle(m.pos, 8.5 * ship_scale, Color(1.0, 0.72, 0.15, 0.26))
+				draw_circle(m.pos, 4.8 * ship_scale, Color(1.0, 0.84, 0.30, 0.38))
 
-			var m_tex: Texture2D = _tex_atom
-			var m_sz := Vector2(11.0, 11.0) * ship_scale
-			if m.kind == MissileUnit.KIND_HYDROGEN:
-				m_tex = _tex_hbomb
-				m_sz = Vector2(12.5, 12.5) * ship_scale
-			elif m.kind == MissileUnit.KIND_MIRV:
-				m_tex = _tex_mirv
-				m_sz = Vector2(13.0, 13.0) * ship_scale
-			elif is_mini:
-				m_tex = _tex_atom
-				m_sz = Vector2(7.0, 7.0) * ship_scale
-			draw_texture_rect(m_tex, Rect2(m.pos - m_sz * 0.5, m_sz), false, Color(1.0, 1.0, 1.0, 0.98))
+			_draw_actual_missile(m, ship_scale, is_intercepted)
 
 	# 6. Explosions & Intercept Flashes
 	for ex: Dictionary in _explosions:
@@ -371,6 +351,70 @@ static func _format_troops(amount: float) -> String:
 	if n >= 1000:
 		return "%.1fk" % (float(n) / 1000.0)
 	return "%d" % n
+
+
+func _draw_actual_missile(m: MissileUnit, s: float, is_intercepted: bool) -> void:
+	var flick: float = 0.82 + 0.18 * sin(_elapsed * 32.0 + float(m.id))
+	draw_set_transform(m.pos, m.heading, Vector2.ONE)
+	match m.kind:
+		MissileUnit.KIND_SAM:
+			# Needle interceptor + swept cyan fins + hot cyan-white exhaust
+			var exhaust := PackedVector2Array([Vector2(-3.2 * s, 0.0), Vector2(-7.8 * s * flick, -1.2 * s), Vector2(-9.5 * s * flick, 0.0), Vector2(-7.8 * s * flick, 1.2 * s)])
+			draw_colored_polygon(exhaust, Color(0.42, 0.96, 1.0, 0.90))
+			var body := PackedVector2Array([Vector2(-3.4 * s, -0.95 * s), Vector2(3.6 * s, -0.75 * s), Vector2(6.2 * s, 0.0), Vector2(3.6 * s, 0.75 * s), Vector2(-3.4 * s, 0.95 * s)])
+			draw_colored_polygon(body, Color(0.92, 0.96, 1.0, 1.0))
+			var nose := PackedVector2Array([Vector2(3.6 * s, -0.75 * s), Vector2(6.4 * s, 0.0), Vector2(3.6 * s, 0.75 * s)])
+			draw_colored_polygon(nose, Color(0.24, 0.88, 1.0, 1.0))
+			var f1 := PackedVector2Array([Vector2(-3.4 * s, -0.95 * s), Vector2(-4.4 * s, -2.5 * s), Vector2(-1.8 * s, -0.95 * s)])
+			var f2 := PackedVector2Array([Vector2(-3.4 * s, 0.95 * s), Vector2(-4.4 * s, 2.5 * s), Vector2(-1.8 * s, 0.95 * s)])
+			draw_colored_polygon(f1, Color(0.24, 0.76, 0.96, 0.98))
+			draw_colored_polygon(f2, Color(0.24, 0.76, 0.96, 0.98))
+		MissileUnit.KIND_HYDROGEN:
+			# Heavy thermonuclear ICBM: side fins, slate-silver body, brass collar, crimson warhead
+			var flame := PackedVector2Array([Vector2(-5.5 * s, -1.5 * s), Vector2(-12.5 * s * flick, -2.1 * s), Vector2(-15.5 * s * flick, 0.0), Vector2(-12.5 * s * flick, 2.1 * s), Vector2(-5.5 * s, 1.5 * s)])
+			draw_colored_polygon(flame, Color(1.0, 0.68, 0.16, 0.92))
+			var body_h := PackedVector2Array([Vector2(-5.8 * s, -1.9 * s), Vector2(4.6 * s, -1.6 * s), Vector2(4.6 * s, 1.6 * s), Vector2(-5.8 * s, 1.9 * s)])
+			draw_colored_polygon(body_h, Color(0.82, 0.86, 0.92, 1.0))
+			draw_rect(Rect2(Vector2(1.4 * s, -1.6 * s), Vector2(1.4 * s, 3.2 * s)), Color(0.95, 0.78, 0.24, 1.0), true)
+			var nose_h := PackedVector2Array([Vector2(4.6 * s, -1.6 * s), Vector2(8.8 * s, 0.0), Vector2(4.6 * s, 1.6 * s)])
+			draw_colored_polygon(nose_h, Color(0.96, 0.22, 0.22, 1.0))
+			var hf1 := PackedVector2Array([Vector2(-5.8 * s, -1.9 * s), Vector2(-7.2 * s, -4.1 * s), Vector2(-2.4 * s, -1.8 * s)])
+			var hf2 := PackedVector2Array([Vector2(-5.8 * s, 1.9 * s), Vector2(-7.2 * s, 4.1 * s), Vector2(-2.4 * s, 1.8 * s)])
+			draw_colored_polygon(hf1, Color(0.54, 0.20, 0.22, 1.0))
+			draw_colored_polygon(hf2, Color(0.54, 0.20, 0.22, 1.0))
+		MissileUnit.KIND_MIRV:
+			# Wide multi-warhead carrier fairing + twin plumes
+			var plume := PackedVector2Array([Vector2(-5.2 * s, -1.8 * s), Vector2(-12.0 * s * flick, 0.0), Vector2(-5.2 * s, 1.8 * s)])
+			draw_colored_polygon(plume, Color(1.0, 0.48, 0.18, 0.92))
+			var hull := PackedVector2Array([Vector2(-5.5 * s, -2.3 * s), Vector2(3.8 * s, -2.0 * s), Vector2(8.2 * s, 0.0), Vector2(3.8 * s, 2.0 * s), Vector2(-5.5 * s, 2.3 * s)])
+			draw_colored_polygon(hull, Color(0.24, 0.28, 0.36, 1.0))
+			var cap := PackedVector2Array([Vector2(3.8 * s, -2.0 * s), Vector2(8.4 * s, 0.0), Vector2(3.8 * s, 2.0 * s)])
+			draw_colored_polygon(cap, Color(0.98, 0.72, 0.18, 1.0))
+			draw_rect(Rect2(Vector2(-2.5 * s, -2.2 * s), Vector2(2.4 * s, 4.4 * s)), Color(0.95, 0.26, 0.28, 0.96), true)
+		MissileUnit.KIND_MIRV_WARHEAD:
+			# Compact re-entry cone dart
+			var r_flame := PackedVector2Array([Vector2(-2.2 * s, -0.8 * s), Vector2(-6.5 * s * flick, 0.0), Vector2(-2.2 * s, 0.8 * s)])
+			draw_colored_polygon(r_flame, Color(1.0, 0.78, 0.26, 0.94))
+			var cone := PackedVector2Array([Vector2(-2.4 * s, -1.2 * s), Vector2(4.2 * s, 0.0), Vector2(-2.4 * s, 1.2 * s)])
+			draw_colored_polygon(cone, Color(0.98, 0.28, 0.22, 1.0))
+		_:
+			# Atom tactical ballistic missile
+			var a_flame := PackedVector2Array([Vector2(-4.4 * s, -1.1 * s), Vector2(-10.2 * s * flick, 0.0), Vector2(-4.4 * s, 1.1 * s)])
+			draw_colored_polygon(a_flame, Color(1.0, 0.56, 0.16, 0.92))
+			var a_body := PackedVector2Array([Vector2(-4.6 * s, -1.4 * s), Vector2(3.6 * s, -1.25 * s), Vector2(3.6 * s, 1.25 * s), Vector2(-4.6 * s, 1.4 * s)])
+			draw_colored_polygon(a_body, Color(0.88, 0.90, 0.94, 1.0))
+			var a_nose := PackedVector2Array([Vector2(3.6 * s, -1.25 * s), Vector2(7.0 * s, 0.0), Vector2(3.6 * s, 1.25 * s)])
+			draw_colored_polygon(a_nose, Color(0.96, 0.24, 0.22, 1.0))
+			var af1 := PackedVector2Array([Vector2(-4.6 * s, -1.4 * s), Vector2(-5.8 * s, -3.1 * s), Vector2(-1.9 * s, -1.35 * s)])
+			var af2 := PackedVector2Array([Vector2(-4.6 * s, 1.4 * s), Vector2(-5.8 * s, 3.1 * s), Vector2(-1.9 * s, 1.35 * s)])
+			draw_colored_polygon(af1, Color(0.68, 0.22, 0.24, 1.0))
+			draw_colored_polygon(af2, Color(0.68, 0.22, 0.24, 1.0))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	if is_intercepted:
+		var xr: float = (3.5 if m.kind == MissileUnit.KIND_MIRV_WARHEAD else 5.5) * s
+		var x_col := Color(1.0, 0.31, 0.31, 0.95)
+		draw_line(m.pos - Vector2(xr, xr), m.pos + Vector2(xr, xr), x_col, 1.3 * s)
+		draw_line(m.pos - Vector2(xr, -xr), m.pos + Vector2(xr, -xr), x_col, 1.3 * s)
 
 
 func _draw_crosshair(center: Vector2, r: float, col: Color, inv_z: float) -> void:

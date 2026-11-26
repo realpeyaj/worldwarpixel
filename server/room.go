@@ -41,6 +41,7 @@ type PlayerSlot struct {
 	HasSpawn       bool         `json:"has_spawn"`
 	Connected      bool         `json:"connected"`
 	IsHost         bool         `json:"is_host"`
+	IsSpectator    bool         `json:"-"`
 	LastSeq        int64        `json:"-"`
 	Limiter        *RateLimiter `json:"-"`
 	sendMu         sync.Mutex   `json:"-"`
@@ -75,8 +76,13 @@ type Room struct {
 	AICount       int
 	IsPublic      bool
 	TeamMode      bool
+	GameSpeed     float64
+	NoNukes       bool
+	AIDifficulty  string
+	StartPreset   string
 	CurrentTick   int
 	Players       []*PlayerSlot
+	Spectators    []*PlayerSlot
 	PendingCmds   []map[string]any
 	Batches       []BatchRecord
 	SyncHashes    map[int]map[int]int64 // tick -> nationID -> hash
@@ -103,6 +109,9 @@ func NewRoom(code string, store *MatchStore, acct ...*AccountService) *Room {
 		Seed:         randSeed(),
 		AICount:      4,
 		IsPublic:     true,
+		GameSpeed:    1.0,
+		AIDifficulty: "normal",
+		StartPreset:  "standard",
 		SyncHashes:   make(map[int]map[int]int64),
 		LastActivity: time.Now(),
 		Store:        store,
@@ -139,6 +148,29 @@ func generateRoomCode() string {
 	return b.String()
 }
 
+func (r *Room) optionsMapLocked() map[string]any {
+	spd := r.GameSpeed
+	if spd <= 0 {
+		spd = 1.0
+	}
+	diff := r.AIDifficulty
+	if diff == "" {
+		diff = "normal"
+	}
+	preset := r.StartPreset
+	if preset == "" {
+		preset = "standard"
+	}
+	return map[string]any{
+		"is_public":     r.IsPublic,
+		"team_mode":     r.TeamMode,
+		"game_speed":    spd,
+		"no_nukes":      r.NoNukes,
+		"ai_difficulty": diff,
+		"start_preset":  preset,
+	}
+}
+
 // Summary returns public metadata for GET /api/rooms.
 func (r *Room) Summary() map[string]any {
 	r.mu.Lock()
@@ -154,17 +186,21 @@ func (r *Room) Summary() map[string]any {
 		}
 	}
 	return map[string]any{
-		"code":        r.Code,
-		"phase":       r.Phase,
-		"players":     connectedCount,
-		"total_slots": len(r.Players),
-		"max_players": MaxPlayersPerRoom,
-		"ai_count":    r.AICount,
-		"tick":        r.CurrentTick,
-		"is_public":   r.IsPublic,
-		"team_mode":   r.TeamMode,
-		"host_name":   hostName,
-		"joinable":    r.IsPublic && r.Phase == PhaseLobby && len(r.Players) < MaxPlayersPerRoom,
+		"code":             r.Code,
+		"match_id":         r.MatchID,
+		"phase":            r.Phase,
+		"players":          connectedCount,
+		"total_slots":      len(r.Players),
+		"max_players":      MaxPlayersPerRoom,
+		"ai_count":         r.AICount,
+		"tick":             r.CurrentTick,
+		"is_public":        r.IsPublic,
+		"team_mode":        r.TeamMode,
+		"options":          r.optionsMapLocked(),
+		"host_name":        hostName,
+		"joinable":         r.IsPublic && r.Phase == PhaseLobby && len(r.Players) < MaxPlayersPerRoom,
+		"spectatable":      r.IsPublic && r.Phase == PhasePlaying,
+		"spectator_count":  len(r.Spectators),
 	}
 }
 
@@ -278,6 +314,7 @@ func (r *Room) SendWelcomeAndState(slot *PlayerSlot, reconnected bool) {
 			"seed":            r.Seed,
 			"local_nation_id": slot.NationID,
 			"ai_count":        r.AICount,
+			"options":         r.optionsMapLocked(),
 			"players":         r.snapshotPlayersLocked(),
 			"current_tick":    r.CurrentTick,
 			"batches":         append([]BatchRecord(nil), r.Batches...),
@@ -300,6 +337,83 @@ func (r *Room) SendWelcomeAndState(slot *PlayerSlot, reconnected bool) {
 		slot.Send(snapMsg)
 	}
 	r.broadcastBytes(lobbyMsg)
+}
+
+// JoinSpectator attaches a read-only live spectator to an active or lobby room.
+func (r *Room) JoinSpectator(name string, sendFn func([]byte)) (*PlayerSlot, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return nil, errRoomClosed
+	}
+	if len(r.Spectators) >= 32 {
+		return nil, errRoomFull
+	}
+	slot := &PlayerSlot{
+		NationID:    0,
+		Name:        sanitizeName(name),
+		Connected:   true,
+		IsSpectator: true,
+		Limiter:     NewRateLimiter(4.0, 8.0),
+		sendFn:      sendFn,
+	}
+	r.Spectators = append(r.Spectators, slot)
+	r.LastActivity = time.Now()
+	return slot, nil
+}
+
+// DetachSpectator removes a disconnected spectator cleanly.
+func (r *Room) DetachSpectator(slot *PlayerSlot) {
+	if slot == nil {
+		return
+	}
+	slot.sendMu.Lock()
+	slot.Connected = false
+	slot.sendFn = nil
+	slot.sendMu.Unlock()
+	r.mu.Lock()
+	kept := r.Spectators[:0]
+	for _, sp := range r.Spectators {
+		if sp != slot {
+			kept = append(kept, sp)
+		}
+	}
+	r.Spectators = kept
+	r.mu.Unlock()
+}
+
+// SendSpectatorWelcome delivers initial spectator handshake + full match snapshot.
+func (r *Room) SendSpectatorWelcome(slot *PlayerSlot) {
+	r.mu.Lock()
+	welcome := mustJSON(map[string]any{
+		"type":            "connected",
+		"room_code":       r.Code,
+		"nation_id":       0,
+		"reconnect_token": "",
+		"is_host":         false,
+		"spectator":       true,
+	})
+	lobbyMsg := mustJSON(r.buildLobbyLocked())
+	var snapMsg []byte
+	if r.Phase == PhasePlaying || r.Phase == PhaseFinished {
+		snapMsg = mustJSON(map[string]any{
+			"type":            "match_snapshot",
+			"seed":            r.Seed,
+			"local_nation_id": 0,
+			"spectator":       true,
+			"ai_count":        r.AICount,
+			"options":         r.optionsMapLocked(),
+			"players":         r.snapshotPlayersLocked(),
+			"current_tick":    r.CurrentTick,
+			"batches":         append([]BatchRecord(nil), r.Batches...),
+		})
+	}
+	r.mu.Unlock()
+	slot.Send(welcome)
+	slot.Send(lobbyMsg)
+	if snapMsg != nil {
+		slot.Send(snapMsg)
+	}
 }
 
 func (r *Room) snapshotPlayersLocked() []map[string]any {
@@ -325,10 +439,12 @@ func (r *Room) buildLobbyLocked() map[string]any {
 	return map[string]any{
 		"type":      "lobby_state",
 		"room_code": r.Code,
+		"match_id":  r.MatchID,
 		"phase":     r.Phase,
 		"ai_count":  r.AICount,
 		"is_public": r.IsPublic,
 		"team_mode": r.TeamMode,
+		"options":   r.optionsMapLocked(),
 		"players":   r.snapshotPlayersLocked(),
 	}
 }
@@ -344,6 +460,13 @@ func (r *Room) HandleClientMessage(slot *PlayerSlot, raw []byte) {
 	if msgType == "ping" {
 		slot.Send(mustJSON(map[string]any{"type": "pong", "t": env["t"]}))
 		return
+	}
+	if slot.IsSpectator {
+		if msgType == "chat_msg" {
+			// Spectators may only post in All chat at a limited rate.
+		} else {
+			return
+		}
 	}
 
 	r.mu.Lock()
@@ -505,9 +628,70 @@ func (r *Room) HandleClientMessage(slot *PlayerSlot, raw []byte) {
 				}
 			}
 		}
+		if spd, ok := asFloat(env["game_speed"]); ok {
+			if spd == 1.0 || spd == 1.5 || spd == 2.0 {
+				r.GameSpeed = spd
+			}
+		}
+		if nn, ok := asBool(env["no_nukes"]); ok {
+			r.NoNukes = nn
+		}
+		if diff, ok := asString(env["ai_difficulty"]); ok {
+			if diff == "normal" || diff == "hard" || diff == "brutal" {
+				r.AIDifficulty = diff
+			}
+		}
+		if preset, ok := asString(env["start_preset"]); ok {
+			if preset == "standard" || preset == "fast" || preset == "sandbox" {
+				r.StartPreset = preset
+			}
+		}
 		lobbyMsg := mustJSON(r.buildLobbyLocked())
 		r.mu.Unlock()
 		r.broadcastBytes(lobbyMsg)
+
+	case "chat_msg":
+		if !slot.Limiter.Allow() {
+			r.mu.Unlock()
+			return
+		}
+		rawTxt, _ := asString(env["text"])
+		txt := strings.TrimSpace(rawTxt)
+		if txt == "" {
+			r.mu.Unlock()
+			return
+		}
+		if len(txt) > 160 {
+			txt = txt[:160]
+		}
+		ch, _ := asString(env["channel"])
+		if ch != "team" || slot.IsSpectator || !r.TeamMode || slot.TeamID <= 0 {
+			ch = "all"
+		}
+		senderTeam := slot.TeamID
+		chatBytes := mustJSON(map[string]any{
+			"type":           "chat_msg",
+			"from_nation_id": slot.NationID,
+			"from_name":      slot.Name,
+			"team_id":        senderTeam,
+			"channel":        ch,
+			"text":           txt,
+		})
+		if ch == "team" {
+			targets := make([]*PlayerSlot, 0, len(r.Players))
+			for _, p := range r.Players {
+				if p.TeamID == senderTeam {
+					targets = append(targets, p)
+				}
+			}
+			r.mu.Unlock()
+			for _, p := range targets {
+				p.Send(chatBytes)
+			}
+			return
+		}
+		r.mu.Unlock()
+		r.broadcastBytes(chatBytes)
 
 	case "map_ping":
 		if r.Phase != PhasePlaying && r.Phase != PhaseSpawning {
@@ -578,7 +762,7 @@ func (r *Room) HandleClientMessage(slot *PlayerSlot, raw []byte) {
 				go func() {
 					ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 					defer cancel()
-					_ = store.UpdateMatchWinner(ctx, matchID, PhaseFinished, winID)
+					_ = store.SaveMatchOutcome(ctx, matchID, PhaseFinished, winID, winTeamID, participants)
 				}()
 			}
 			return
@@ -607,16 +791,20 @@ func (r *Room) beginPlayingIfSpawning() {
 		return
 	}
 	r.Phase = PhasePlaying
+	snapPlayers := r.snapshotPlayersLocked()
+	opts := r.optionsMapLocked()
 	beginMsg := mustJSON(map[string]any{
 		"type":     "match_begin",
 		"seed":     r.Seed,
 		"ai_count": r.AICount,
-		"players":  r.snapshotPlayersLocked(),
+		"options":  opts,
+		"players":  snapPlayers,
 	})
 	lobbyMsg := mustJSON(r.buildLobbyLocked())
 	matchID := r.MatchID
 	code := r.Code
 	seed := r.Seed
+	aiCount := r.AICount
 	store := r.Store
 	if !r.tickerRunning {
 		r.tickerRunning = true
@@ -629,7 +817,7 @@ func (r *Room) beginPlayingIfSpawning() {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 			defer cancel()
-			_ = store.SaveMatch(ctx, matchID, code, seed, PhasePlaying)
+			_ = store.SaveMatchMeta(ctx, matchID, code, seed, aiCount, snapPlayers, opts, PhasePlaying)
 		}()
 	}
 
@@ -655,7 +843,17 @@ func (r *Room) runPersistWorker() {
 }
 
 func (r *Room) runTickLoop() {
-	batchInterval := time.Duration(TicksPerBatch) * (time.Second / time.Duration(TickHz))
+	r.mu.Lock()
+	spd := r.GameSpeed
+	r.mu.Unlock()
+	if spd <= 0 {
+		spd = 1.0
+	}
+	intervalMs := (float64(TicksPerBatch) * 1000.0 / float64(TickHz)) / spd
+	if intervalMs < 20.0 {
+		intervalMs = 20.0
+	}
+	batchInterval := time.Duration(intervalMs * float64(time.Millisecond))
 	ticker := time.NewTicker(batchInterval)
 	defer ticker.Stop()
 
@@ -711,7 +909,9 @@ func (r *Room) runTickLoop() {
 
 func (r *Room) broadcastBytes(data []byte) {
 	r.mu.Lock()
-	targets := append([]*PlayerSlot(nil), r.Players...)
+	targets := make([]*PlayerSlot, 0, len(r.Players)+len(r.Spectators))
+	targets = append(targets, r.Players...)
+	targets = append(targets, r.Spectators...)
 	r.mu.Unlock()
 	for _, p := range targets {
 		p.Send(data)

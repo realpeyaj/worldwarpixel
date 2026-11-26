@@ -12,6 +12,11 @@ var account_client := AccountClient.new()
 var is_multiplayer: bool = false
 var _mp_spawning: bool = false
 var _pending_batches: Array[Dictionary] = []
+var _replay_active: bool = false
+var _replay_batches: Array = []
+var _replay_cursor: int = 0
+var _replay_accum: float = 0.0
+var _replay_speed: float = 1.0
 var _tcp_ping: StreamPeerTCP = StreamPeerTCP.new()
 var _http_ping_timer: float = 0.5
 var _http_ping_inflight: bool = false
@@ -73,12 +78,29 @@ func _ready() -> void:
 	hud.mp_rooms_refresh_requested.connect(_on_mp_rooms_refresh_requested)
 	hud.mp_team_selected.connect(func(tid: int) -> void: mp_client.send_set_team(tid))
 	hud.mp_room_options_changed.connect(func(is_pub: bool, tm: bool) -> void: mp_client.send_room_options(is_pub, tm))
+	hud.mp_room_modifiers_changed.connect(func(opts: Dictionary) -> void: mp_client.send_room_modifiers(opts))
+	hud.mp_spectate_requested.connect(_on_mp_spectate_requested)
+	hud.chat_send_requested.connect(func(ch: String, txt: String) -> void:
+		if mp_client.is_socket_active():
+			mp_client.send_chat_message(ch, txt)
+	)
+	hud.leaderboard_open_requested.connect(func() -> void:
+		account_client.fetch_leaderboard(25, func(_ok: bool, _list: Array) -> void: pass)
+		if account_client.is_logged_in:
+			account_client.fetch_my_matches(20, func(_ok: bool, _m: Array) -> void: pass)
+	)
+	hud.watch_replay_requested.connect(_on_watch_replay_requested)
+	hud.replay_speed_changed.connect(func(spd: float) -> void:
+		_replay_speed = clampf(spd, 1.0, 4.0)
+		hud.show_toast("Replay Speed: %d×" % int(_replay_speed), false)
+	)
 	hud.friend_invite_requested.connect(func(f_name: String, r_code: String) -> void:
 		mp_client.send_friend_invite(f_name)
 		account_client.send_room_invite(f_name, r_code)
 	)
 	hud.account_login_requested.connect(func(u: String, pw: String) -> void: account_client.login_account(u, pw))
 	hud.account_register_requested.connect(func(u: String, pw: String) -> void: account_client.register_account(u, pw))
+	hud.account_change_password_requested.connect(func(cur_pw: String, new_pw: String) -> void: account_client.change_password(cur_pw, new_pw))
 	hud.account_logout_requested.connect(func() -> void: account_client.logout())
 	hud.pfp_file_selected.connect(func(p: String) -> void: account_client.import_and_upload_avatar(p))
 	hud.friend_search_requested.connect(func(q: String) -> void: account_client.search_players(q))
@@ -101,6 +123,21 @@ func _ready() -> void:
 		AudioManager.play_error()
 	)
 	account_client.avatar_updated.connect(_on_avatar_updated)
+	account_client.password_changed.connect(func(ok: bool, msg: String) -> void:
+		hud.set_password_change_result(ok, msg)
+		if ok:
+			AudioManager.play_ui_tap()
+		else:
+			AudioManager.play_error()
+	)
+	account_client.leaderboard_received.connect(func(entries: Array) -> void:
+		_latest_lb_cache = entries
+		_push_rankings_to_hud()
+	)
+	account_client.my_matches_received.connect(func(matches: Array) -> void:
+		_latest_hist_cache = matches
+		_push_rankings_to_hud()
+	)
 	account_client.search_results_received.connect(hud.update_search_results)
 	account_client.friends_overview_received.connect(hud.update_friends_overview)
 	account_client.friend_action_result.connect(func(ok: bool, msg: String) -> void:
@@ -118,11 +155,15 @@ func _ready() -> void:
 
 	mp_client.lobby_updated.connect(hud.update_mp_lobby)
 	mp_client.room_options_updated.connect(hud.update_mp_room_options)
+	mp_client.room_modifiers_updated.connect(hud.update_mp_room_modifiers)
 	mp_client.spawn_phase_started.connect(_on_mp_spawn_phase_started)
 	mp_client.match_begun.connect(_on_mp_match_begun)
 	mp_client.tick_batch_received.connect(_on_mp_tick_batch)
 	mp_client.snapshot_received.connect(_on_mp_snapshot_received)
 	mp_client.map_ping_received.connect(_on_map_ping_received)
+	mp_client.chat_msg_received.connect(func(_fnid: int, fname: String, _tid: int, ch: String, txt: String) -> void:
+		hud.append_chat_message(fname, ch, txt)
+	)
 	mp_client.ping_updated.connect(hud.update_ping)
 	mp_client.invite_received.connect(_on_mp_invite_received)
 	mp_client.disconnected.connect(_on_mp_disconnected)
@@ -185,6 +226,25 @@ func _process(delta: float) -> void:
 				_http_ping_timer = 4.0
 				_start_http_ping()
 
+	if _replay_active:
+		_replay_accum += delta * _replay_speed
+		var stepped_rep := false
+		while _replay_cursor < _replay_batches.size() and _replay_accum >= 0.125:
+			_replay_accum -= 0.125
+			var b: Dictionary = _replay_batches[_replay_cursor] as Dictionary
+			_replay_cursor += 1
+			for c_item: Variant in b.get("commands", []):
+				if c_item is Dictionary:
+					world_state.apply_command(c_item as Dictionary)
+			for t in range(int(b.get("from_tick", 0)), int(b.get("to_tick", 0)) + 1):
+				world_state.step_tick(t)
+				stepped_rep = true
+			simulation_clock.tick_count = world_state.current_tick
+		if stepped_rep:
+			hud.update_clock_text(simulation_clock.get_formatted_time())
+			hud.refresh_player_bar()
+		return
+
 	if is_multiplayer:
 		var stepped := false
 		while not _pending_batches.is_empty():
@@ -217,6 +277,9 @@ func _process(delta: float) -> void:
 
 
 func _dispatch_game_command(cmd: Dictionary) -> Dictionary:
+	if _replay_active or mp_client.is_spectator:
+		return {"ok": false, "reason": "Read-only playback or spectator mode."}
+
 	if is_multiplayer:
 		mp_client.send_command(cmd)
 		return {"ok": true, "queued": true}
@@ -241,8 +304,10 @@ func _on_spawn_requested(cell: Vector2i) -> void:
 		"y": cell.y,
 		"name": cfg.get("name", "Terran Vanguard"),
 		"ai_count": int(cfg.get("ai_count", 6)),
+		"options": cfg.get("options", {}),
 	})
 	if bool(res.get("ok", false)):
+		simulation_clock.speed_multiplier = world_state.game_speed
 		AudioManager.play_expand_launch()
 
 
@@ -257,9 +322,14 @@ func _on_new_match_requested() -> void:
 	mp_client.disconnect_from_server(false)
 	is_multiplayer = false
 	_mp_spawning = false
+	_replay_active = false
+	_replay_batches.clear()
+	_replay_cursor = 0
 	_pending_batches.clear()
+	hud.set_chat_active(false)
 	AudioManager.stop_game_music(0.6)
 	world_state.reset_match()
+	simulation_clock.speed_multiplier = 1.0
 	simulation_clock.tick_count = 0
 	simulation_clock.accumulator = 0.0
 	world_map.layer4_cities.clear_nation_avatars()
@@ -279,10 +349,23 @@ func _on_mp_connect_requested(ws_url: String, room_code: String, player_name: St
 		_tcp_ping.disconnect_from_host()
 		_http_ping_inflight = false
 	account_client.set_ws_url(ws_url)
+	_replay_active = false
 	is_multiplayer = true
 	_mp_spawning = false
 	_pending_batches.clear()
-	mp_client.connect_to_room(ws_url, room_code, player_name, "", account_client.session_token)
+	mp_client.connect_to_room(ws_url, room_code, player_name, "", account_client.session_token, false)
+
+
+func _on_mp_spectate_requested(room_code: String) -> void:
+	var ws_url: String = hud.get_mp_server_url()
+	account_client.set_ws_url(ws_url)
+	_replay_active = false
+	is_multiplayer = true
+	_mp_spawning = false
+	_pending_batches.clear()
+	var cfg: Dictionary = hud.get_spawn_config()
+	mp_client.connect_to_room(ws_url, room_code, str(cfg.get("name", "Spectator")), "", account_client.session_token, true)
+	hud.enter_live_spectate_mode(room_code)
 
 
 func _on_mp_disconnect_requested() -> void:
@@ -313,8 +396,11 @@ func _on_mp_match_begun(seed_val: int, local_nid: int, ai_count: int, players: A
 		"seed": seed_val,
 		"local_nation_id": local_nid,
 		"ai_count": ai_count,
+		"options": mp_client.last_match_options,
 		"players": players,
 	})
+	simulation_clock.speed_multiplier = world_state.game_speed
+	hud.set_chat_active(true)
 	_sync_local_player_map_avatar()
 	_fetch_mp_player_avatars(players)
 	world_map._refresh_lut()
@@ -335,8 +421,14 @@ func _on_mp_snapshot_received(snap: Dictionary) -> void:
 		"seed": int(snap.get("seed", 1)),
 		"local_nation_id": int(snap.get("local_nation_id", 1)),
 		"ai_count": int(snap.get("ai_count", 4)),
+		"options": snap.get("options", {}),
 		"players": mp_players,
 	})
+	if mp_client.is_spectator or bool(snap.get("spectator", false)):
+		hud.enter_live_spectate_mode(mp_client.get_room_code())
+	else:
+		simulation_clock.speed_multiplier = world_state.game_speed
+	hud.set_chat_active(true)
 	_sync_local_player_map_avatar()
 	_fetch_mp_player_avatars(mp_players)
 	for batch_v: Variant in snap.get("batches", []):
@@ -351,7 +443,43 @@ func _on_mp_snapshot_received(snap: Dictionary) -> void:
 	world_map._refresh_lut()
 	world_map.sync_owner_texture()
 	hud.refresh_all()
-	hud.show_toast("Reconnected & synced to tick %d!" % world_state.current_tick, false)
+	hud.show_toast("Spectating live match (tick %d)" % world_state.current_tick if mp_client.is_spectator else "Reconnected & synced to tick %d!" % world_state.current_tick, false)
+
+
+var _latest_lb_cache: Array = []
+var _latest_hist_cache: Array = []
+
+
+func _push_rankings_to_hud() -> void:
+	hud.update_rankings_data(_latest_lb_cache, _latest_hist_cache)
+
+
+func _on_watch_replay_requested(match_id: String) -> void:
+	account_client.fetch_match_replay(match_id, func(ok: bool, rep: Dictionary, err_msg: String) -> void:
+		if not ok:
+			hud.show_toast(err_msg, true)
+			AudioManager.play_error()
+			return
+		mp_client.disconnect_from_server(false)
+		is_multiplayer = false
+		_replay_active = true
+		_replay_batches = (rep.get("batches", []) as Array).duplicate()
+		_replay_cursor = 0
+		_replay_accum = 0.0
+		_replay_speed = 1.0
+		world_state.apply_command({
+			"type": "start_mp_match",
+			"seed": int(rep.get("seed", 1)),
+			"local_nation_id": 0,
+			"ai_count": int(rep.get("ai_count", 4)),
+			"options": rep.get("options", {}),
+			"players": rep.get("players", []),
+		})
+		_fetch_mp_player_avatars(rep.get("players", []))
+		world_map._refresh_lut()
+		world_map.sync_owner_texture()
+		hud.enter_replay_mode("Room %s" % str(rep.get("room_code", "")))
+	)
 
 
 func _on_account_auth_changed(logged_in: bool, uname: String, msg: String) -> void:

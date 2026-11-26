@@ -14,6 +14,9 @@ signal friends_overview_received(friends: Array, incoming: Array, outgoing: Arra
 signal friend_action_result(ok: bool, message: String)
 signal incoming_friend_request_notified(count: int)
 signal incoming_room_invite_notified(from_name: String, room_code: String)
+signal password_changed(ok: bool, message: String)
+signal leaderboard_received(entries: Array)
+signal my_matches_received(matches: Array)
 
 var api_base_url: String = "http://151.242.136.18:30041"
 var session_token: String = ""
@@ -33,7 +36,7 @@ var _seen_room_invites: Dictionary = {} # "from|code" -> true
 
 
 func _ready() -> void:
-	set_ws_url(MPClient.DEFAULT_SERVER_URL)
+	set_ws_url(MPClient.resolve_default_ws_url())
 	load_saved_state()
 	if not session_token.is_empty() and DisplayServer.get_name() != "headless":
 		verify_session()
@@ -42,7 +45,7 @@ func _ready() -> void:
 func set_ws_url(ws_url: String) -> void:
 	var u: String = ws_url.strip_edges()
 	if u.is_empty():
-		u = MPClient.DEFAULT_SERVER_URL
+		u = MPClient.resolve_default_ws_url()
 	u = u.replace("wss://", "https://").replace("ws://", "http://")
 	if u.ends_with("/ws"):
 		u = u.substr(0, u.length() - 3)
@@ -420,6 +423,55 @@ func _apply_user_profile(u: Dictionary, save_state: bool) -> void:
 			return
 	if save_state:
 		_save_account_state()
+
+
+func change_password(cur_pass: String, new_pass: String) -> void:
+	if not is_logged_in or session_token.is_empty():
+		password_changed.emit(false, "Sign in required.")
+		return
+	var body := {"current_password": cur_pass, "new_password": new_pass}
+	_request_json("/api/auth/change_password", HTTPClient.METHOD_POST, body, true, func(code: int, data: Dictionary, err_msg: String) -> void:
+		if code >= 200 and code < 300:
+			password_changed.emit(true, str(data.get("message", "Password updated.")))
+		else:
+			password_changed.emit(false, str(data.get("error", err_msg if not err_msg.is_empty() else "Password change failed.")))
+	)
+
+
+func fetch_leaderboard(limit: int = 25, cb: Callable = Callable()) -> void:
+	_request_json("/api/leaderboard?limit=%d" % clampi(limit, 1, 50), HTTPClient.METHOD_GET, {}, false, func(code: int, data: Dictionary, _err_msg: String) -> void:
+		var arr: Array = data.get("leaderboard", []) as Array if (code >= 200 and code < 300 and data.get("leaderboard") is Array) else []
+		leaderboard_received.emit(arr)
+		if cb.is_valid():
+			cb.call(code >= 200 and code < 300, arr)
+	)
+
+
+func fetch_my_matches(limit: int = 20, cb: Callable = Callable()) -> void:
+	if not is_logged_in or session_token.is_empty():
+		my_matches_received.emit([])
+		if cb.is_valid():
+			cb.call(false, [])
+		return
+	_request_json("/api/me/matches?limit=%d" % clampi(limit, 1, 40), HTTPClient.METHOD_GET, {}, true, func(code: int, data: Dictionary, _err_msg: String) -> void:
+		var arr: Array = data.get("matches", []) as Array if (code >= 200 and code < 300 and data.get("matches") is Array) else []
+		my_matches_received.emit(arr)
+		if cb.is_valid():
+			cb.call(code >= 200 and code < 300, arr)
+	)
+
+
+func fetch_match_replay(match_id: String, cb: Callable) -> void:
+	var clean_id: String = match_id.strip_edges()
+	if clean_id.is_empty():
+		cb.call(false, {}, "Missing match ID.")
+		return
+	_request_json("/api/matches/" + clean_id.uri_encode() + "/replay", HTTPClient.METHOD_GET, {}, false, func(code: int, data: Dictionary, err_msg: String) -> void:
+		if code >= 200 and code < 300 and data.has("batches"):
+			cb.call(true, data, "")
+		else:
+			cb.call(false, {}, str(data.get("error", err_msg if not err_msg.is_empty() else "Replay unavailable.")))
+	)
 
 
 func _request_json(path: String, method: int, body_dict: Dictionary, with_auth: bool, cb: Callable) -> void:

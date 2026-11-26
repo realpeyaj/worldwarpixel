@@ -445,3 +445,125 @@ func TestQuickPlayTeamsPingsAndProfileStats(t *testing.T) {
 		t.Fatalf("expected updated match stats (wins=1, elo=1025), got %v", u1)
 	}
 }
+
+func TestLeaderboardReplaysModifiersChatSpectateAndChangePassword(t *testing.T) {
+	store, err := NewMatchStore(t.Context(), "")
+	if err != nil {
+		t.Fatalf("NewMatchStore failed: %v", err)
+	}
+	acct := NewAccountService(store)
+	rm := NewRoomManager(store)
+	defer rm.StopAll()
+
+	srv := httptest.NewServer(newServerMux(rm, store, acct))
+	defer srv.Close()
+
+	_, r1 := postJSONTest(t, srv.URL+"/api/auth/register", "", map[string]any{"username": "ChampOne", "password": "oldpass1"})
+	tok1 := r1["token"].(string)
+	_, r2 := postJSONTest(t, srv.URL+"/api/auth/register", "", map[string]any{"username": "ChallengerTwo", "password": "pass2222"})
+	tok2 := r2["token"].(string)
+
+	// 1. ChangePassword check
+	stBadPW, _ := postJSONTest(t, srv.URL+"/api/auth/change_password", tok1, map[string]any{"current_password": "wrong", "new_password": "newpass9"})
+	if stBadPW == http.StatusOK {
+		t.Fatalf("expected wrong current password to fail")
+	}
+	stOKPW, _ := postJSONTest(t, srv.URL+"/api/auth/change_password", tok1, map[string]any{"current_password": "oldpass1", "new_password": "newpass9"})
+	if stOKPW != http.StatusOK {
+		t.Fatalf("expected password change to succeed, got %d", stOKPW)
+	}
+	stLoginNew, loginBody := postJSONTest(t, srv.URL+"/api/auth/login", "", map[string]any{"username": "ChampOne", "password": "newpass9"})
+	if stLoginNew != http.StatusOK {
+		t.Fatalf("expected login with updated password to succeed, got %d", stLoginNew)
+	}
+	tok1 = loginBody["token"].(string)
+
+	// 2. Host creates room, enables team_mode + modifiers, second player joins same team
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
+	c1, _, err := websocket.DefaultDialer.Dial(wsURL+"?room=MOD99&account_token="+tok1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c1.Close()
+	readMsgType(t, c1, "connected")
+	readMsgType(t, c1, "lobby_state")
+
+	c2, _, err := websocket.DefaultDialer.Dial(wsURL+"?room=MOD99&account_token="+tok2, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c2.Close()
+	readMsgType(t, c2, "connected")
+	readMsgType(t, c2, "lobby_state")
+
+	_ = c1.WriteJSON(map[string]any{
+		"type":          "set_room_options",
+		"is_public":     true,
+		"team_mode":     true,
+		"game_speed":    2.0,
+		"no_nukes":      true,
+		"ai_difficulty": "hard",
+		"start_preset":  "fast",
+	})
+	_ = c1.WriteJSON(map[string]any{"type": "set_team", "team_id": 1})
+	_ = c2.WriteJSON(map[string]any{"type": "set_team", "team_id": 1})
+	time.Sleep(40 * time.Millisecond)
+
+	// Drain until match_begin with modifiers
+	_ = c1.WriteJSON(map[string]any{"type": "start_match", "ai_count": 2})
+	readMsgType(t, c1, "spawn_phase")
+	_ = c1.WriteJSON(map[string]any{"type": "pick_spawn", "x": 200, "y": 200})
+	_ = c2.WriteJSON(map[string]any{"type": "pick_spawn", "x": 300, "y": 250})
+	mb := readMsgType(t, c1, "match_begin")
+	opts, _ := mb["options"].(map[string]any)
+	if opts == nil || opts["no_nukes"] != true || opts["ai_difficulty"] != "hard" || opts["game_speed"].(float64) != 2.0 {
+		t.Fatalf("expected modifiers in match_begin, got %v", mb)
+	}
+	readMsgType(t, c2, "match_begin")
+
+	// 3. Team chat check
+	_ = c1.WriteJSON(map[string]any{"type": "chat_msg", "channel": "team", "text": "Rush Europe"})
+	chatEv := readMsgType(t, c2, "chat_msg")
+	if chatEv["channel"] != "team" || chatEv["text"] != "Rush Europe" {
+		t.Fatalf("unexpected team chat event: %v", chatEv)
+	}
+
+	// 4. Live spectator joins mid-match and receives spectator snapshot + does not disrupt match
+	spec, _, err := websocket.DefaultDialer.Dial(wsURL+"?room=MOD99&spectate=1&name=Watcher", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer spec.Close()
+	sConn := readMsgType(t, spec, "connected")
+	if sConn["spectator"] != true {
+		t.Fatalf("expected spectator=true in connected envelope: %v", sConn)
+	}
+	readMsgType(t, spec, "match_snapshot")
+
+	// Finish match & verify leaderboard, my matches, and replay endpoint
+	_ = c1.WriteJSON(map[string]any{
+		"type":             "match_over",
+		"winner_nation_id": 1,
+		"winner_team_id":   1,
+		"territory_pcts":   map[string]any{"1": 52.0, "2": 31.0},
+	})
+	time.Sleep(100 * time.Millisecond)
+
+	stLB, lbBody := getJSONTest(t, srv.URL+"/api/leaderboard?limit=10", "")
+	lbList, _ := lbBody["leaderboard"].([]any)
+	if stLB != http.StatusOK || len(lbList) < 2 {
+		t.Fatalf("expected leaderboard entries, got status=%d body=%v", stLB, lbBody)
+	}
+
+	stHist, histBody := getJSONTest(t, srv.URL+"/api/me/matches", tok1)
+	mList, _ := histBody["matches"].([]any)
+	if stHist != http.StatusOK || len(mList) < 1 {
+		t.Fatalf("expected match history entry for ChampOne, got status=%d body=%v", stHist, histBody)
+	}
+	matchID := mList[0].(map[string]any)["match_id"].(string)
+
+	stRep, repBody := getJSONTest(t, srv.URL+"/api/matches/"+matchID+"/replay", "")
+	if stRep != http.StatusOK || repBody["match_id"] != matchID {
+		t.Fatalf("expected replay payload for %s, got status=%d body=%v", matchID, stRep, repBody)
+	}
+}

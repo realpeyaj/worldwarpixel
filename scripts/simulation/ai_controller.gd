@@ -43,9 +43,14 @@ static func step_scheduled(ws: WorldState, tick: int) -> void:
 	if ai_ids.is_empty():
 		return
 
-	if tick % AI_STEP_INTERVAL != 0:
+	var interval: int = AI_STEP_INTERVAL
+	if ws.ai_difficulty == "hard":
+		interval = 10
+	elif ws.ai_difficulty == "brutal":
+		interval = 7
+	if tick % interval != 0:
 		return
-	var chosen_idx: int = int(tick / AI_STEP_INTERVAL) % ai_ids.size()
+	var chosen_idx: int = int(tick / interval) % ai_ids.size()
 	var nid: int = ai_ids[chosen_idx]
 	_act_for_nation(ws, ws.nations[nid], tick)
 
@@ -87,7 +92,7 @@ static func _act_for_nation(ws: WorldState, nation: NationData, tick: int) -> vo
 				return
 
 	# 2. Launch occasional Atom Bomb against a stronger non-allied rival using nearest ready Silo
-	if nation.gold >= 950000.0:
+	if not ws.no_nukes and nation.gold >= 950000.0:
 		var nuke_tgt: Vector2i = _pick_missile_target(ws, nation)
 		if nuke_tgt.x >= 0:
 			var ready_silo: StructureData = ws.find_ready_silo(nation.id, nuke_tgt)

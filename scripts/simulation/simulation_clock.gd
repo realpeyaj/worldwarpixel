@@ -9,12 +9,13 @@ const MAX_FRAME_DELTA := 0.25
 
 var tick_count: int = 0
 var accumulator: float = 0.0
+var speed_multiplier: float = 1.0
 
 
 func advance(delta: float) -> int:
 	if delta <= 0.0:
 		return 0
-	accumulator += minf(delta, MAX_FRAME_DELTA)
+	accumulator += minf(delta, MAX_FRAME_DELTA) * clampf(speed_multiplier, 0.5, 4.0)
 	var ticks_this_frame := 0
 	while accumulator + 1e-6 >= TICK_INTERVAL:
 		accumulator = maxf(0.0, accumulator - TICK_INTERVAL)

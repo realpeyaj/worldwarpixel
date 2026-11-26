@@ -1109,6 +1109,99 @@ func (a *AccountService) RecordMatchResult(ctx context.Context, players []MatchP
 	}
 }
 
+// ChangePassword validates the current password and updates the stored PBKDF2 hash.
+func (a *AccountService) ChangePassword(ctx context.Context, token, currentPass, newPass string) error {
+	rec, err := a.Authenticate(ctx, token, true)
+	if err != nil {
+		return err
+	}
+	if len(newPass) < 4 || len(newPass) > 128 {
+		return errors.New("new password must be 4-128 characters")
+	}
+	newHash, err := hashPassword(newPass)
+	if err != nil {
+		return err
+	}
+	if a.dbPool() {
+		var curHash string
+		err := a.store.Pool().QueryRow(ctx, `SELECT password_hash FROM accounts WHERE username_lower = $1`, rec.UsernameLower).Scan(&curHash)
+		if err != nil || !verifyPassword(currentPass, curHash) {
+			return errors.New("current password is incorrect")
+		}
+		_, err = a.store.Pool().Exec(ctx, `UPDATE accounts SET password_hash = $2 WHERE username_lower = $1`, rec.UsernameLower, newHash)
+		return err
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	stored, ok := a.accounts[rec.UsernameLower]
+	if !ok || !verifyPassword(currentPass, stored.PasswordHash) {
+		return errors.New("current password is incorrect")
+	}
+	stored.PasswordHash = newHash
+	return nil
+}
+
+// GetLeaderboard returns top registered commanders ranked by ELO, wins, and peak territory.
+func (a *AccountService) GetLeaderboard(ctx context.Context, limit int) ([]UserProfileDTO, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 25
+	}
+	if a.dbPool() {
+		rows, err := a.store.Pool().Query(ctx, `
+			SELECT username, avatar_frames, avatar_delay_ms, avatar_hash,
+			       games_played, wins, elo, best_territory_pct, last_seen_at
+			FROM accounts
+			ORDER BY elo DESC, wins DESC, best_territory_pct DESC, username ASC
+			LIMIT $1`, limit,
+		)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		out := make([]UserProfileDTO, 0, limit)
+		for rows.Next() {
+			var r AccountRecord
+			if err := rows.Scan(&r.Username, &r.AvatarFrames, &r.AvatarDelayMs, &r.AvatarHash, &r.GamesPlayed, &r.Wins, &r.Elo, &r.BestTerritoryPct, &r.LastSeenAt); err == nil {
+				out = append(out, a.makeDTO(&r, false, ""))
+			}
+		}
+		return out, nil
+	}
+	a.mu.RLock()
+	recs := make([]*AccountRecord, 0, len(a.accounts))
+	for _, r := range a.accounts {
+		recs = append(recs, r)
+	}
+	a.mu.RUnlock()
+	sort.Slice(recs, func(i, j int) bool {
+		ei, ej := recs[i].Elo, recs[j].Elo
+		if ei <= 0 {
+			ei = 1000
+		}
+		if ej <= 0 {
+			ej = 1000
+		}
+		if ei != ej {
+			return ei > ej
+		}
+		if recs[i].Wins != recs[j].Wins {
+			return recs[i].Wins > recs[j].Wins
+		}
+		if recs[i].BestTerritoryPct != recs[j].BestTerritoryPct {
+			return recs[i].BestTerritoryPct > recs[j].BestTerritoryPct
+		}
+		return recs[i].Username < recs[j].Username
+	})
+	if len(recs) > limit {
+		recs = recs[:limit]
+	}
+	out := make([]UserProfileDTO, 0, len(recs))
+	for _, r := range recs {
+		out = append(out, a.makeDTO(r, false, ""))
+	}
+	return out, nil
+}
+
 // RegisterAccountRoutes registers all account, DB search, friends, presence, and PFP routes on mux.
 func RegisterAccountRoutes(mux *http.ServeMux, svc *AccountService) {
 	extractBearer := func(r *http.Request) string {
@@ -1177,6 +1270,67 @@ func RegisterAccountRoutes(mux *http.ServeMux, svc *AccountService) {
 	mux.HandleFunc("POST /api/auth/logout", func(w http.ResponseWriter, r *http.Request) {
 		svc.Logout(r.Context(), extractBearer(r))
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	})
+
+	mux.HandleFunc("POST /api/auth/change_password", func(w http.ResponseWriter, r *http.Request) {
+		tok := extractBearer(r)
+		if tok == "" {
+			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "Sign in required"})
+			return
+		}
+		var body struct {
+			CurrentPassword string `json:"current_password"`
+			NewPassword     string `json:"new_password"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "Invalid JSON body"})
+			return
+		}
+		if err := svc.ChangePassword(r.Context(), tok, body.CurrentPassword, body.NewPassword); err != nil {
+			code := http.StatusBadRequest
+			if err == errUnauthorized {
+				code = http.StatusUnauthorized
+			}
+			writeJSON(w, code, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "Password updated."})
+	})
+
+	mux.HandleFunc("GET /api/leaderboard", func(w http.ResponseWriter, r *http.Request) {
+		limit := 25
+		if lv := r.URL.Query().Get("limit"); lv != "" {
+			var parsed int
+			if _, err := fmt.Sscanf(lv, "%d", &parsed); err == nil && parsed > 0 {
+				limit = parsed
+			}
+		}
+		list, err := svc.GetLeaderboard(r.Context(), limit)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "Failed to load leaderboard"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"leaderboard": list})
+	})
+
+	mux.HandleFunc("GET /api/me/matches", func(w http.ResponseWriter, r *http.Request) {
+		rec := requireAuth(w, r, true)
+		if rec == nil {
+			return
+		}
+		limit := 20
+		if lv := r.URL.Query().Get("limit"); lv != "" {
+			var parsed int
+			if _, err := fmt.Sscanf(lv, "%d", &parsed); err == nil && parsed > 0 {
+				limit = parsed
+			}
+		}
+		matches, err := svc.store.GetUserMatches(r.Context(), rec.UsernameLower, limit)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "Failed to load match history"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"matches": matches})
 	})
 
 	mux.HandleFunc("POST /api/profile/avatar", func(w http.ResponseWriter, r *http.Request) {

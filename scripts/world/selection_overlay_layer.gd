@@ -140,7 +140,8 @@ func _draw() -> void:
 		if _hover_sim_cell.x >= 0 or _staged_missile_cell.x >= 0:
 			var aim_cell: Vector2i = _staged_missile_cell if _staged_missile_cell.x >= 0 else _hover_sim_cell
 			var pos: Vector2 = _world_state.sim_to_world(aim_cell)
-			var blast_r: float = float(MissileUnit.get_blast_radius(_missile_mode))
+			var sim_s: float = _world_state.sim_scale
+			var blast_r: float = float(MissileUnit.get_blast_radius(_missile_mode)) * sim_s
 			var pulse: float = 0.78 + 0.22 * sin(_elapsed * 7.0)
 			var p_id: int = _world_state.player_nation_id
 			if _world_state.get_owner_at(aim_cell.x, aim_cell.y) == p_id:
@@ -197,10 +198,42 @@ func _draw() -> void:
 						draw_line(w_pt - Vector2(x_sz, x_sz), w_pt + Vector2(x_sz, x_sz), Color(1.0, 0.88, 0.24, 0.98), 2.1 * inv_z, true)
 						draw_line(w_pt - Vector2(x_sz, -x_sz), w_pt + Vector2(x_sz, -x_sz), Color(1.0, 0.88, 0.24, 0.98), 2.1 * inv_z, true)
 				var red_col := Color(1.0, 0.30, 0.24, 0.92 * pulse) if ready_ok else Color(0.70, 0.32, 0.32, 0.75)
-				draw_circle(pos, blast_r, Color(1.0, 0.24, 0.18, 0.14 if _staged_missile_cell.x < 0 else 0.26))
-				draw_arc(pos, blast_r, 0.0, TAU, 36, red_col, (2.4 if _staged_missile_cell.x >= 0 else 1.8) * inv_z)
-				if _staged_missile_cell.x >= 0:
-					draw_arc(pos, blast_r * 0.55, 0.0, TAU, 24, Color(1.0, 0.88, 0.28, 0.92 * pulse), 1.6 * inv_z)
+				if _missile_mode == MissileUnit.KIND_MIRV:
+					var tgt_oid: int = _world_state.get_owner_at(aim_cell.x, aim_cell.y)
+					var sub_r: float = float(MissileUnit.get_blast_radius(MissileUnit.KIND_MIRV_WARHEAD)) * sim_s
+					if tgt_oid > 0 and tgt_oid != p_id:
+						var sub_spots: Array[Vector2] = [pos]
+						var w_g: int = _world_state.sim_width
+						var h_g: int = _world_state.sim_height
+						var min_d2: float = (sub_r * 1.6) * (sub_r * 1.6)
+						for sy_i in range(0, h_g, 18):
+							if sub_spots.size() >= 12:
+								break
+							var row_off: int = sy_i * w_g
+							for sx_i in range(0, w_g, 18):
+								if _world_state.owner_grid[row_off + sx_i] != tgt_oid:
+									continue
+								var wp: Vector2 = _world_state.sim_to_world(Vector2i(sx_i, sy_i))
+								var spaced := true
+								for prev_p: Vector2 in sub_spots:
+									if wp.distance_squared_to(prev_p) < min_d2:
+										spaced = false
+										break
+								if spaced:
+									sub_spots.append(wp)
+									if sub_spots.size() >= 12:
+										break
+						for sp: Vector2 in sub_spots:
+							draw_circle(sp, sub_r, Color(1.0, 0.34, 0.16, 0.14))
+							draw_arc(sp, sub_r, 0.0, TAU, 24, Color(1.0, 0.42, 0.22, 0.76), 1.3 * inv_z)
+					draw_arc(pos, blast_r, 0.0, TAU, 36, red_col, 1.8 * inv_z)
+				else:
+					draw_circle(pos, blast_r, Color(1.0, 0.24, 0.18, 0.15 if _staged_missile_cell.x < 0 else 0.28))
+					draw_arc(pos, blast_r, 0.0, TAU, 40, red_col, (2.4 if _staged_missile_cell.x >= 0 else 1.8) * inv_z)
+					# Inner 0.80*r guaranteed full-scorch core matching _detonate_missile
+					draw_arc(pos, blast_r * 0.80, 0.0, TAU, 32, Color(1.0, 0.78, 0.28, 0.65), 1.1 * inv_z)
+					if _staged_missile_cell.x >= 0:
+						draw_arc(pos, blast_r * 0.55, 0.0, TAU, 24, Color(1.0, 0.88, 0.28, 0.92 * pulse), 1.6 * inv_z)
 				_draw_crosshair(pos, 11.0 * inv_z, red_col, inv_z)
 
 	# 3. Build placement validity ring + Defense/Factory/SAM range preview
@@ -215,15 +248,40 @@ func _draw() -> void:
 			)
 			valid = bool(check.get("ok", false))
 		if _build_mode == StructureData.TYPE_FACTORY:
+			var p_id: int = _world_state.player_nation_id
 			var preview_st := StructureData.new()
 			preview_st.id = _world_state.structures.size() + 1
+			preview_st.nation_id = p_id
 			preview_st.cell = _hover_sim_cell
 			preview_st.level = 1
 			_draw_irregular_factory_range(preview_st, inv_z, Color(1.0, 0.78, 0.30, 0.12), Color(1.0, 0.78, 0.30, 0.65))
+			var link_cnt := 0
+			for sid_t: int in _world_state.structures.keys():
+				var tgt_st: StructureData = _world_state.structures[sid_t]
+				if tgt_st.level <= 0 or (tgt_st.type != StructureData.TYPE_TOWN and tgt_st.type != StructureData.TYPE_PORT and tgt_st.type != StructureData.TYPE_FACTORY):
+					continue
+				if tgt_st.nation_id != p_id and _world_state.is_embargoed(p_id, tgt_st.nation_id):
+					continue
+				var in_rng: bool = preview_st.is_cell_in_factory_range(tgt_st.cell) or (tgt_st.type == StructureData.TYPE_FACTORY and tgt_st.is_cell_in_factory_range(_hover_sim_cell))
+				if not in_rng:
+					continue
+				link_cnt += 1
+				var t_pos: Vector2 = tgt_st.get_world_pos()
+				var l_col := Color(0.98, 0.84, 0.34, 0.82) if tgt_st.nation_id == p_id else Color(0.36, 0.92, 0.88, 0.78)
+				var segs := 10
+				for si in range(segs):
+					if si % 2 == 0:
+						draw_line(pos.lerp(t_pos, float(si) / float(segs)), pos.lerp(t_pos, float(si + 1) / float(segs)), l_col, 1.5 * inv_z, true)
+				draw_arc(t_pos, 7.5 * inv_z, 0.0, TAU, 18, l_col, 1.5 * inv_z)
+			if link_cnt > 0 and ThemeDB.fallback_font != null:
+				draw_string(ThemeDB.fallback_font, pos + Vector2(12.0 * inv_z, -10.0 * inv_z), "+%d link%s" % [link_cnt, "" if link_cnt == 1 else "s"], HORIZONTAL_ALIGNMENT_LEFT, -1, int(maxf(11.0, 12.0 * inv_z)), Color(1.0, 0.88, 0.38, 0.95))
 		elif _build_mode == StructureData.TYPE_DEFENSE_POST:
 			var dr: float = StructureData.get_defense_radius_for_level(1)
-			draw_circle(pos, dr, Color(0.45, 0.74, 1.0, 0.10))
-			draw_arc(pos, dr, 0.0, TAU, 32, Color(0.45, 0.76, 1.0, 0.68), 1.5 * inv_z)
+			var def_fill := Color(0.45, 0.74, 1.0, 0.12) if valid else Color(0.95, 0.28, 0.30, 0.10)
+			var def_rim := Color(0.45, 0.78, 1.0, 0.82) if valid else Color(1.0, 0.34, 0.34, 0.82)
+			draw_circle(pos, dr, def_fill)
+			draw_arc(pos, dr, 0.0, TAU, 36, def_rim, 1.6 * inv_z)
+			draw_arc(pos, dr * 0.55, 0.0, TAU, 24, Color(def_rim.r, def_rim.g, def_rim.b, 0.32), 1.0 * inv_z)
 		elif _build_mode == StructureData.TYPE_SAM_LAUNCHER:
 			var p_id: int = _world_state.player_nation_id
 			for sid_s: int in _world_state.structures.keys():
