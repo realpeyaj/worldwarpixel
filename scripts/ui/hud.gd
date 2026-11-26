@@ -2558,7 +2558,7 @@ func show_hovered_cell(cell: Vector2i) -> void:
 	if oid == 0:
 		if bool(info.get("fallout", false)):
 			hover_owner_dot.color = Color(0.56, 0.68, 0.18)
-			hover_owner_lbl.text = "Nuclear Waste (2.4x Troop Cost to Reclaim)"
+			hover_owner_lbl.text = "Nuclear Waste (1.4x Explore Cost to Reclaim)"
 		else:
 			hover_owner_dot.color = Color(0.42, 0.48, 0.56)
 			hover_owner_lbl.text = "Unclaimed Land (Conquerable)"

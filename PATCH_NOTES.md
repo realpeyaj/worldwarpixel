@@ -1,5 +1,11 @@
 # World War Pixel — Patch Notes
 
+## v1.3.2 — MIRV Coverage, Fallout Balance, AI Army Cost & Coastal Ports
+- **Full-Territory MIRV Targeting & Preview**: Replaced corner-biased farthest-point selection and the 12-circle northern-edge hover preview with a shared uniform 2D coverage lattice + structure/capital anchors (`compute_mirv_targets`, up to 72 warheads) so both the live targeting preview and launched MIRV strikes blanket the target nation's entire landmass.
+- **Rebalanced Radioactive Fallout Cost**: Removed double-stacking of unclaimed explore and fallout multipliers (`1.85×` × `2.4×` = `4.44×`) on neutral nuclear waste so reclaiming irradiated land remains costly (`2.6×` base / ~`1.4×` explore cost) without wiping out entire armies.
+- **AI Expansion Army Accounting & Pacing**: Fixed AI round-robin action starvation in large matches so bots spend troops smoothly on expansion alongside building, replaced the flat 3-troop / 10-floor naval beachhead calculation with true per-cell cost deduction, and updated on-map troop labels immediately when orders commit.
+- **Strict Open-Sea Coastal Port Placement**: Ports now strictly require direct ocean coastline tiles (`coastal_grid == 1`) with open-sea navigable access, rejecting inland cells and inland lake shores.
+
 ## v1.3.1 — Freeze & Stutter Performance Fix
 - **Hierarchical Ocean Pathfinding & Route Cache**: Replaced slow flat-grid pathfinding with native C++ `AStarGrid2D` coarse routing + local fine stitching and bidirectional route caching, eliminating multi-second mid-game freezes during Port trade spawning and sea invasions.
 - **Precomputed Coastlines & Late-Game Border Caps**: Precomputed continent coastline lookup tables at startup and capped late-game border sampling so large 24-nation matches stay smooth without periodic lag spikes.

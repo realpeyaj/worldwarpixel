@@ -60,9 +60,11 @@ static func step_scheduled(ws: WorldState, tick: int) -> void:
 		interval = 7
 	if tick % interval != 0:
 		return
-	var chosen_idx: int = int(tick / interval) % ai_ids.size()
-	var nid: int = ai_ids[chosen_idx]
-	_act_for_nation(ws, ws.nations[nid], tick)
+	var batch: int = maxi(1, int(ceil(float(ai_ids.size()) / 6.0)))
+	var base_idx: int = (int(tick / interval) * batch) % ai_ids.size()
+	for bi in range(mini(batch, ai_ids.size())):
+		var nid: int = ai_ids[(base_idx + bi) % ai_ids.size()]
+		_act_for_nation(ws, ws.nations[nid], tick)
 
 
 static func _act_for_nation(ws: WorldState, nation: NationData, tick: int) -> void:
@@ -101,6 +103,8 @@ static func _act_for_nation(ws: WorldState, nation: NationData, tick: int) -> vo
 				})
 				return
 
+	var did_econ_action := false
+
 	# 2. Launch occasional Atom Bomb against a stronger non-allied rival using nearest ready Silo
 	if not ws.no_nukes and nation.gold >= 950000.0:
 		var nuke_tgt: Vector2i = _pick_missile_target(ws, nation)
@@ -114,18 +118,19 @@ static func _act_for_nation(ws: WorldState, nation: NationData, tick: int) -> vo
 					"x": nuke_tgt.x,
 					"y": nuke_tgt.y,
 				})
-				return
+				did_econ_action = true
 
 	# 3. Commission a Warship only after basic economy (Port + Town/Factory) is established
-	if nation.structure_ids.size() >= 2 and nation.gold >= 250000.0 and ws.count_warships(nation.id) < 2 and nation.gold >= ws.get_warship_build_cost(nation.id):
+	if not did_econ_action and nation.structure_ids.size() >= 2 and nation.gold >= 250000.0 and ws.count_warships(nation.id) < 2 and nation.gold >= ws.get_warship_build_cost(nation.id):
 		for sid: int in nation.structure_ids:
 			var p_st: StructureData = ws.structures.get(sid, null)
 			if p_st != null and p_st.type == StructureData.TYPE_PORT and not p_st.is_constructing and p_st.level >= 1 and p_st.action_cooldown_ticks == 0:
 				ws.apply_command({"type": "build_warship", "nation_id": nation.id, "port_id": p_st.id})
-				return
+				did_econ_action = true
+				break
 
 	# 4. Smart Peso allocation: compare upgrading existing economy/defense vs placing new structures
-	if nation.gold >= 50000.0 and nation.structure_ids.size() < 13:
+	if not did_econ_action and nation.gold >= 50000.0 and nation.structure_ids.size() < 13:
 		var has_port := false
 		var town_count := 0
 		var factory_count := 0
@@ -177,10 +182,10 @@ static func _act_for_nation(ws: WorldState, nation: NationData, tick: int) -> vo
 					"x": build_cell.x,
 					"y": build_cell.y,
 				})
-				return
+				did_econ_action = true
 
 		# Upgrade existing high-ROI structures when cheaper than scaled new builds
-		if not nation.structure_ids.is_empty():
+		if not did_econ_action and not nation.structure_ids.is_empty():
 			var best_sid := 0
 			var best_score := -1e9
 			for sid: int in nation.structure_ids:
@@ -195,18 +200,20 @@ static func _act_for_nation(ws: WorldState, nation: NationData, tick: int) -> vo
 							best_sid = sid
 			if best_sid > 0 and ws.get_structure(best_sid).get_next_upgrade_cost() <= 240000.0:
 				ws.apply_command({"type": "upgrade_structure", "nation_id": nation.id, "structure_id": best_sid})
-				return
+				did_econ_action = true
 
-		if sam_count < 1 and (rival_has_silo or nation.structure_ids.size() >= 4) and nation.gold >= ws.get_structure_build_cost(nation.id, StructureData.TYPE_SAM_LAUNCHER):
-			want_type = StructureData.TYPE_SAM_LAUNCHER
-		elif silo_count < 1 and nation.structure_ids.size() >= 3 and nation.gold >= ws.get_structure_build_cost(nation.id, StructureData.TYPE_MISSILE_SILO):
-			want_type = StructureData.TYPE_MISSILE_SILO
-		elif (town_count >= 1 or has_port) and factory_count < town_count + 1 and nation.gold >= ws.get_structure_build_cost(nation.id, StructureData.TYPE_FACTORY):
-			want_type = StructureData.TYPE_FACTORY
-		elif town_count < 3 and nation.gold >= ws.get_structure_build_cost(nation.id, StructureData.TYPE_TOWN):
-			want_type = StructureData.TYPE_TOWN
-		elif def_count < 2 and nation.structure_ids.size() >= 2 and nation.gold >= ws.get_structure_build_cost(nation.id, StructureData.TYPE_DEFENSE_POST):
-			want_type = StructureData.TYPE_DEFENSE_POST
+		want_type = ""
+		if not did_econ_action:
+			if sam_count < 1 and (rival_has_silo or nation.structure_ids.size() >= 4) and nation.gold >= ws.get_structure_build_cost(nation.id, StructureData.TYPE_SAM_LAUNCHER):
+				want_type = StructureData.TYPE_SAM_LAUNCHER
+			elif silo_count < 1 and nation.structure_ids.size() >= 3 and nation.gold >= ws.get_structure_build_cost(nation.id, StructureData.TYPE_MISSILE_SILO):
+				want_type = StructureData.TYPE_MISSILE_SILO
+			elif (town_count >= 1 or has_port) and factory_count < town_count + 1 and nation.gold >= ws.get_structure_build_cost(nation.id, StructureData.TYPE_FACTORY):
+				want_type = StructureData.TYPE_FACTORY
+			elif town_count < 3 and nation.gold >= ws.get_structure_build_cost(nation.id, StructureData.TYPE_TOWN):
+				want_type = StructureData.TYPE_TOWN
+			elif def_count < 2 and nation.structure_ids.size() >= 2 and nation.gold >= ws.get_structure_build_cost(nation.id, StructureData.TYPE_DEFENSE_POST):
+				want_type = StructureData.TYPE_DEFENSE_POST
 
 		if want_type != "":
 			var build_cell2: Vector2i = _pick_build_cell(ws, nation, want_type)
@@ -218,26 +225,26 @@ static func _act_for_nation(ws: WorldState, nation: NationData, tick: int) -> vo
 					"x": build_cell2.x,
 					"y": build_cell2.y,
 				})
-				return
+				did_econ_action = true
 
 	# 6. Periodically propose an alliance to a non-bordering distant nation
-	if tick % 1440 == 0 and nation.alliances.is_empty() and not nation.is_betrayer(tick):
+	if not did_econ_action and tick % 1440 == 0 and nation.alliances.is_empty() and not nation.is_betrayer(tick):
 		var ally_cand: int = _pick_peaceful_ally_candidate(ws, nation)
 		if ally_cand > 0:
 			ws.apply_command({"type": "request_alliance", "nation_id": nation.id, "target_nation_id": ally_cand})
-			return
 
 	# 7. Expand: smart unclaimed rush, opportunistic weaker non-allied rival attack, or overseas hop
 	var owned_borders: Dictionary = ws.get_nation_borders(nation.id)
-	if nation.troops >= nation.max_troops * 0.32 and ws.count_active_expansions(nation.id) < 2 and not owned_borders.is_empty():
+	if nation.troops >= nation.max_troops * 0.25 and ws.count_active_expansions(nation.id) < 2 and not owned_borders.is_empty():
 		var land_target: Vector2i = _pick_smart_land_target(ws, nation, owned_borders, tick)
 		if land_target.x >= 0:
+			var is_neutral: bool = ws.get_owner_at(land_target.x, land_target.y) == 0
 			ws.apply_command({
 				"type": "expand_to",
 				"nation_id": nation.id,
 				"x": land_target.x,
 				"y": land_target.y,
-				"commit_ratio": 0.35,
+				"commit_ratio": 0.45 if is_neutral else 0.35,
 			})
 			return
 
@@ -356,9 +363,11 @@ static func _pick_smart_land_target(ws: WorldState, nation: NationData, borders:
 			else:
 				if ws.are_allied(nation.id, own):
 					continue
-				# Attack any rival nation (AI or player) when equal or advantaged
+				# Attack any rival nation (AI or player) when equal or advantaged and reserve >= 32%
 				var enemy: NationData = ws.nations.get(own, null)
 				var troop_fill: float = nation.troops / maxf(nation.max_troops, 1.0)
+				if troop_fill < 0.32:
+					continue
 				var req_ratio: float = 0.72 if troop_fill >= 0.60 else 0.82
 				if enemy == null or not enemy.alive or nation.troops < enemy.troops * req_ratio:
 					continue

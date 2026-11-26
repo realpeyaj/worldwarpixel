@@ -1195,8 +1195,8 @@ func _run_openfront_feature_tests(us_spot: Vector2i, normandy: Vector2i, england
 			min_rem_troops = minf(min_rem_troops, rec_ord.remaining_troops)
 			claimed_rec_cells = maxi(claimed_rec_cells, rec_ord.cells_claimed)
 	var cost_per_cell: float = (init_rec_troops - min_rem_troops) / maxf(float(claimed_rec_cells), 1.0)
-	_check(fallout_created_ok and skipped_fallout_ok and allow_fallout_ok and claimed_rec_cells >= 20 and ws_nuke.fallout_cell_count < pre_reclaim_fallout and not ws_nuke.is_fallout_at(fallout_probe.x, fallout_probe.y) and cost_per_cell >= 0.55,
-		"Nuke leaves GPU nuclear fallout excluded unless clicked & cleared by costly troop reclamation (%.2f troops/cell, %d fallout remaining)" % [cost_per_cell, ws_nuke.fallout_cell_count],
+	_check(fallout_created_ok and skipped_fallout_ok and allow_fallout_ok and claimed_rec_cells >= 20 and ws_nuke.fallout_cell_count < pre_reclaim_fallout and not ws_nuke.is_fallout_at(fallout_probe.x, fallout_probe.y) and cost_per_cell >= 0.55 and cost_per_cell <= 1.25,
+		"Nuke leaves GPU nuclear fallout excluded unless clicked & cleared by rebalanced costly troop reclamation (%.2f troops/cell, %d fallout remaining)" % [cost_per_cell, ws_nuke.fallout_cell_count],
 		"ok=%s skip=%s allow=%s probe=%s claimed=%d cost=%.2f f=%d->%d" % [str(fallout_created_ok), str(skipped_fallout_ok), str(allow_fallout_ok), str(fallout_probe), claimed_rec_cells, cost_per_cell, pre_reclaim_fallout, ws_nuke.fallout_cell_count])
 
 	# Milestone 4 & 5: Alliances, Embargo, Peso & Troop Donations, Betrayal & Factory Trains
@@ -1841,3 +1841,125 @@ func _run_phase2_account_and_pfp_tests() -> void:
 	var raid_loot_ok: bool = tr_c.gold >= c_gold_pre + 25000.0 # 65% of 40000 = 26000 when no friendly port
 	_check(bool(team_aid_g.get("ok", false)) and bool(team_aid_t.get("ok", false)) and not bool(team_brk.get("ok", true)) and raid_loot_ok,
 		"Team/FFA Gold & Troop aid verified, permanent team pact protected, and Warship naval raid plunders 65%% trade value")
+
+	# 8. v1.3.2 Regression Checks: MIRV Whole-Nation Coverage, AI Explore Troop Cost, Strict Coastal Port Placement
+	var ws_v132 := WorldState.new()
+	ws_v132.load_world()
+	ws_v132.apply_command({"type": "spawn_player", "x": n1_pos.x, "y": n1_pos.y, "name": "Cmd132", "ai_count": 0, "seed": 777})
+	var p132: NationData = ws_v132.get_player_nation()
+	p132.gold = 80000000.0
+	var giant_spot := _find_nearby_land(ws_v132, 20.0, 10.0, 12) # Central Africa interior for ~8000-cell nation
+	var giant_n: NationData = ws_v132._create_nation("MegaState", Color.RED, false, giant_spot, 8000)
+	var mirv_pts: Array[Vector2i] = ws_v132.compute_mirv_targets(giant_n.id, giant_spot)
+	var g_min_x := 9999
+	var g_max_x := -1
+	var g_min_y := 9999
+	var g_max_y := -1
+	for gi in range(ws_v132.sim_width * ws_v132.sim_height):
+		if ws_v132.owner_grid[gi] == giant_n.id:
+			var gx: int = gi % ws_v132.sim_width
+			var gy: int = int(gi / ws_v132.sim_width)
+			g_min_x = mini(g_min_x, gx)
+			g_max_x = maxi(g_max_x, gx)
+			g_min_y = mini(g_min_y, gy)
+			g_max_y = maxi(g_max_y, gy)
+	var g_cx: float = float(g_min_x + g_max_x) * 0.5
+	var g_cy: float = float(g_min_y + g_max_y) * 0.5
+	var q_mask := 0
+	var near_center := false
+	for mp: Vector2i in mirv_pts:
+		if mp.x < g_cx and mp.y < g_cy: q_mask |= 1
+		elif mp.x >= g_cx and mp.y < g_cy: q_mask |= 2
+		elif mp.x < g_cx and mp.y >= g_cy: q_mask |= 4
+		else: q_mask |= 8
+		if Vector2(mp).distance_to(Vector2(g_cx, g_cy)) <= 32.0:
+			near_center = true
+	var p132_silo := ws_v132.apply_command({"type": "build_structure", "nation_id": p132.id, "structure_type": StructureData.TYPE_MISSILE_SILO, "x": n1_pos.x, "y": n1_pos.y})
+	for _t in range(32):
+		ws_v132.step_tick(ws_v132.current_tick + 1)
+	var p132_silo_obj: StructureData = ws_v132.get_structure(int(p132_silo.get("structure_id", 0)))
+	if p132_silo_obj != null:
+		p132_silo_obj.action_cooldown_ticks = 0
+	var m_launch := ws_v132.apply_command({"type": "launch_missile", "nation_id": p132.id, "missile_kind": MissileUnit.KIND_MIRV, "x": giant_spot.x, "y": giant_spot.y})
+	var spawned_subs := 0
+	for _t in range(180):
+		ws_v132.step_tick(ws_v132.current_tick + 1)
+		var c_now := 0
+		for mid_k: int in ws_v132.missiles.keys():
+			if (ws_v132.missiles[mid_k] as MissileUnit).kind == MissileUnit.KIND_MIRV_WARHEAD:
+				c_now += 1
+		spawned_subs = maxi(spawned_subs, c_now)
+	_check(bool(m_launch.get("ok", false)) and mirv_pts.size() >= 12 and q_mask == 15 and near_center and spawned_subs >= mirv_pts.size() - 2,
+		"MIRV targets whole territory across interior & all 4 quadrants (%d targets, %d warheads)" % [mirv_pts.size(), spawned_subs],
+		"pts=%d q=%d center=%s subs=%d" % [mirv_pts.size(), q_mask, str(near_center), spawned_subs])
+
+	var ws_ai_cost := WorldState.new()
+	ws_ai_cost.load_world()
+	ws_ai_cost.apply_command({"type": "spawn_player", "x": n1_pos.x, "y": n1_pos.y, "name": "AiCostRef", "ai_count": 3, "seed": 909})
+	var ai_sample: NationData = null
+	for nid_a: int in ws_ai_cost.nations.keys():
+		if not ws_ai_cost.nations[nid_a].is_player:
+			ai_sample = ws_ai_cost.nations[nid_a]
+			break
+	var ai_pre_troops: float = ai_sample.troops
+	ai_sample.troops = ai_sample.max_troops * 0.90
+	ai_pre_troops = ai_sample.troops
+	AIController._act_for_nation(ws_ai_cost, ai_sample, 14)
+	var ai_dropped_troops: bool = (ai_sample.troops < ai_pre_troops * 0.70) and (ws_ai_cost.count_active_expansions(ai_sample.id) >= 1)
+	var tiny_ship := ShipUnit.new()
+	tiny_ship.id = ws_ai_cost._next_ship_id
+	ws_ai_cost._next_ship_id += 1
+	tiny_ship.kind = ShipUnit.KIND_LANDING
+	tiny_ship.nation_id = ai_sample.id
+	tiny_ship.troops_carried = 3.0
+	tiny_ship.landing_cell = _find_nearby_land(ws_ai_cost, -1.5, 51.5, 4)
+	tiny_ship.target_cell = tiny_ship.landing_cell
+	tiny_ship.waypoints = PackedVector2Array([ws_ai_cost.sim_to_world(tiny_ship.landing_cell)])
+	tiny_ship.waypoint_index = 1
+	ws_ai_cost.ships[tiny_ship.id] = tiny_ship
+	var ex_before_tiny: int = ws_ai_cost.expansions.size()
+	ws_ai_cost._step_ships()
+	var no_free_landing_troops: bool = (ws_ai_cost.expansions.size() == ex_before_tiny)
+	_check(ai_dropped_troops and no_free_landing_troops,
+		"AI exploration deducts standing army properly (%.0f -> %.0f) & tiny landing ships spawn zero free troops" % [ai_pre_troops, ai_sample.troops])
+
+	var ws_port_rule := WorldState.new()
+	ws_port_rule.load_world()
+	var port_coast := Vector2i(-1, -1)
+	var port_inland_2px := Vector2i(-1, -1)
+	var lake_shore := Vector2i(-1, -1)
+	for py in range(100, ws_port_rule.sim_height - 100):
+		var ro: int = py * ws_port_rule.sim_width
+		for px in range(100, ws_port_rule.sim_width - 100):
+			var idx_p: int = ro + px
+			if ws_port_rule.terrain_grid[idx_p] < WorldState.T_PLAINS:
+				continue
+			if port_coast.x < 0 and ws_port_rule.coastal_grid[idx_p] == 1 and ws_port_rule.sea_pathfinder.find_nearest_nav_cell(Vector2i(px, py), 2).x >= 0:
+				if px + 2 < ws_port_rule.sim_width and ws_port_rule.terrain_grid[idx_p + 2] >= WorldState.T_PLAINS and ws_port_rule.coastal_grid[idx_p + 2] == 0:
+					port_coast = Vector2i(px, py)
+					port_inland_2px = Vector2i(px + 2, py)
+			if lake_shore.x < 0 and ws_port_rule.coastal_grid[idx_p] == 0:
+				for dir_l: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+					if ws_port_rule.get_terrain_at(px + dir_l.x, py + dir_l.y) == WorldState.T_LAKE:
+						lake_shore = Vector2i(px, py)
+						break
+			if port_coast.x >= 0 and lake_shore.x >= 0:
+				break
+		if port_coast.x >= 0 and lake_shore.x >= 0:
+			break
+	ws_port_rule.apply_command({"type": "spawn_player", "x": port_coast.x, "y": port_coast.y, "name": "PortStrict", "ai_count": 0, "seed": 414})
+	var pp_s: NationData = ws_port_rule.get_player_nation()
+	pp_s.gold = 5000000.0
+	ws_port_rule._claim_organic_dot(pp_s.id, port_coast, 80, 0)
+	ws_port_rule._set_cell_owner(port_inland_2px.y * ws_port_rule.sim_width + port_inland_2px.x, pp_s.id)
+	if lake_shore.x >= 0:
+		ws_port_rule._set_cell_owner(lake_shore.y * ws_port_rule.sim_width + lake_shore.x, pp_s.id)
+	var port_ok_chk: Dictionary = ws_port_rule.can_place_structure(pp_s.id, StructureData.TYPE_PORT, port_coast.x, port_coast.y)
+	var port_inland_chk: Dictionary = ws_port_rule.can_place_structure(pp_s.id, StructureData.TYPE_PORT, port_inland_2px.x, port_inland_2px.y)
+	var port_lake_chk: Dictionary = ws_port_rule.can_place_structure(pp_s.id, StructureData.TYPE_PORT, lake_shore.x, lake_shore.y) if lake_shore.x >= 0 else {"ok": false, "reason": "coastline"}
+	_check(
+		bool(port_ok_chk.get("ok", false))
+		and not bool(port_inland_chk.get("ok", true)) and "coastline" in str(port_inland_chk.get("reason", "")).to_lower()
+		and not bool(port_lake_chk.get("ok", true)) and "coastline" in str(port_lake_chk.get("reason", "")).to_lower(),
+		"Port placement strictly requires ocean coastline with open-sea access (rejects 2px inland & inland lakes)",
+		"coast=%s inland=%s lake=%s" % [str(port_ok_chk), str(port_inland_chk), str(port_lake_chk)])

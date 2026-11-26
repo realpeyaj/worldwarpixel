@@ -16,6 +16,10 @@ var _elapsed: float = 0.0
 var _cached_fac_key: String = ""
 var _cached_fac_poly: PackedVector2Array = PackedVector2Array()
 var _active_pings: Array[Dictionary] = [] # {"pos": Vector2, "kind": String, "sender": String, "ttl": float, "max_ttl": float}
+var _mirv_cache_owner: int = -1
+var _mirv_cache_cells: int = -1
+var _mirv_cache_aim: Vector2i = Vector2i(-1, -1)
+var _mirv_cache_pts: PackedVector2Array = PackedVector2Array()
 
 
 func setup(world_state: WorldState, camera: Camera2D) -> void:
@@ -201,31 +205,21 @@ func _draw() -> void:
 				if _missile_mode == MissileUnit.KIND_MIRV:
 					var tgt_oid: int = _world_state.get_owner_at(aim_cell.x, aim_cell.y)
 					var sub_r: float = float(MissileUnit.get_blast_radius(MissileUnit.KIND_MIRV_WARHEAD)) * sim_s
-					if tgt_oid > 0 and tgt_oid != p_id:
-						var sub_spots: Array[Vector2] = [pos]
-						var w_g: int = _world_state.sim_width
-						var h_g: int = _world_state.sim_height
-						var min_d2: float = (sub_r * 1.6) * (sub_r * 1.6)
-						for sy_i in range(0, h_g, 18):
-							if sub_spots.size() >= 12:
-								break
-							var row_off: int = sy_i * w_g
-							for sx_i in range(0, w_g, 18):
-								if _world_state.owner_grid[row_off + sx_i] != tgt_oid:
-									continue
-								var wp: Vector2 = _world_state.sim_to_world(Vector2i(sx_i, sy_i))
-								var spaced := true
-								for prev_p: Vector2 in sub_spots:
-									if wp.distance_squared_to(prev_p) < min_d2:
-										spaced = false
-										break
-								if spaced:
-									sub_spots.append(wp)
-									if sub_spots.size() >= 12:
-										break
-						for sp: Vector2 in sub_spots:
+					if tgt_oid > 0 and tgt_oid != p_id and not _world_state.are_allied(p_id, tgt_oid):
+						var tgt_n: NationData = _world_state.get_nation(tgt_oid)
+						var cell_cnt: int = tgt_n.owned_cell_count if tgt_n != null else 0
+						if tgt_oid != _mirv_cache_owner or cell_cnt != _mirv_cache_cells or aim_cell.distance_squared_to(_mirv_cache_aim) >= 16:
+							var mirv_cells: Array[Vector2i] = _world_state.compute_mirv_targets(tgt_oid, aim_cell)
+							_mirv_cache_pts.resize(mirv_cells.size())
+							for mi in range(mirv_cells.size()):
+								_mirv_cache_pts[mi] = _world_state.sim_to_world(mirv_cells[mi])
+							_mirv_cache_owner = tgt_oid
+							_mirv_cache_cells = cell_cnt
+							_mirv_cache_aim = aim_cell
+						for sp: Vector2 in _mirv_cache_pts:
 							draw_circle(sp, sub_r, Color(1.0, 0.34, 0.16, 0.14))
-							draw_arc(sp, sub_r, 0.0, TAU, 24, Color(1.0, 0.42, 0.22, 0.76), 1.3 * inv_z)
+							draw_arc(sp, sub_r, 0.0, TAU, 24, Color(1.0, 0.42, 0.22, 0.78), 1.3 * inv_z)
+							draw_arc(sp, sub_r * 0.80, 0.0, TAU, 20, Color(1.0, 0.78, 0.28, 0.45), 0.9 * inv_z)
 					draw_arc(pos, blast_r, 0.0, TAU, 36, red_col, 1.8 * inv_z)
 				else:
 					draw_circle(pos, blast_r, Color(1.0, 0.24, 0.18, 0.15 if _staged_missile_cell.x < 0 else 0.28))

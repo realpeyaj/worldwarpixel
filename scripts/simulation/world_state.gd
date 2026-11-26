@@ -79,8 +79,9 @@ const TERRAIN_COST := {
 }
 
 const VICTORY_THRESHOLD_PERCENT := 80.0
-const FALLOUT_TROOP_COST_MULT := 2.4
+const FALLOUT_TROOP_COST_MULT := 2.6
 const NEUTRAL_EXPLORE_TROOP_COST_MULT := 1.85
+const MAX_MIRV_WARHEADS := 72
 const MAX_ACTIVE_EXPANSIONS_PER_NATION := 3
 const MAX_ACTIVE_TRADE_SHIPS := 150
 const MIN_STRUCTURE_SPACING_CELLS := 8
@@ -1503,24 +1504,12 @@ func can_place_structure(nid: int, s_type: String, sx: int, sy: int) -> Dictiona
 			return {"ok": false, "reason": "Too close to another structure."}
 
 	if s_type == StructureData.TYPE_PORT:
-		if coastal_grid[idx] != 1 and not _has_nearby_ocean(sx, sy, 4):
-			return {"ok": false, "reason": "Ports must be built on an ocean coastline."}
-		if sea_pathfinder.find_nearest_nav_cell(cell, 4).x < 0:
-			return {"ok": false, "reason": "No navigable sea access nearby for ships."}
+		if coastal_grid[idx] != 1:
+			return {"ok": false, "reason": "Ports must be built directly on an open-sea coastline."}
+		if sea_pathfinder.find_nearest_nav_cell(cell, 2).x < 0:
+			return {"ok": false, "reason": "No open-sea navigable access from this shore."}
 
 	return {"ok": true, "reason": ""}
-
-
-func _has_nearby_ocean(sx: int, sy: int, r: int) -> bool:
-	for dy in range(-r, r + 1):
-		var yy: int = sy + dy
-		if yy < 0 or yy >= sim_height:
-			continue
-		for dx in range(-r, r + 1):
-			var xx: int = sx + dx
-			if xx >= 0 and xx < sim_width and terrain_grid[yy * sim_width + xx] == T_OCEAN:
-				return true
-	return false
 
 
 func _cmd_build_structure(cmd: Dictionary) -> Dictionary:
@@ -1550,7 +1539,7 @@ func _cmd_build_structure(cmd: Dictionary) -> Dictionary:
 	st.progress_ticks = 0
 	st.total_build_ticks = StructureData.get_build_ticks(1)
 	if s_type == StructureData.TYPE_PORT:
-		st.water_cell = sea_pathfinder.find_nearest_nav_cell(st.cell, 3)
+		st.water_cell = sea_pathfinder.find_nearest_nav_cell(st.cell, 2)
 	elif s_type == StructureData.TYPE_FACTORY:
 		st.terrain_bonus = _factory_terrain_bonus(terrain_grid[sy * sim_width + sx])
 
@@ -1925,20 +1914,23 @@ func _step_ships() -> void:
 			elif l_ship.target_owner_id == player_nation_id:
 				last_player_threat_world_pos = sim_to_world(l_ship.landing_cell)
 				player_territory_attacked.emit(n.id, beach_claimed)
-		var rem: float = maxf(10.0, l_ship.troops_carried - (6.0 if hit_fallout else 3.0))
-		var push_target: Vector2i = l_ship.target_cell if l_ship.target_cell.x >= 0 else l_ship.landing_cell
-		var existing := _find_reinforceable_expansion(n.id, push_target, landing_lm, l_ship.target_owner_id)
-		if existing != null:
-			existing.remaining_troops += rem
-			existing.initial_troops += rem
-			existing.last_troop_delta = rem
-			existing.troop_flash_timer = 0.65
-			existing.target_cell = push_target
-			_seed_expansion_arc(existing, n.id, push_target, landing_lm, 24)
-		else:
-			var ord := _start_land_expansion(n.id, push_target, rem, l_ship.target_owner_id)
-			if ord == null:
-				n.troops = minf(n.max_troops, n.troops + rem)
+		var beach_mult: float = FALLOUT_TROOP_COST_MULT if hit_fallout else (NEUTRAL_EXPLORE_TROOP_COST_MULT if l_ship.target_owner_id == 0 else 1.65)
+		var beach_cost: float = float(beach_claimed) * 0.25 * beach_mult
+		var rem: float = maxf(0.0, l_ship.troops_carried - beach_cost)
+		if rem >= 1.0:
+			var push_target: Vector2i = l_ship.target_cell if l_ship.target_cell.x >= 0 else l_ship.landing_cell
+			var existing := _find_reinforceable_expansion(n.id, push_target, landing_lm, l_ship.target_owner_id)
+			if existing != null:
+				existing.remaining_troops += rem
+				existing.initial_troops += rem
+				existing.last_troop_delta = rem
+				existing.troop_flash_timer = 0.65
+				existing.target_cell = push_target
+				_seed_expansion_arc(existing, n.id, push_target, landing_lm, 24)
+			else:
+				var ord := _start_land_expansion(n.id, push_target, rem, l_ship.target_owner_id)
+				if ord == null:
+					n.troops = minf(n.max_troops, n.troops + rem)
 		any_landed = true
 	if any_landed:
 		_economy_dirty = true
@@ -2238,7 +2230,7 @@ func _step_expansions() -> void:
 
 			var cost: float = float(TERRAIN_COST.get(t, 1.0)) * 0.25
 			if prev_owner == 0:
-				cost *= NEUTRAL_EXPLORE_TROOP_COST_MULT
+				cost *= FALLOUT_TROOP_COST_MULT if fallout_grid[idx] > 0 else NEUTRAL_EXPLORE_TROOP_COST_MULT
 			else:
 				var enemy: NationData = nations.get(prev_owner, null)
 				var def_mult: float = 1.65
@@ -2253,10 +2245,10 @@ func _step_expansions() -> void:
 				if nation.is_betrayer(current_tick):
 					def_mult *= 1.35
 				cost *= def_mult
+				if fallout_grid[idx] > 0:
+					cost *= 1.4
 			if order.supply_factor < 1.0:
 				cost *= 1.15
-			if fallout_grid[idx] > 0:
-				cost *= FALLOUT_TROOP_COST_MULT
 
 			if order.remaining_troops < cost:
 				order.remaining_troops = 0.0
@@ -3508,24 +3500,76 @@ func _step_missiles() -> void:
 		_detonate_missile(det)
 
 
-func _split_mirv(m: MissileUnit) -> void:
-	var tgt_owner: int = m.target_nation_id if m.target_nation_id > 0 else get_owner_at(m.target_cell.x, m.target_cell.y)
+func compute_mirv_targets(tgt_owner: int, aim_cell: Vector2i = Vector2i(-1, -1)) -> Array[Vector2i]:
 	var en: NationData = nations.get(tgt_owner, null)
+	if en == null or not en.alive or en.owned_cell_count <= 0:
+		if aim_cell.x >= 0 and get_owner_at(aim_cell.x, aim_cell.y) > 0:
+			return [aim_cell]
+		return []
+
 	var target_cells: Array[Vector2i] = []
-	if en != null and en.alive and en.owned_cell_count > 0:
+	var desired_count: int = clampi(int(ceil(float(en.owned_cell_count) / 620.0)), 8, MAX_MIRV_WARHEADS)
+	var step: int = clampi(int(floor(sqrt(float(en.owned_cell_count) / float(desired_count)))), 6, 64)
+
+	var grid_pts: Array[Vector2i] = []
+	var row_i := 0
+	var y: int = step >> 1
+	while y < sim_height:
+		var x_off: int = (step >> 1) if (row_i & 1) == 1 else (step >> 2)
+		var row_off: int = y * sim_width
+		var x: int = x_off
+		while x < sim_width:
+			if owner_grid[row_off + x] == tgt_owner and terrain_grid[row_off + x] >= T_PLAINS:
+				grid_pts.append(Vector2i(x, y))
+			x += step
+		y += step
+		row_i += 1
+
+	if grid_pts.size() > MAX_MIRV_WARHEADS:
+		for i in range(MAX_MIRV_WARHEADS):
+			var gi: int = int(floor(float(i) * float(grid_pts.size()) / float(MAX_MIRV_WARHEADS)))
+			target_cells.append(grid_pts[gi])
+	else:
+		target_cells = grid_pts
+
+	var priority_pts: Array[Vector2i] = []
+	if aim_cell.x >= 0 and get_owner_at(aim_cell.x, aim_cell.y) == tgt_owner:
+		priority_pts.append(aim_cell)
+	if en.capital_cell.x >= 0 and get_owner_at(en.capital_cell.x, en.capital_cell.y) == tgt_owner:
+		priority_pts.append(en.capital_cell)
+	for sid: int in en.structure_ids:
+		var st: StructureData = structures.get(sid, null)
+		if st != null and get_owner_at(st.cell.x, st.cell.y) == tgt_owner:
+			priority_pts.append(st.cell)
+
+	var min_sep_sq: float = float(step * step) * 0.30
+	for pt: Vector2i in priority_pts:
+		var near_existing := false
+		var closest_i := -1
+		var closest_d2 := 1e12
+		for ti in range(target_cells.size()):
+			var d2: float = Vector2(pt - target_cells[ti]).length_squared()
+			if d2 < closest_d2:
+				closest_d2 = d2
+				closest_i = ti
+			if d2 < min_sep_sq:
+				near_existing = true
+				break
+		if not near_existing:
+			if target_cells.size() < MAX_MIRV_WARHEADS:
+				target_cells.append(pt)
+			elif pt == aim_cell and closest_i >= 0:
+				target_cells[closest_i] = pt
+
+	var min_need: int = mini(8, en.owned_cell_count)
+	if target_cells.size() < min_need:
 		var cands: Array[Vector2i] = []
-		if get_owner_at(m.target_cell.x, m.target_cell.y) == tgt_owner:
-			cands.append(m.target_cell)
-		if en.capital_cell.x >= 0 and get_owner_at(en.capital_cell.x, en.capital_cell.y) == tgt_owner:
-			cands.append(en.capital_cell)
-		for sid: int in en.structure_ids:
-			var st: StructureData = structures.get(sid, null)
-			if st != null:
-				cands.append(st.cell)
 		var center: Vector2i = get_nation_label_cell(tgt_owner)
+		if center.x >= 0 and get_owner_at(center.x, center.y) == tgt_owner:
+			cands.append(center)
 		var borders: Dictionary = _nation_borders.get(tgt_owner, {})
 		var b_keys: Array = borders.keys()
-		var stride: int = maxi(1, int(ceil(float(b_keys.size()) / 64.0)))
+		var b_stride: int = maxi(1, int(ceil(float(b_keys.size()) / 48.0)))
 		var bi := 0
 		while bi < b_keys.size():
 			var b_idx: int = int(b_keys[bi])
@@ -3535,18 +3579,12 @@ func _split_mirv(m: MissileUnit) -> void:
 				var ic := Vector2i(int(round(lerpf(float(bc.x), float(center.x), frac))), int(round(lerpf(float(bc.y), float(center.y), frac))))
 				if get_owner_at(ic.x, ic.y) == tgt_owner:
 					cands.append(ic)
-			bi += stride
-		var warhead_count: int = clampi(8 + int(en.owned_cell_count / 60), 10, 20)
-		# Greedy farthest-point selection spreads mini warheads across the whole nation
-		for c: Vector2i in cands:
-			if get_owner_at(c.x, c.y) == tgt_owner and terrain_grid[c.y * sim_width + c.x] >= T_PLAINS:
-				target_cells.append(c)
-				break
-		while target_cells.size() < warhead_count and not cands.is_empty():
+			bi += b_stride
+		while target_cells.size() < min_need and not cands.is_empty():
 			var best_c := Vector2i(-1, -1)
 			var best_d := -1.0
 			for c: Vector2i in cands:
-				if get_owner_at(c.x, c.y) != tgt_owner:
+				if get_owner_at(c.x, c.y) != tgt_owner or terrain_grid[c.y * sim_width + c.x] < T_PLAINS:
 					continue
 				var min_d := 1e12
 				for t: Vector2i in target_cells:
@@ -3554,9 +3592,16 @@ func _split_mirv(m: MissileUnit) -> void:
 				if min_d > best_d:
 					best_d = min_d
 					best_c = c
-			if best_c.x < 0 or best_d < 16.0:
+			if best_c.x < 0 or (not target_cells.is_empty() and best_d < 16.0):
 				break
 			target_cells.append(best_c)
+
+	return target_cells
+
+
+func _split_mirv(m: MissileUnit) -> void:
+	var tgt_owner: int = m.target_nation_id if m.target_nation_id > 0 else get_owner_at(m.target_cell.x, m.target_cell.y)
+	var target_cells: Array[Vector2i] = compute_mirv_targets(tgt_owner, m.target_cell)
 	if target_cells.is_empty():
 		if get_owner_at(m.target_cell.x, m.target_cell.y) > 0:
 			target_cells.append(m.target_cell)

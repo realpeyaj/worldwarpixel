@@ -70,6 +70,8 @@ func setup(world_state: WorldState, camera: Camera2D) -> void:
 		_world_state.nation_spawned.connect(_on_visual_dirty_arg)
 	if not _world_state.diplomacy_changed.is_connected(_on_visual_dirty_noarg):
 		_world_state.diplomacy_changed.connect(_on_visual_dirty_noarg)
+	if not _world_state.expansion_updated.is_connected(_on_visual_dirty_noarg):
+		_world_state.expansion_updated.connect(_on_visual_dirty_noarg)
 	if not _world_state.missile_detonated.is_connected(_on_visual_dirty_det):
 		_world_state.missile_detonated.connect(_on_visual_dirty_det)
 	_dirty = true
