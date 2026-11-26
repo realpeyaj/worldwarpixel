@@ -29,6 +29,8 @@ signal diplomacy_changed
 signal alliance_requested(from_nation_id: int, to_nation_id: int)
 signal diplomacy_event(message: String, is_warning: bool)
 signal nation_eliminated(nation_id: int, conqueror_id: int)
+signal player_land_conquered(cells_claimed: int, is_contested: bool)
+signal player_territory_attacked(attacker_id: int, cells_lost: int)
 
 const TICK_RATE_HZ := SimulationClock.TICK_RATE_HZ
 const TICK_DT := SimulationClock.TICK_INTERVAL
@@ -80,7 +82,7 @@ const VICTORY_THRESHOLD_PERCENT := 80.0
 const FALLOUT_TROOP_COST_MULT := 2.4
 const MAX_ACTIVE_EXPANSIONS_PER_NATION := 3
 const MAX_ACTIVE_TRADE_SHIPS := 150
-const MIN_STRUCTURE_SPACING_CELLS := 4
+const MIN_STRUCTURE_SPACING_CELLS := 8
 const NATION_LABEL_MIN_SCALE := 0.65
 const NATION_LABEL_MAX_SCALE := 1.55
 const SHIP_SPEED_PX_SEC := 22.0
@@ -94,8 +96,9 @@ const NATION_COLOR_PALETTE: Array[String] = [
 	"#d97706", "#10b981", "#e879f9", "#0ea5e9",
 ]
 
-var sim_width: int = 1024
-var sim_height: int = 512
+var sim_width: int = 2048
+var sim_height: int = 1024
+var sim_scale: float = 1.0
 var map_size: Vector2 = Vector2(2048.0, 1024.0)
 
 var terrain_grid: PackedByteArray = PackedByteArray()
@@ -134,6 +137,9 @@ var _nation_coasts: Dictionary = {}      # int -> Dictionary (cell_idx -> true)
 var _nation_landmasses: Dictionary = {}  # int -> Dictionary (landmass_id -> int count)
 var _prev_link_keys: Dictionary = {}
 var _road_cache: Dictionary = {}
+var _station_road_adj: Dictionary = {}     # station_id -> Array[Dictionary] directed road edges
+var _factory_train_routes: Dictionary = {} # factory_id -> Array[Dictionary] BFS 1..8-hop train routes
+var _factory_route_cursor: Dictionary = {} # factory_id -> int round-robin route cursor
 var _landmass_coasts: Dictionary = {}    # int (lm_id) -> PackedInt32Array of navigable coastal cell indices
 var _next_nation_id: int = 1
 var _next_structure_id: int = 1
@@ -159,9 +165,10 @@ func load_world(meta_path: String = META_PATH, grid_path: String = GRID_PATH, na
 		return false
 	var meta := parsed as Dictionary
 
-	sim_width = int(meta.get("sim_width", 1024))
-	sim_height = int(meta.get("sim_height", 512))
+	sim_width = int(meta.get("sim_width", 2048))
+	sim_height = int(meta.get("sim_height", 1024))
 	map_size = Vector2(float(meta.get("map_width", 2048)), float(meta.get("map_height", 1024)))
+	sim_scale = map_size.x / float(maxi(sim_width, 1))
 	var nav_w: int = int(meta.get("nav_width", 1024))
 	var nav_h: int = int(meta.get("nav_height", 512))
 	region_labels = meta.get("region_labels", [])
@@ -180,7 +187,7 @@ func load_world(meta_path: String = META_PATH, grid_path: String = GRID_PATH, na
 		push_error("world_grid.bin size mismatch.")
 		return false
 
-	if not sea_pathfinder.load_nav_grid(nav_path, nav_w, nav_h):
+	if not sea_pathfinder.load_nav_grid(nav_path, nav_w, nav_h, sim_width):
 		return false
 
 	_init_row_areas()
@@ -211,6 +218,9 @@ func reset_match() -> void:
 	_nation_landmasses.clear()
 	_prev_link_keys.clear()
 	_road_cache.clear()
+	_station_road_adj.clear()
+	_factory_train_routes.clear()
+	_factory_route_cursor.clear()
 	_next_nation_id = 1
 	_next_structure_id = 1
 	_next_expansion_id = 1
@@ -319,14 +329,15 @@ func _precompute_coast_and_landmasses() -> void:
 
 
 func world_to_sim(world_pos: Vector2) -> Vector2i:
+	var inv_s: float = 1.0 / maxf(sim_scale, 0.25)
 	return Vector2i(
-		clampi(int(floor(world_pos.x * 0.5)), 0, sim_width - 1),
-		clampi(int(floor(world_pos.y * 0.5)), 0, sim_height - 1)
+		clampi(int(floor(world_pos.x * inv_s)), 0, sim_width - 1),
+		clampi(int(floor(world_pos.y * inv_s)), 0, sim_height - 1)
 	)
 
 
 func sim_to_world(cell: Vector2i) -> Vector2:
-	return Vector2((float(cell.x) + 0.5) * 2.0, (float(cell.y) + 0.5) * 2.0)
+	return Vector2((float(cell.x) + 0.5) * sim_scale, (float(cell.y) + 0.5) * sim_scale)
 
 
 func is_land_cell(sx: int, sy: int) -> bool:
@@ -414,14 +425,14 @@ func _spawn_ai_nations(ai_count: int, spawned_pts: Array[Vector2i], palette: Arr
 			continue
 		var too_close := false
 		for pt: Vector2i in spawned_pts:
-			if cand.distance_squared_to(pt) < 3600.0:
+			if cand.distance_squared_to(pt) < 14400.0:
 				too_close = true
 				break
 		if too_close:
 			continue
 		var col := Color.from_string(palette[(ai_idx + palette_offset) % palette.size()], Color.ORANGE)
 		var nm: String = AIController.AI_NAMES[ai_idx % AIController.AI_NAMES.size()]
-		var ai_n := _create_nation(nm, col, false, cand, 14)
+		var ai_n := _create_nation(nm, col, false, cand, 56)
 		_start_land_expansion(ai_n.id, cand, 48.0, 0)
 		spawned_pts.append(cand)
 		ai_idx += 1
@@ -446,7 +457,7 @@ func _cmd_spawn_player(cmd: Dictionary) -> Dictionary:
 	var p_color := Color.from_string(palette[0], Color("#3b82f6"))
 	var ai_count: int = clampi(int(cmd.get("ai_count", 6)), 0, 10)
 
-	var p_nation := _create_nation(p_name, p_color, true, Vector2i(sx, sy), 14)
+	var p_nation := _create_nation(p_name, p_color, true, Vector2i(sx, sy), 56)
 	player_nation_id = p_nation.id
 	_start_land_expansion(p_nation.id, Vector2i(sx, sy), 58.0, 0)
 
@@ -490,7 +501,7 @@ func _cmd_start_mp_match(cmd: Dictionary) -> Dictionary:
 				if is_land_cell(cand.x, cand.y) and get_owner_at(cand.x, cand.y) == 0:
 					var far_ok := true
 					for prev_pt: Vector2i in spawned_pts:
-						if cand.distance_squared_to(prev_pt) < 1600.0:
+						if cand.distance_squared_to(prev_pt) < 6400.0:
 							far_ok = false
 							break
 					if far_ok:
@@ -498,7 +509,7 @@ func _cmd_start_mp_match(cmd: Dictionary) -> Dictionary:
 						sy = cand.y
 						break
 		var col := Color.from_string(palette[i % palette.size()], Color("#3b82f6"))
-		var mp_n := _create_nation(nm, col, true, Vector2i(sx, sy), 14, nid)
+		var mp_n := _create_nation(nm, col, true, Vector2i(sx, sy), 56, nid)
 		_start_land_expansion(mp_n.id, Vector2i(sx, sy), 58.0, 0)
 		spawned_pts.append(Vector2i(sx, sy))
 
@@ -527,7 +538,8 @@ func _create_nation(n_name: String, col: Color, is_player: bool, center: Vector2
 	n.label_cell = center
 	n.label_dirty = true
 	n.gold = 125000.0
-	n.troops = 180.0 if is_player else 150.0
+	n.troops = 1500.0
+	n.max_troops = 3200.0
 	nations[nid] = n
 	_nation_borders[nid] = {}
 	_nation_coasts[nid] = {}
@@ -580,7 +592,7 @@ func _claim_organic_dot(nid: int, center: Vector2i, target_count: int, allowed_o
 
 
 func find_closest_owned_shore(nid: int, target_cell: Vector2i, required_lm: int = -1, preview_only: bool = false) -> Dictionary:
-	"""Finds the nearest owned coastal cell to target_cell and a valid sea route to target landmass."""
+	"""Finds the fastest sea-time owned departure coast (considering sea detours & 1.25x Port speed) and valid A* route."""
 	if target_cell.x < 0 or target_cell.y < 0 or target_cell.x >= sim_width or target_cell.y >= sim_height:
 		return {"ok": false, "reason": "Destination out of bounds."}
 	var t_idx: int = target_cell.y * sim_width + target_cell.x
@@ -630,16 +642,13 @@ func find_closest_owned_shore(nid: int, target_cell: Vector2i, required_lm: int 
 			"near_port": false,
 		}
 
-	# O(N) top-3 selection (zero array sorting on boat spam)
-	var b0 := Vector2i(-1, -1)
-	var b1 := Vector2i(-1, -1)
-	var b2 := Vector2i(-1, -1)
-	var d0 := 1e12
-	var d1 := 1e12
-	var d2_best := 1e12
+	# Diverse candidate selection: best per ocean-facing direction + spatially separated shores + Ports
+	var dir_best_cell: Array[Vector2i] = [Vector2i(-1, -1), Vector2i(-1, -1), Vector2i(-1, -1), Vector2i(-1, -1)]
+	var dir_best_d2: Array[float] = [1e12, 1e12, 1e12, 1e12]
+	var near_shores: Array[Dictionary] = []  # [{"cell": Vector2i, "d2": float}] max 6 separated >= 28 cells
 	var coast_keys: Array = coasts.keys()
 	var c_total: int = coast_keys.size()
-	var c_step: int = maxi(1, int(c_total / 400))
+	var c_step: int = maxi(1, int(c_total / 2500))
 	var ci := 0
 	while ci < c_total:
 		var c_idx: int = int(coast_keys[ci])
@@ -651,53 +660,125 @@ func find_closest_owned_shore(nid: int, target_cell: Vector2i, required_lm: int 
 		var cx: int = c_idx % sim_width
 		var cy: int = int(c_idx / sim_width)
 		var d2: float = float((cx - landing_spot.x) * (cx - landing_spot.x) + (cy - landing_spot.y) * (cy - landing_spot.y))
-		if d2 < d0:
-			d2_best = d1
-			b2 = b1
-			d1 = d0
-			b1 = b0
-			d0 = d2
-			b0 = Vector2i(cx, cy)
-		elif d2 < d1:
-			d2_best = d1
-			b2 = b1
-			d1 = d2
-			b1 = Vector2i(cx, cy)
-		elif d2 < d2_best:
-			d2_best = d2
-			b2 = Vector2i(cx, cy)
+		var sc := Vector2i(cx, cy)
+		if cy > 0 and terrain_grid[c_idx - sim_width] == T_OCEAN and d2 < dir_best_d2[0]:
+			dir_best_d2[0] = d2
+			dir_best_cell[0] = sc
+		if cy + 1 < sim_height and terrain_grid[c_idx + sim_width] == T_OCEAN and d2 < dir_best_d2[1]:
+			dir_best_d2[1] = d2
+			dir_best_cell[1] = sc
+		if cx + 1 < sim_width and terrain_grid[c_idx + 1] == T_OCEAN and d2 < dir_best_d2[2]:
+			dir_best_d2[2] = d2
+			dir_best_cell[2] = sc
+		if cx > 0 and terrain_grid[c_idx - 1] == T_OCEAN and d2 < dir_best_d2[3]:
+			dir_best_d2[3] = d2
+			dir_best_cell[3] = sc
 
-	if b0.x < 0:
-		return {"ok": false, "reason": "No coastal departure shore on source landmass."}
+		var merged := false
+		for ns_i in range(near_shores.size()):
+			var prev_c: Vector2i = near_shores[ns_i]["cell"]
+			if Vector2(prev_c - sc).length_squared() < 784.0:
+				merged = true
+				if d2 < float(near_shores[ns_i]["d2"]):
+					near_shores[ns_i] = {"cell": sc, "d2": d2}
+				break
+		if not merged:
+			if near_shores.size() < 6:
+				near_shores.append({"cell": sc, "d2": d2})
+			else:
+				var worst_i := 0
+				var worst_d2 := -1.0
+				for ns_i in range(near_shores.size()):
+					if float(near_shores[ns_i]["d2"]) > worst_d2:
+						worst_d2 = float(near_shores[ns_i]["d2"])
+						worst_i = ns_i
+				if d2 < worst_d2:
+					near_shores[worst_i] = {"cell": sc, "d2": d2}
 
-	var seen_start_nav: Dictionary = {}
-	for shore: Vector2i in [b0, b1, b2]:
-		if shore.x < 0:
-			continue
+	var cand_raw: Array[Dictionary] = []
+	for di in range(4):
+		if dir_best_cell[di].x >= 0:
+			cand_raw.append({"cell": dir_best_cell[di], "from_port": false})
+	for ns: Dictionary in near_shores:
+		cand_raw.append({"cell": ns["cell"], "from_port": false})
+
+	var nation: NationData = nations.get(nid, null)
+	if nation != null:
+		var port_cands: Array[Dictionary] = []
+		for sid: int in nation.structure_ids:
+			var pst: StructureData = structures.get(sid, null)
+			if pst != null and pst.type == StructureData.TYPE_PORT and pst.level > 0 and pst.water_cell.x >= 0:
+				if required_lm > 0 and landmass_grid[pst.cell.y * sim_width + pst.cell.x] != required_lm:
+					continue
+				var pd2: float = Vector2(pst.cell - landing_spot).length_squared()
+				port_cands.append({"cell": pst.cell, "d2": pd2})
+		port_cands.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return float(a["d2"]) < float(b["d2"]))
+		for pi in range(mini(4, port_cands.size())):
+			cand_raw.append({"cell": port_cands[pi]["cell"], "from_port": true})
+
+	var candidates_by_nav: Dictionary = {}
+	var world_scale: float = sea_pathfinder._world_scale
+	for item: Dictionary in cand_raw:
+		var shore: Vector2i = item["cell"]
 		var start_nav: Vector2i = sea_pathfinder.find_nearest_nav_cell(shore, 2)
 		if start_nav.x < 0:
 			continue
 		var nav_key: int = start_nav.y * sea_pathfinder.nav_width + start_nav.x
-		if seen_start_nav.has(nav_key):
-			continue
-		seen_start_nav[nav_key] = true
+		var near_port: bool = bool(item["from_port"]) or _has_nearby_port(nid, shore, 24.0)
+		var ship_speed: float = SHIP_SPEED_PX_SEC * (1.25 if near_port else 1.0)
+		var min_eta: float = (Vector2(start_nav - dest_nav).length() * world_scale) / ship_speed
+		var entry := {
+			"shore_cell": shore,
+			"start_nav": start_nav,
+			"near_port": near_port,
+			"ship_speed": ship_speed,
+			"min_eta": min_eta,
+		}
+		if not candidates_by_nav.has(nav_key):
+			candidates_by_nav[nav_key] = entry
+		else:
+			var old: Dictionary = candidates_by_nav[nav_key]
+			if (not bool(old["near_port"]) and near_port) or (bool(old["near_port"]) == near_port and min_eta < float(old["min_eta"])):
+				candidates_by_nav[nav_key] = entry
+
+	if candidates_by_nav.is_empty():
+		return {"ok": false, "reason": "No coastal departure shore on source landmass."}
+
+	var candidates: Array[Dictionary] = []
+	for k in candidates_by_nav.keys():
+		candidates.append(candidates_by_nav[k])
+	candidates.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return float(a["min_eta"]) < float(b["min_eta"])
+	)
+	if candidates.size() > 10:
+		candidates.resize(10)
+
+	var best_time := 1e12
+	var best_res: Dictionary = {}
+	for cand: Dictionary in candidates:
+		if best_time < 1e11 and float(cand["min_eta"]) >= best_time:
+			break
+		var start_nav: Vector2i = cand["start_nav"]
 		var route: PackedVector2Array = sea_pathfinder.find_path(start_nav, dest_nav)
 		if route.is_empty():
 			continue
-		var near_port := _has_nearby_port(nid, shore, 24.0)
-		return {
-			"ok": true,
-			"shore_cell": shore,
-			"start_nav": start_nav,
-			"landing_cell": landing_spot,
-			"dest_nav": dest_nav,
-			"route": route,
-			"near_port": near_port,
-		}
-		if seen_start_nav.size() >= 2:
-			break
+		var eta: float = _compute_route_length(route) / float(cand["ship_speed"])
+		if eta < best_time:
+			best_time = eta
+			best_res = {
+				"ok": true,
+				"shore_cell": cand["shore_cell"],
+				"start_nav": start_nav,
+				"landing_cell": landing_spot,
+				"dest_nav": dest_nav,
+				"route": route,
+				"near_port": cand["near_port"],
+				"travel_time": eta,
+			}
 
-	return {"ok": false, "reason": "No navigable sea route from your nearest shore."}
+	if not best_res.is_empty():
+		return best_res
+	return {"ok": false, "reason": "No navigable sea route from your coasts."}
 
 
 func _has_nearby_port(nid: int, cell: Vector2i, max_dist: float) -> bool:
@@ -886,12 +967,12 @@ func should_use_sea_crossing(nid: int, target_cell: Vector2i) -> bool:
 	if ocean_hits == 0:
 		return false
 	var best_d: float = sqrt(best_d2)
-	if best_d >= 12.0 and ocean_hits >= 5:
+	if best_d >= 24.0 and ocean_hits >= 10:
 		return true
 
 	# Bounded local overland BFS to verify whether a narrow water gap lacks a nearby land detour
-	var max_depth: int = mini(20, int(ceil(best_d * 2.2)) + 4)
-	var max_popped: int = 320
+	var max_depth: int = mini(40, int(ceil(best_d * 2.2)) + 8)
+	var max_popped: int = 960
 	var queue_idx := PackedInt32Array([t_idx])
 	var queue_depth := PackedInt32Array([0])
 	var visited: Dictionary = {t_idx: true}
@@ -984,7 +1065,7 @@ func _find_reinforceable_expansion(nid: int, target_cell: Vector2i, target_lm: i
 			continue
 		if desired_target_owner > 0:
 			return o
-		if o.target_cell.distance_to(target_cell) <= 55.0 or (o.front_world_pos != Vector2.ZERO and o.front_world_pos.distance_to(target_w) <= 110.0):
+		if o.target_cell.distance_to(target_cell) <= 110.0 or (o.front_world_pos != Vector2.ZERO and o.front_world_pos.distance_to(target_w) <= 110.0):
 			return o
 	return null
 
@@ -1083,8 +1164,8 @@ func _start_land_expansion(nid: int, target: Vector2i, troops: float, forced_tar
 	order.supply_quality = supply["quality"]
 	order.supply_factor = supply["factor"]
 
-	# OpenFront 1:1 frontier seeding across the entire active border (up to 400 cells)
-	var seed_limit: int = mini(ranked.size(), 400)
+	# OpenFront 1:1 frontier seeding across the entire active border (up to 900 cells at 2048x1024)
+	var seed_limit: int = mini(ranked.size(), 900)
 	for i in range(seed_limit):
 		var b_idx: int = int(ranked[i][1])
 		var bd: float = sqrt(float(ranked[i][0]))
@@ -1094,14 +1175,14 @@ func _start_land_expansion(nid: int, target: Vector2i, troops: float, forced_tar
 	if order.frontier_size() == 0:
 		for item: Array in ranked:
 			_push_adjacent_frontier(order, int(item[1]), nid, target, 0.0)
-			if order.frontier_size() >= 64:
+			if order.frontier_size() >= 128:
 				break
 	if order.frontier_size() == 0:
 		return null
 
 	var first_idx: int = order.peek_best()
 	if first_idx >= 0:
-		order.front_world_pos = Vector2(float(first_idx % sim_width) + 0.5, float(int(first_idx / sim_width)) + 0.5) * 2.0
+		order.front_world_pos = Vector2(float(first_idx % sim_width) + 0.5, float(int(first_idx / sim_width)) + 0.5) * sim_scale
 	expansions[order.id] = order
 	return order
 
@@ -1332,9 +1413,9 @@ func can_place_structure(nid: int, s_type: String, sx: int, sy: int) -> Dictiona
 			return {"ok": false, "reason": "Too close to another structure."}
 
 	if s_type == StructureData.TYPE_PORT:
-		if coastal_grid[idx] != 1 and not _has_nearby_ocean(sx, sy, 2):
+		if coastal_grid[idx] != 1 and not _has_nearby_ocean(sx, sy, 4):
 			return {"ok": false, "reason": "Ports must be built on an ocean coastline."}
-		if sea_pathfinder.find_nearest_nav_cell(cell, 3).x < 0:
+		if sea_pathfinder.find_nearest_nav_cell(cell, 4).x < 0:
 			return {"ok": false, "reason": "No navigable sea access nearby for ships."}
 
 	return {"ok": true, "reason": ""}
@@ -1729,7 +1810,12 @@ func _step_ships() -> void:
 			continue
 		var landing_lm: int = landmass_grid[l_ship.landing_cell.y * sim_width + l_ship.landing_cell.x]
 		var hit_fallout: bool = is_fallout_at(l_ship.landing_cell.x, l_ship.landing_cell.y)
-		_claim_organic_dot(n.id, l_ship.landing_cell, 3, l_ship.target_owner_id)
+		var beach_claimed: int = _claim_organic_dot(n.id, l_ship.landing_cell, 12, l_ship.target_owner_id)
+		if beach_claimed > 0 and player_nation_id != 0:
+			if n.id == player_nation_id:
+				player_land_conquered.emit(beach_claimed, l_ship.target_owner_id != 0)
+			elif l_ship.target_owner_id == player_nation_id:
+				player_territory_attacked.emit(n.id, beach_claimed)
 		var rem: float = maxf(10.0, l_ship.troops_carried - (6.0 if hit_fallout else 3.0))
 		var push_target: Vector2i = l_ship.target_cell if l_ship.target_cell.x >= 0 else l_ship.landing_cell
 		var existing := _find_reinforceable_expansion(n.id, push_target, landing_lm, l_ship.target_owner_id)
@@ -1990,6 +2076,10 @@ func _step_expansions() -> void:
 	if expansions.is_empty():
 		return
 	var any_flipped := false
+	var player_claimed_cells := 0
+	var player_claimed_contested := false
+	var player_lost_cells := 0
+	var player_attacker_id := 0
 	var done_ids: Array[int] = []
 
 	for eid: int in expansions.keys():
@@ -2000,7 +2090,7 @@ func _step_expansions() -> void:
 			continue
 
 		var troops_before: float = order.remaining_troops
-		var base_rate: float = (3.4 + order.remaining_troops / 22.0) / 1.45
+		var base_rate: float = ((3.4 + order.remaining_troops / 22.0) / 1.45) * 4.0
 		if order.is_contested:
 			var en: NationData = nations.get(order.enemy_nation_id, null)
 			var en_ref: float = maxf(en.troops * 0.25, 30.0) if en != null else 40.0
@@ -2009,7 +2099,7 @@ func _step_expansions() -> void:
 		var def_area_mult: float = get_defense_multiplier_at(order.enemy_nation_id, order.target_cell) if order.is_contested else 1.0
 		if def_area_mult > 1.0:
 			base_rate /= sqrt(def_area_mult)
-		var max_claims: int = clampi(int(round(base_rate * order.supply_factor)), 2, 8 if order.is_contested else 10)
+		var max_claims: int = clampi(int(round(base_rate * order.supply_factor)), 8, 32 if order.is_contested else 40)
 		var claimed_now := 0
 		var pops_left: int = max_claims * 4
 		var sum_x := 0.0
@@ -2025,14 +2115,15 @@ func _step_expansions() -> void:
 			if fallout_grid[idx] > 0 and not order.allow_fallout:
 				continue
 
-			var cost: float = float(TERRAIN_COST.get(t, 1.0))
+			var cost: float = float(TERRAIN_COST.get(t, 1.0)) * 0.25
 			if prev_owner != 0:
 				var enemy: NationData = nations.get(prev_owner, null)
 				var def_mult: float = 1.65
 				if enemy != null:
-					var density: float = enemy.troops / maxf(float(enemy.owned_cell_count), 1.0)
+					var eq_cells: float = maxf(float(enemy.owned_cell_count) * 0.25, 1.0)
+					var density: float = enemy.troops / eq_cells
 					def_mult += clampf(density * 0.16, 0.0, 0.95)
-					enemy.troops = maxf(0.0, enemy.troops - clampf(0.55 + density * 0.04, 0.45, 1.4))
+					enemy.troops = maxf(0.0, enemy.troops - clampf(0.55 + density * 0.04, 0.45, 1.4) * 0.25)
 					def_mult *= get_defense_multiplier_at(prev_owner, Vector2i(idx % sim_width, int(idx / sim_width)))
 					if enemy.is_betrayer(current_tick):
 						def_mult *= 0.55
@@ -2052,6 +2143,14 @@ func _step_expansions() -> void:
 			_set_cell_owner(idx, order.nation_id)
 			order.cells_claimed += 1
 			claimed_now += 1
+			if player_nation_id != 0:
+				if order.nation_id == player_nation_id:
+					player_claimed_cells += 1
+					if prev_owner != 0:
+						player_claimed_contested = true
+				elif prev_owner == player_nation_id:
+					player_lost_cells += 1
+					player_attacker_id = order.nation_id
 			sum_x += float(idx % sim_width)
 			sum_y += float(int(idx / sim_width))
 			any_flipped = true
@@ -2060,17 +2159,17 @@ func _step_expansions() -> void:
 			_push_adjacent_frontier(order, idx, order.nation_id, order.target_cell, parent_depth)
 
 		if claimed_now > 0:
-			var avg_w := Vector2((sum_x / float(claimed_now)) + 0.5, (sum_y / float(claimed_now)) + 0.5) * 2.0
+			var avg_w := Vector2((sum_x / float(claimed_now)) + 0.5, (sum_y / float(claimed_now)) + 0.5) * sim_scale
 			order.front_world_pos = avg_w if order.front_world_pos == Vector2.ZERO else order.front_world_pos.lerp(avg_w, 0.35)
 		elif order.front_world_pos == Vector2.ZERO and order.frontier_size() > 0:
 			var p_idx: int = order.peek_best()
-			order.front_world_pos = Vector2(float(p_idx % sim_width) + 0.5, float(int(p_idx / sim_width)) + 0.5) * 2.0
+			order.front_world_pos = Vector2(float(p_idx % sim_width) + 0.5, float(int(p_idx / sim_width)) + 0.5) * sim_scale
 
 		order.troop_flash_timer = maxf(0.0, order.troop_flash_timer - TICK_DT)
 		if order.troop_flash_timer <= 0.0 and order.remaining_troops < troops_before:
 			order.last_troop_delta = order.remaining_troops - troops_before
 
-		order.eta_seconds = order.remaining_troops / maxf(float(max_claims) * TICK_RATE_HZ, 1.0)
+		order.eta_seconds = (order.remaining_troops * 4.0) / maxf(float(max_claims) * TICK_RATE_HZ, 1.0)
 		if order.remaining_troops <= 0.5 or order.frontier_size() == 0:
 			if order.remaining_troops > 0.5 and nation.alive:
 				nation.troops = minf(nation.max_troops, nation.troops + order.remaining_troops)
@@ -2083,6 +2182,10 @@ func _step_expansions() -> void:
 		_economy_dirty = true
 		owner_dirty = true
 		territory_changed.emit()
+		if player_claimed_cells > 0:
+			player_land_conquered.emit(player_claimed_cells, player_claimed_contested)
+		if player_lost_cells > 0:
+			player_territory_attacked.emit(player_attacker_id, player_lost_cells)
 	expansion_updated.emit()
 
 
@@ -2152,7 +2255,7 @@ func _set_cell_owner(idx: int, new_nid: int) -> void:
 				var captured_sids: Array[int] = []
 				for sid: int in old_nation.structure_ids:
 					var st: StructureData = structures.get(sid, null)
-					if st != null and st.cell.distance_squared_to(cell_v) <= 2.0:
+					if st != null and st.cell.distance_squared_to(cell_v) <= 8.0:
 						captured_sids.append(sid)
 				for sid: int in captured_sids:
 					var st: StructureData = structures[sid]
@@ -2204,9 +2307,11 @@ func _is_border_cell(x: int, y: int, nid: int) -> bool:
 
 
 func _recompute_factory_links() -> void:
-	"""OpenFront 1:1 rail/road network: computes Factory synergy for every in-range Town/Port,
-	reuses all already-built roads in _road_cache across conquests, and connects stations within 4 hops."""
+	"""OpenFront 1:1 rail/road network: computes Factory synergy for every in-range Town/Port/Factory,
+	reuses all already-built roads in _road_cache across conquests, and builds multi-hop train routes."""
 	factory_links.clear()
+	_station_road_adj.clear()
+	_factory_train_routes.clear()
 	for sid: int in structures.keys():
 		var st: StructureData = structures[sid]
 		st.connection_bonus = 1.0
@@ -2227,14 +2332,33 @@ func _recompute_factory_links() -> void:
 		if fac.type != StructureData.TYPE_FACTORY or fac.level <= 0:
 			continue
 		var nation: NationData = nations.get(fac.nation_id, null)
-		if nation == null:
+		if nation == null or not nation.alive:
 			continue
 		active_stations[fac.id] = fac
-		for tid: int in nation.structure_ids:
+		for tid: int in structures.keys():
 			var tgt: StructureData = structures.get(tid, null)
-			if tgt == null or tgt.level <= 0:
+			if tgt == null or tgt.id == fac.id or tgt.level <= 0:
 				continue
-			if tgt.type != StructureData.TYPE_TOWN and tgt.type != StructureData.TYPE_PORT:
+			if tgt.type != StructureData.TYPE_TOWN and tgt.type != StructureData.TYPE_PORT and tgt.type != StructureData.TYPE_FACTORY:
+				continue
+			if tgt.nation_id != fac.nation_id:
+				var tgt_n: NationData = nations.get(tgt.nation_id, null)
+				if tgt_n == null or not tgt_n.alive or is_embargoed(fac.nation_id, tgt.nation_id):
+					continue
+			if tgt.type == StructureData.TYPE_FACTORY:
+				if fac.id >= tgt.id:
+					continue
+				if not (fac.is_cell_in_factory_range(tgt.cell) or tgt.is_cell_in_factory_range(fac.cell)):
+					continue
+				active_stations[tid] = tgt
+				fac.connected_count += 1
+				fac.connection_bonus += 0.14 + float(fac.level) * 0.02
+				tgt.connected_count += 1
+				tgt.connection_bonus += 0.14 + float(tgt.level) * 0.02
+				if not in_range.has(tid):
+					in_range[tid] = []
+					tgt_refs[tid] = tgt
+				(in_range[tid] as Array).append([fac, Vector2(fac.cell - tgt.cell).length()])
 				continue
 			if not fac.is_cell_in_factory_range(tgt.cell):
 				continue
@@ -2254,7 +2378,7 @@ func _recompute_factory_links() -> void:
 
 	var added_road_keys: Dictionary = {}
 
-	# 1. Preserve any existing road in _road_cache between active stations of the same nation
+	# 1. Preserve any existing road in _road_cache between active stations (including non-embargoed cross-border / factory-to-factory)
 	for cache_key: String in _road_cache.keys():
 		var parts: PackedStringArray = cache_key.split(":")
 		if parts.size() != 2:
@@ -2265,11 +2389,14 @@ func _recompute_factory_links() -> void:
 			continue
 		var st_a: StructureData = active_stations[id_a]
 		var st_b: StructureData = active_stations[id_b]
-		if st_a.nation_id != st_b.nation_id:
+		if st_a.nation_id != st_b.nation_id and is_embargoed(st_a.nation_id, st_b.nation_id):
 			continue
 		var root_fac: StructureData = null
 		var tgt_st: StructureData = null
-		if st_a.type == StructureData.TYPE_FACTORY and st_b.type != StructureData.TYPE_FACTORY:
+		if st_a.type == StructureData.TYPE_FACTORY and st_b.type == StructureData.TYPE_FACTORY:
+			root_fac = st_a if st_a.id < st_b.id else st_b
+			tgt_st = st_b if st_a.id < st_b.id else st_a
+		elif st_a.type == StructureData.TYPE_FACTORY and st_b.type != StructureData.TYPE_FACTORY:
 			root_fac = st_a
 			tgt_st = st_b
 		elif st_b.type == StructureData.TYPE_FACTORY and st_a.type != StructureData.TYPE_FACTORY:
@@ -2281,14 +2408,16 @@ func _recompute_factory_links() -> void:
 				root_fac = ((in_range[tgt_st.id] as Array)[0] as Array)[0]
 		if root_fac == null or tgt_st == null:
 			continue
+		if root_fac.nation_id != tgt_st.nation_id and is_embargoed(root_fac.nation_id, tgt_st.nation_id):
+			continue
 		(adj[id_a] as Array).append(id_b)
 		(adj[id_b] as Array).append(id_a)
 		added_road_keys[cache_key] = true
-		var road_c: Dictionary = _get_or_build_road(st_a if st_a == root_fac else st_a, st_b if st_a == root_fac else st_b)
-		if st_b == root_fac:
-			road_c = _get_or_build_road(st_b, st_a)
+		var road_c: Dictionary = _get_or_build_road(st_b, st_a) if st_b == root_fac else _get_or_build_road(st_a, st_b)
 		var from_st: StructureData = st_b if st_b == root_fac else st_a
 		var to_st: StructureData = st_a if st_b == root_fac else st_b
+		var road_pts_c: PackedVector2Array = road_c["road_points"]
+		var road_len_c: float = float(road_c["road_length"])
 		var crosses_c: bool = bool(road_c["crosses_water"])
 		factory_links.append({
 			"factory_id": root_fac.id,
@@ -2298,11 +2427,12 @@ func _recompute_factory_links() -> void:
 			"to_cell": to_st.cell,
 			"from_world": from_st.get_world_pos(),
 			"to_world": to_st.get_world_pos(),
-			"road_points": road_c["road_points"],
-			"road_length": float(road_c["road_length"]),
+			"road_points": road_pts_c,
+			"road_length": road_len_c,
 			"crosses_water": crosses_c,
 			"water_spans": road_c["water_spans"],
 		})
+		_add_station_road_edge(from_st.id, to_st.id, road_pts_c, road_len_c, crosses_c)
 		if crosses_c:
 			root_fac.bridge_count += 1
 		var k_c: String = "%d->%d" % [from_st.id, to_st.id]
@@ -2330,7 +2460,7 @@ func _recompute_factory_links() -> void:
 		if already_linked or best_fac == null:
 			continue
 
-		# Check if a nearby already-connected station of the same nation is closer than best_fac
+		# Check if a nearby already-connected station (own or non-embargoed partner) is closer than best_fac
 		var connect_from: StructureData = best_fac
 		var connect_d: float = best_d
 		for other_id: int in active_stations.keys():
@@ -2338,11 +2468,14 @@ func _recompute_factory_links() -> void:
 				continue
 			var other_st: StructureData = active_stations[other_id]
 			if other_st.nation_id != tgt.nation_id:
+				if other_st.nation_id != best_fac.nation_id or is_embargoed(other_st.nation_id, tgt.nation_id):
+					continue
+			if other_st.nation_id != best_fac.nation_id and is_embargoed(best_fac.nation_id, other_st.nation_id):
 				continue
 			if not _are_stations_within_hops(adj, other_id, best_fac.id, 3):
 				continue
 			var d_other: float = Vector2(other_st.cell - tgt.cell).length()
-			if d_other < connect_d and d_other <= 42.0:
+			if d_other < connect_d and d_other <= 84.0:
 				connect_d = d_other
 				connect_from = other_st
 
@@ -2360,6 +2493,7 @@ func _recompute_factory_links() -> void:
 		var spans: Array = road["water_spans"]
 		var crosses_water: bool = bool(road["crosses_water"])
 
+		var road_len: float = float(road["road_length"])
 		factory_links.append({
 			"factory_id": best_fac.id,
 			"target_id": tgt.id,
@@ -2369,10 +2503,11 @@ func _recompute_factory_links() -> void:
 			"from_world": from_w,
 			"to_world": to_w,
 			"road_points": road_pts,
-			"road_length": float(road["road_length"]),
+			"road_length": road_len,
 			"crosses_water": crosses_water,
 			"water_spans": spans,
 		})
+		_add_station_road_edge(connect_from.id, tgt.id, road_pts, road_len, crosses_water)
 		if crosses_water:
 			best_fac.bridge_count += 1
 
@@ -2384,6 +2519,7 @@ func _recompute_factory_links() -> void:
 			else:
 				created_regular = true
 
+	_rebuild_factory_train_routes()
 	_prev_link_keys = new_keys
 	if created_bridge:
 		factory_link_created.emit(true)
@@ -2424,12 +2560,10 @@ func _get_or_build_road(fac: StructureData, tgt: StructureData) -> Dictionary:
 	if not _road_cache.has(key):
 		var low: StructureData = fac if fac.id < tgt.id else tgt
 		var high: StructureData = tgt if fac.id < tgt.id else fac
-		var pts: PackedVector2Array = _build_irregular_road_points(low, high)
-		var w_spans: Array = _find_water_spans_along_road(pts)
-		if not w_spans.is_empty():
-			# Bridge connections use a straight causeway line (no winding road if it has bridges)
-			pts = PackedVector2Array([low.get_world_pos(), high.get_world_pos()])
-			w_spans = _find_water_spans_along_road(pts)
+		var raw_pts: PackedVector2Array = _build_irregular_road_points(low, high)
+		var shaped: Dictionary = _straighten_water_spans_in_road(raw_pts)
+		var pts: PackedVector2Array = shaped["road_points"]
+		var w_spans: Array = shaped["water_spans"]
 		_road_cache[key] = {
 			"road_points": pts,
 			"road_length": _compute_route_length(pts),
@@ -2437,12 +2571,7 @@ func _get_or_build_road(fac: StructureData, tgt: StructureData) -> Dictionary:
 		}
 	var entry: Dictionary = _road_cache[key]
 	var canon: PackedVector2Array = entry["road_points"]
-	var out_pts: PackedVector2Array = canon
-	if fac.id > tgt.id:
-		out_pts = PackedVector2Array()
-		out_pts.resize(canon.size())
-		for i in range(canon.size()):
-			out_pts[i] = canon[canon.size() - 1 - i]
+	var out_pts: PackedVector2Array = _reverse_polyline(canon) if fac.id > tgt.id else canon
 	var spans: Array = entry["water_spans"]
 	return {
 		"road_points": out_pts,
@@ -2450,6 +2579,160 @@ func _get_or_build_road(fac: StructureData, tgt: StructureData) -> Dictionary:
 		"water_spans": spans,
 		"crosses_water": not spans.is_empty(),
 	}
+
+
+static func _reverse_polyline(pts: PackedVector2Array) -> PackedVector2Array:
+	var out := PackedVector2Array()
+	out.resize(pts.size())
+	for i in range(pts.size()):
+		out[i] = pts[pts.size() - 1 - i]
+	return out
+
+
+func _add_station_road_edge(id_a: int, id_b: int, pts_a_to_b: PackedVector2Array, r_len: float, crosses_w: bool) -> void:
+	if pts_a_to_b.size() < 2:
+		return
+	if not _station_road_adj.has(id_a):
+		_station_road_adj[id_a] = []
+	if not _station_road_adj.has(id_b):
+		_station_road_adj[id_b] = []
+	(_station_road_adj[id_a] as Array).append({
+		"to_id": id_b,
+		"road_points": pts_a_to_b,
+		"road_length": r_len,
+		"crosses_water": crosses_w,
+	})
+	(_station_road_adj[id_b] as Array).append({
+		"to_id": id_a,
+		"road_points": _reverse_polyline(pts_a_to_b),
+		"road_length": r_len,
+		"crosses_water": crosses_w,
+	})
+
+
+func _rebuild_factory_train_routes() -> void:
+	"""Builds 1..8-hop BFS train routes from every active Factory across ALL connected roads."""
+	for fid: int in structures.keys():
+		var fac: StructureData = structures[fid]
+		if fac.type != StructureData.TYPE_FACTORY or fac.level <= 0:
+			continue
+		var fac_n: NationData = nations.get(fac.nation_id, null)
+		if fac_n == null or not fac_n.alive:
+			continue
+		var queue: Array[int] = [fid]
+		var head := 0
+		var hop_dist: Dictionary = {fid: 0}
+		var parent_edge: Dictionary = {}
+		var dest_order: Array[int] = []
+		while head < queue.size():
+			var cur: int = queue[head]
+			head += 1
+			var d_cur: int = int(hop_dist[cur])
+			if d_cur >= 8:
+				continue
+			for edge: Dictionary in _station_road_adj.get(cur, []):
+				var nxt_id: int = int(edge["to_id"])
+				if hop_dist.has(nxt_id):
+					continue
+				var nxt_st: StructureData = structures.get(nxt_id, null)
+				if nxt_st == null or nxt_st.level <= 0:
+					continue
+				var nxt_n: NationData = nations.get(nxt_st.nation_id, null)
+				if nxt_n == null or not nxt_n.alive:
+					continue
+				if nxt_st.nation_id != fac.nation_id and is_embargoed(fac.nation_id, nxt_st.nation_id):
+					continue
+				hop_dist[nxt_id] = d_cur + 1
+				parent_edge[nxt_id] = {"prev_id": cur, "edge": edge}
+				queue.append(nxt_id)
+				dest_order.append(nxt_id)
+		if dest_order.is_empty():
+			continue
+		var routes: Array[Dictionary] = []
+		for dest_id: int in dest_order:
+			var chain: Array[Dictionary] = []
+			var trace_id: int = dest_id
+			while trace_id != fid and parent_edge.has(trace_id):
+				var step_info: Dictionary = parent_edge[trace_id]
+				chain.append(step_info["edge"])
+				trace_id = int(step_info["prev_id"])
+			chain.reverse()
+			var hop_ids: Array[int] = [fid]
+			var combined := PackedVector2Array()
+			var total_len := 0.0
+			var any_water := false
+			for edge: Dictionary in chain:
+				hop_ids.append(int(edge["to_id"]))
+				var e_pts: PackedVector2Array = edge["road_points"]
+				if combined.is_empty():
+					combined.append_array(e_pts)
+				elif e_pts.size() > 1:
+					for pi in range(1, e_pts.size()):
+						combined.append(e_pts[pi])
+				total_len += float(edge["road_length"])
+				any_water = any_water or bool(edge["crosses_water"])
+			if combined.size() >= 2:
+				routes.append({
+					"target_id": dest_id,
+					"hop_ids": hop_ids,
+					"hops": hop_ids.size() - 1,
+					"road_points": combined,
+					"road_length": total_len,
+					"crosses_water": any_water,
+				})
+		if not routes.is_empty():
+			_factory_train_routes[fid] = routes
+
+
+func _straighten_water_spans_in_road(raw_pts: PackedVector2Array) -> Dictionary:
+	"""Preserves winding curves across land and replaces water crossings with straight Bridge spans."""
+	var out_pts := PackedVector2Array()
+	var spans: Array = []
+	if raw_pts.is_empty():
+		return {"road_points": out_pts, "water_spans": spans}
+	out_pts.append(raw_pts[0])
+	if raw_pts.size() < 2:
+		return {"road_points": out_pts, "water_spans": spans}
+
+	var in_water := false
+	var span_entry: Vector2 = raw_pts[0]
+	var prev_land: Vector2 = raw_pts[0]
+	for seg_i in range(raw_pts.size() - 1):
+		var p0: Vector2 = raw_pts[seg_i]
+		var p1: Vector2 = raw_pts[seg_i + 1]
+		var steps: int = maxi(4, int(ceil(p0.distance_to(p1))))
+		for s in range(1, steps + 1):
+			var w_pt: Vector2 = p0.lerp(p1, float(s) / float(steps))
+			var sim_pt := world_to_sim(w_pt)
+			var is_water: bool = terrain_grid[sim_pt.y * sim_width + sim_pt.x] < T_PLAINS
+			if is_water:
+				if not in_water:
+					in_water = true
+					if prev_land.distance_to(out_pts[out_pts.size() - 1]) > 0.25:
+						out_pts.append(prev_land)
+					span_entry = out_pts[out_pts.size() - 1]
+			else:
+				if in_water:
+					in_water = false
+					if w_pt.distance_to(out_pts[out_pts.size() - 1]) > 0.25:
+						out_pts.append(w_pt)
+					var span_exit: Vector2 = out_pts[out_pts.size() - 1]
+					if span_entry.distance_to(span_exit) >= 1.2:
+						spans.append([span_entry, span_exit])
+				elif s == steps and w_pt.distance_to(out_pts[out_pts.size() - 1]) > 0.25:
+					out_pts.append(w_pt)
+				prev_land = w_pt
+
+	var last_pt: Vector2 = raw_pts[raw_pts.size() - 1]
+	if in_water:
+		if last_pt.distance_to(out_pts[out_pts.size() - 1]) > 0.25:
+			out_pts.append(last_pt)
+		var final_exit: Vector2 = out_pts[out_pts.size() - 1]
+		if span_entry.distance_to(final_exit) >= 1.2:
+			spans.append([span_entry, final_exit])
+	elif last_pt.distance_to(out_pts[out_pts.size() - 1]) > 0.25:
+		out_pts.append(last_pt)
+	return {"road_points": out_pts, "water_spans": spans}
 
 
 func _prune_road_cache(structure_id: int) -> void:
@@ -2558,10 +2841,10 @@ func _recompute_all_economy_rates() -> void:
 			n.gold_per_sec = 0.0
 			n.troops_per_sec = 0.0
 			continue
-		var g_rate: float = 140.0 + float(n.owned_cell_count) * 2.2
-		var c_cnt: float = float(maxi(n.owned_cell_count, 1))
-		var t_cap: float = 280.0 + c_cnt * 1.85 + pow(c_cnt, 0.65) * 14.0
-		var t_rate: float = 4.2 + c_cnt * 0.052 + pow(c_cnt, 0.60) * 0.35
+		var c_cnt: float = maxf(float(n.owned_cell_count) * 0.25, 1.0)
+		var g_rate: float = 140.0 + pow(c_cnt, 0.58) * 18.0
+		var t_cap: float = 2600.0 + pow(c_cnt, 0.56) * 85.0
+		var t_rate: float = 30.0 + pow(c_cnt, 0.52) * 1.15
 
 		for sid: int in n.structure_ids:
 			var st: StructureData = structures.get(sid, null)
@@ -2630,8 +2913,8 @@ func get_nation_label_cell(nid: int) -> Vector2i:
 		best_cell = Vector2i(cx, cy)
 	else:
 		var fallback_owned := Vector2i(-1, -1)
-		var r := 2
-		while r <= 48 and best_cell.x < 0:
+		var r := 4
+		while r <= 96 and best_cell.x < 0:
 			for s_i in range(16):
 				var ang: float = float(s_i) * (TAU / 16.0)
 				var sx: int = clampi(cx + int(round(cos(ang) * float(r))), 0, sim_width - 1)
@@ -2647,7 +2930,7 @@ func get_nation_label_cell(nid: int) -> Vector2i:
 				if interior:
 					best_cell = Vector2i(sx, sy)
 					break
-			r += 3
+			r += 6
 		if best_cell.x < 0:
 			if fallback_owned.x >= 0:
 				best_cell = fallback_owned
@@ -2670,7 +2953,7 @@ func get_nation_label_scale(nid: int) -> float:
 	var n: NationData = nations.get(nid, null)
 	if n == null or n.owned_cell_count <= 0:
 		return 0.72
-	return clampf(0.55 + sqrt(float(maxi(n.owned_cell_count, 20))) / 36.0, NATION_LABEL_MIN_SCALE, NATION_LABEL_MAX_SCALE)
+	return clampf(0.55 + sqrt(maxf(float(n.owned_cell_count) * 0.25, 20.0)) / 36.0, NATION_LABEL_MIN_SCALE, NATION_LABEL_MAX_SCALE)
 
 
 func get_structure(sid: int) -> StructureData:
@@ -2913,6 +3196,8 @@ func _cmd_launch_missile(cmd: Dictionary) -> Dictionary:
 	var sx: int = clampi(int(cmd.get("x", -1)), 0, sim_width - 1)
 	var sy: int = clampi(int(cmd.get("y", -1)), 0, sim_height - 1)
 	var target_owner: int = get_owner_at(sx, sy)
+	if target_owner == nid:
+		return _reject("Cannot launch warheads onto your own territory.")
 	if target_owner > 0 and are_allied(nid, target_owner):
 		return _reject("Cannot launch warheads onto an allied nation.")
 	if kind == MissileUnit.KIND_MIRV:
@@ -2969,7 +3254,7 @@ func _step_sam_launchers() -> void:
 		if sam.type != StructureData.TYPE_SAM_LAUNCHER or sam.is_constructing or sam.level <= 0 or sam.action_cooldown_ticks > 0 or sam.sam_ammo <= 0:
 			continue
 		var sam_pos: Vector2 = sam.get_world_pos()
-		var max_r_w: float = sam.get_sam_radius() * 2.0
+		var max_r_w: float = sam.get_sam_radius()
 		var best_m: MissileUnit = null
 		var best_d := max_r_w
 		for mid: int in missiles.keys():
@@ -3225,7 +3510,7 @@ func _detonate_missile(m: MissileUnit) -> void:
 			var impacted: int = int(hit_counts[nid_v])
 			var tiles_before: int = maxi(1, vn.owned_cell_count + impacted)
 			var loss_ratio: float = clampf((2.2 * float(impacted)) / float(tiles_before), 0.04, 0.72)
-			vn.troops = maxf(0.0, vn.troops - maxf(float(impacted) * 1.6, vn.troops * loss_ratio))
+			vn.troops = maxf(0.0, vn.troops - maxf(float(impacted) * 0.4, vn.troops * loss_ratio))
 			for eid_k: int in expansions.keys():
 				var eo: ExpansionOrder = expansions[eid_k]
 				if eo.nation_id == vn.id and eo.remaining_troops > 1.0:
@@ -3243,7 +3528,7 @@ func _detonate_missile(m: MissileUnit) -> void:
 	_economy_dirty = true
 	owner_dirty = true
 	territory_changed.emit()
-	missile_detonated.emit(m.target_pos, float(r) * 2.0, m.kind)
+	missile_detonated.emit(m.target_pos, float(r) * sim_scale, m.kind)
 
 
 func _cmd_request_alliance(cmd: Dictionary) -> Dictionary:
@@ -3353,6 +3638,7 @@ func _cmd_toggle_embargo(cmd: Dictionary) -> Dictionary:
 	else:
 		nation.embargoes[tgt_id] = true
 		diplomacy_event.emit("Trade embargo placed on %s." % target.name, false)
+	_factory_links_dirty = true
 	diplomacy_changed.emit()
 	return {"ok": true, "embargoed": nation.embargoes.has(tgt_id)}
 
@@ -3421,7 +3707,23 @@ func _step_trains() -> void:
 		var tgt: StructureData = structures.get(tgt_id, null)
 		var nid: int = int(tr.get("nation_id", 0))
 		var owner_n: NationData = nations.get(nid, null)
-		if fac == null or tgt == null or owner_n == null or not owner_n.alive or fac.nation_id != nid or tgt.nation_id != nid:
+		var tgt_n: NationData = nations.get(tgt.nation_id, null) if tgt != null else null
+		var link_allowed: bool = (
+			fac != null and tgt != null
+			and owner_n != null and owner_n.alive
+			and tgt_n != null and tgt_n.alive
+			and fac.nation_id == nid
+			and (tgt.nation_id == nid or not is_embargoed(nid, tgt.nation_id))
+		)
+		if link_allowed:
+			var hop_ids: Array = tr.get("hop_ids", [])
+			for h_var in hop_ids:
+				var h_st: StructureData = structures.get(int(h_var), null)
+				var h_n: NationData = nations.get(h_st.nation_id, null) if h_st != null else null
+				if h_st == null or h_n == null or not h_n.alive or (h_st.nation_id != nid and is_embargoed(nid, h_st.nation_id)):
+					link_allowed = false
+					break
+		if not link_allowed:
 			trains.remove_at(i)
 			continue
 		var p_a: Vector2 = tr["from_pos"]
@@ -3434,6 +3736,9 @@ func _step_trains() -> void:
 				var payout: float = float(tr["gold"])
 				owner_n.gold += payout
 				structure_income_popup.emit(nid, p_b, payout, "train")
+				if tgt.nation_id != nid and tgt_n != null and tgt_n.alive:
+					tgt_n.gold += payout
+					structure_income_popup.emit(tgt.nation_id, p_b, payout, "train")
 				tr["returning"] = true
 				tr["progress"] = 0.0
 				var samp_ret: Dictionary = _sample_polyline(r_pts, 0.0, true, dist)
@@ -3450,32 +3755,41 @@ func _step_trains() -> void:
 			tr["heading"] = samp["heading"]
 			_update_train_cars(tr, r_pts, prog, is_ret, dist)
 
-	# 2. Spawn new trains from completed connected Factories
-	if factory_links.is_empty():
+	# 2. Spawn new trains from completed Factories across ALL connected roads (1-hop & extended)
+	if _factory_train_routes.is_empty():
 		return
 	var per_fac_count: Dictionary = {}
 	for tr: Dictionary in trains:
 		var fid: int = int(tr.get("factory_id", 0))
 		per_fac_count[fid] = int(per_fac_count.get(fid, 0)) + 1
 
-	for link: Dictionary in factory_links:
-		var fid: int = int(link.get("factory_id", 0))
+	for fid: int in _factory_train_routes.keys():
 		var fac: StructureData = structures.get(fid, null)
 		if fac == null or fac.is_constructing or fac.level <= 0 or fac.train_cooldown_ticks > 0:
 			continue
-		if int(per_fac_count.get(fid, 0)) >= mini(3, fac.connected_count):
+		var routes: Array = _factory_train_routes[fid]
+		if routes.is_empty():
 			continue
-		var gold_amt: float = round((1800.0 + float(fac.level) * 1250.0) * (1.25 if bool(link.get("crosses_water", false)) else 1.0))
-		var from_w: Vector2 = link["from_world"]
-		var to_w: Vector2 = link["to_world"]
-		var r_pts: PackedVector2Array = link.get("road_points", PackedVector2Array([from_w, to_w]))
-		var r_len: float = float(link.get("road_length", from_w.distance_to(to_w)))
+		if int(per_fac_count.get(fid, 0)) >= mini(4, routes.size()):
+			continue
+		var cursor: int = int(_factory_route_cursor.get(fid, 0))
+		var route: Dictionary = routes[cursor % routes.size()]
+		_factory_route_cursor[fid] = cursor + 1
+		var dest_id: int = int(route["target_id"])
+		var r_pts: PackedVector2Array = route["road_points"]
+		var r_len: float = float(route["road_length"])
+		var hops: int = int(route["hops"])
+		var crosses_w: bool = bool(route["crosses_water"])
+		var from_w: Vector2 = r_pts[0]
+		var to_w: Vector2 = r_pts[r_pts.size() - 1]
+		var gold_amt: float = round((1800.0 + float(fac.level) * 1250.0) * (1.25 if crosses_w else 1.0) * (1.0 + 0.15 * float(mini(hops - 1, 4))))
 		var samp0: Dictionary = _sample_polyline(r_pts, 0.0, false, r_len)
 		var new_tr: Dictionary = {
 			"id": _next_train_id,
 			"nation_id": fac.nation_id,
 			"factory_id": fid,
-			"target_id": int(link.get("target_id", 0)),
+			"target_id": dest_id,
+			"hop_ids": route["hop_ids"],
 			"from_pos": from_w,
 			"to_pos": to_w,
 			"road_points": r_pts,
@@ -3489,13 +3803,13 @@ func _step_trains() -> void:
 			"returning": false,
 			"speed": 38.0 + float(fac.level) * 2.0,
 			"gold": gold_amt,
-			"crosses_water": bool(link.get("crosses_water", false)),
+			"crosses_water": crosses_w,
 		}
 		_update_train_cars(new_tr, r_pts, 0.0, false, r_len)
 		trains.append(new_tr)
 		_next_train_id += 1
 		per_fac_count[fid] = int(per_fac_count.get(fid, 0)) + 1
-		fac.train_cooldown_ticks = 96
+		fac.train_cooldown_ticks = 72
 
 
 static func _update_train_cars(tr: Dictionary, r_pts: PackedVector2Array, prog: float, is_ret: bool, dist: float) -> void:

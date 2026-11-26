@@ -44,12 +44,41 @@ func NewMatchStore(ctx context.Context, databaseURL string) (*MatchStore, error)
 		to_tick INT NOT NULL,
 		commands_json JSONB NOT NULL,
 		PRIMARY KEY (match_id, from_tick)
+	);
+	CREATE TABLE IF NOT EXISTS accounts (
+		username TEXT PRIMARY KEY,
+		username_lower TEXT NOT NULL UNIQUE,
+		password_hash TEXT NOT NULL,
+		session_token TEXT NOT NULL DEFAULT '',
+		avatar_png BYTEA,
+		avatar_frames INT NOT NULL DEFAULT 1,
+		avatar_delay_ms INT NOT NULL DEFAULT 100,
+		avatar_hash TEXT NOT NULL DEFAULT '',
+		last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);
+	CREATE INDEX IF NOT EXISTS idx_accounts_token ON accounts(session_token) WHERE session_token <> '';
+	CREATE TABLE IF NOT EXISTS friendships (
+		requester TEXT NOT NULL REFERENCES accounts(username) ON DELETE CASCADE,
+		addressee TEXT NOT NULL REFERENCES accounts(username) ON DELETE CASCADE,
+		status TEXT NOT NULL,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		PRIMARY KEY (requester, addressee)
 	);`
 	if _, err := pool.Exec(pCtx, ddl); err != nil {
 		pool.Close()
 		return nil, err
 	}
 	return &MatchStore{pool: pool}, nil
+}
+
+// Pool exposes the underlying PostgreSQL pool (nil in memory-only mode).
+func (s *MatchStore) Pool() *pgxpool.Pool {
+	if s == nil {
+		return nil
+	}
+	return s.pool
 }
 
 // IsDBConnected reports whether PostgreSQL backing is active.

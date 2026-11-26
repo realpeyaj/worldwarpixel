@@ -73,8 +73,30 @@ func _run_all_tests() -> void:
 		var utex: Texture2D = load("res://assets/ui/" + ui_name)
 		if utex == null or utex.get_width() < 12:
 			ui_ok_tex = false
-	_check(icons_ok and ui_ok_tex and not ResourceLoader.exists("res://assets/sprites/icon_capital.png") and not ResourceLoader.exists("res://assets/sprites/icon_army.png"),
-		"All 14 smooth minimalist sprites (64x64 / 96x48 / 64x32), 10 nation masks & 5 9-patch UI frames load cleanly")
+	var hud_silo_tex: Texture2D = load("res://assets/sprites/hud_silo.png")
+	var hud_sam_tex: Texture2D = load("res://assets/sprites/hud_sam.png")
+	var hud_town_tex: Texture2D = load("res://assets/sprites/hud_town.png")
+	var hud_warship_tex: Texture2D = load("res://assets/sprites/hud_warship.png")
+	var hud_atom_tex: Texture2D = load("res://assets/sprites/hud_atom.png")
+	var hud_hbomb_tex: Texture2D = load("res://assets/sprites/hud_hbomb.png")
+	var hud_mirv_tex: Texture2D = load("res://assets/sprites/hud_mirv.png")
+	var map_atom_tex: Texture2D = load("res://assets/sprites/icon_atom.png")
+	var map_hbomb_tex: Texture2D = load("res://assets/sprites/icon_hbomb.png")
+	var map_mirv_tex: Texture2D = load("res://assets/sprites/icon_mirv.png")
+	var hud_nuke_icons_ok: bool = (
+		hud_silo_tex != null and hud_silo_tex.get_width() == 20 and hud_silo_tex.get_height() == 20
+		and hud_sam_tex != null and hud_sam_tex.get_width() == 20 and hud_sam_tex.get_height() == 20
+		and hud_town_tex != null and hud_town_tex.get_width() == 20 and hud_town_tex.get_height() == 20
+		and hud_warship_tex != null and hud_warship_tex.get_width() == 20 and hud_warship_tex.get_height() == 20
+		and hud_atom_tex != null and hud_atom_tex.get_width() == 20 and hud_atom_tex.get_height() == 20
+		and hud_hbomb_tex != null and hud_hbomb_tex.get_width() == 20 and hud_hbomb_tex.get_height() == 20
+		and hud_mirv_tex != null and hud_mirv_tex.get_width() == 20 and hud_mirv_tex.get_height() == 20
+		and map_atom_tex != null and map_atom_tex.get_width() == 64 and map_atom_tex.get_height() == 64
+		and map_hbomb_tex != null and map_hbomb_tex.get_width() == 64 and map_hbomb_tex.get_height() == 64
+		and map_mirv_tex != null and map_mirv_tex.get_width() == 64 and map_mirv_tex.get_height() == 64
+	)
+	_check(icons_ok and ui_ok_tex and hud_nuke_icons_ok and not ResourceLoader.exists("res://assets/sprites/icon_capital.png") and not ResourceLoader.exists("res://assets/sprites/icon_army.png"),
+		"All 14 smooth minimalist sprites, 10 nation masks, 5 9-patch UI frames & crisp 20x20 HUD Silo/SAM icons load cleanly")
 
 	var env_script := EnvironmentDecor.new()
 	_check(not env_script.has_method("_draw_compass_rose"), "EnvironmentDecor has no N/S/E/W compass rose")
@@ -85,31 +107,37 @@ func _run_all_tests() -> void:
 	var ws := WorldState.new()
 	var loaded: bool = ws.load_world()
 	var t1: int = Time.get_ticks_usec()
-	print("[BENCH] WorldState.load_world() (1024x512 grid + landmasses + 1024x512 nav): %.2f ms" % (float(t1 - t0) / 1000.0))
+	print("[BENCH] WorldState.load_world() (2048x1024 grid + landmasses + 1024x512 nav): %.2f ms" % (float(t1 - t0) / 1000.0))
 	var nav_land_overlap := 0
-	if ws.terrain_grid.size() == ws.sea_pathfinder.nav_grid.size():
-		for n_idx in range(ws.sea_pathfinder.nav_grid.size()):
-			if ws.sea_pathfinder.nav_grid[n_idx] > 0 and ws.terrain_grid[n_idx] != WorldState.T_OCEAN:
-				nav_land_overlap += 1
-	_check(loaded and ws.terrain_grid.size() == 1024 * 512 and ws.sea_pathfinder.nav_grid.size() == 1024 * 512 and nav_land_overlap == 0,
-		"WorldState loads 1024x512 terrain_grid and strict water-only 1024x512 ocean_nav (0 land overlaps)")
+	var nw: int = ws.sea_pathfinder.nav_width
+	var nh: int = ws.sea_pathfinder.nav_height
+	if ws.sea_pathfinder.nav_grid.size() == nw * nh and ws.terrain_grid.size() == ws.sim_width * ws.sim_height:
+		for ny in range(nh):
+			for nx in range(nw):
+				if ws.sea_pathfinder.nav_grid[ny * nw + nx] > 0:
+					for oy in range(2):
+						for ox in range(2):
+							if ws.get_terrain_at(nx * 2 + ox, ny * 2 + oy) != WorldState.T_OCEAN:
+								nav_land_overlap += 1
+	_check(loaded and ws.terrain_grid.size() == 2048 * 1024 and ws.sea_pathfinder.nav_grid.size() == 1024 * 512 and nav_land_overlap == 0,
+		"WorldState loads 2048x1024 terrain_grid (1:1 map) and strict water-only 1024x512 ocean_nav (0 land overlaps)")
 
 	var ata_cells := 0
-	for y in range(422, ws.sim_height):
+	for y in range(844, ws.sim_height):
 		for x in range(ws.sim_width):
 			if ws.is_land_cell(x, y):
 				ata_cells += 1
-	_check(ata_cells > 5000 and ws.total_conquerable_area_km2 >= 135000000.0,
+	_check(ata_cells > 20000 and ws.total_conquerable_area_km2 >= 135000000.0,
 		"Antarctica (%d cells) is conquerable and included in total area (%.0f km2)" % [ata_cells, ws.total_conquerable_area_km2])
 
 	var islands_ok := true
 	for pt in [[-155.5, 19.6], [-18.5, 64.9], [46.8, -18.9], [-79.5, 21.8], [138.2, 36.2], [-59.5, -51.7]]:
-		if _find_nearby_land(ws, pt[0], pt[1], 4).x < 0:
+		if _find_nearby_land(ws, pt[0], pt[1], 8).x < 0:
 			islands_ok = false
 	_check(islands_ok, "Enlarged tiny islands (Hawaii, Iceland, Madagascar, Cuba, Japan, Falklands) present as land")
 
 	# 3. Spawn & Long-Range Circular-Organic Expansion (Zero Heartbeat Spikes)
-	_check(not bool(ws.apply_command({"type": "spawn_player", "x": 120, "y": 280, "name": "Ocean", "ai_count": 0}).get("ok", true)),
+	_check(not bool(ws.apply_command({"type": "spawn_player", "x": 240, "y": 560, "name": "Ocean", "ai_count": 0}).get("ok", true)),
 		"Spawn rejects ocean cells")
 
 	var ws_ata := WorldState.new()
@@ -160,7 +188,7 @@ func _run_all_tests() -> void:
 	var label_scale_after: float = ws.get_nation_label_scale(p.id)
 	var label_on_owned: bool = label_cell_after.x >= 0 and ws.get_owner_at(label_cell_after.x, label_cell_after.y) == p.id
 	var saved_cnt: int = p.owned_cell_count
-	p.owned_cell_count = 20000
+	p.owned_cell_count = 80000
 	var giant_scale: float = ws.get_nation_label_scale(p.id)
 	p.owned_cell_count = saved_cnt
 	_check(label_on_owned and label_cell_after.x > label_cell_before.x and label_scale_after > label_scale_before * 1.25 and giant_scale <= WorldState.NATION_LABEL_MAX_SCALE + 0.01,
@@ -168,13 +196,13 @@ func _run_all_tests() -> void:
 			label_cell_before.x, label_cell_before.y, label_cell_after.x, label_cell_after.y, label_scale_before, label_scale_after, giant_scale
 		])
 
-	# Verify tight structure placement spacing (5 cells allowed, 2 cells rejected)
+	# Verify tight structure placement spacing (10 cells allowed, 4 cells rejected)
 	p.gold = 1000000.0
 	var sp_base := ws.apply_command({"type": "build_structure", "nation_id": p.id, "structure_type": StructureData.TYPE_TOWN, "x": us_spot.x, "y": us_spot.y})
-	var sp_close_rej := ws.can_place_structure(p.id, StructureData.TYPE_DEFENSE_POST, us_spot.x + 2, us_spot.y)
-	var sp_near_ok := ws.can_place_structure(p.id, StructureData.TYPE_DEFENSE_POST, us_spot.x + 5, us_spot.y)
-	_check(bool(sp_base.get("ok", false)) and WorldState.MIN_STRUCTURE_SPACING_CELLS <= 4 and not bool(sp_close_rej.get("ok", true)) and bool(sp_near_ok.get("ok", false)),
-		"Structure spacing allows close placement (5 cells ok, 2 cells rejected, min=%d)" % WorldState.MIN_STRUCTURE_SPACING_CELLS)
+	var sp_close_rej := ws.can_place_structure(p.id, StructureData.TYPE_DEFENSE_POST, us_spot.x + 4, us_spot.y)
+	var sp_near_ok := ws.can_place_structure(p.id, StructureData.TYPE_DEFENSE_POST, us_spot.x + 10, us_spot.y)
+	_check(bool(sp_base.get("ok", false)) and WorldState.MIN_STRUCTURE_SPACING_CELLS <= 8 and not bool(sp_close_rej.get("ok", true)) and bool(sp_near_ok.get("ok", false)),
+		"Structure spacing allows close placement (10 cells ok, 4 cells rejected, min=%d)" % WorldState.MIN_STRUCTURE_SPACING_CELLS)
 
 	# 4. No Port Required for Island Exploration + Closest-Shore Launch
 	var ws_sea := WorldState.new()
@@ -198,8 +226,8 @@ func _run_all_tests() -> void:
 	sea_p.gold = 25000000.0
 	# Build Port on England coast + Factory on Normandy shore across the English Channel
 	var port_spot := Vector2i(-1, -1)
-	for dy in range(-8, 9):
-		for dx in range(-8, 9):
+	for dy in range(-16, 17):
+		for dx in range(-16, 17):
 			var xx: int = england.x + dx
 			var yy: int = england.y + dy
 			if ws_sea.can_place_structure(sea_p.id, "port", xx, yy).get("ok", false):
@@ -213,12 +241,12 @@ func _run_all_tests() -> void:
 		"Port and Factory construct with Pesos")
 
 	# Add a peaceful coastal trading partner on Brittany so OpenFront 1:1 Port-to-Port trade operates across water
-	var partner_coast: Vector2i = _find_nearby_land(ws_sea, -4.0, 48.2, 6)
-	var partner_n: NationData = ws_sea._create_nation("TradeLeague", Color.TEAL, false, partner_coast, 42)
+	var partner_coast: Vector2i = _find_nearby_land(ws_sea, -4.0, 48.2, 12)
+	var partner_n: NationData = ws_sea._create_nation("TradeLeague", Color.TEAL, false, partner_coast, 168)
 	partner_n.gold = 2000000.0
 	var p2_spot := Vector2i(-1, -1)
-	for dy in range(-8, 9):
-		for dx in range(-8, 9):
+	for dy in range(-16, 17):
+		for dx in range(-16, 17):
 			if ws_sea.can_place_structure(partner_n.id, "port", partner_coast.x + dx, partner_coast.y + dy).get("ok", false):
 				p2_spot = Vector2i(partner_coast.x + dx, partner_coast.y + dy)
 				break
@@ -268,11 +296,45 @@ func _run_all_tests() -> void:
 	_check(has_bridge and fac_st.bridge_count >= 1 and port_st.factory_boost > 1.0,
 		"Factory irregular range links across water to island Port and builds pixel-art Bridge (%d links)" % fac_st.connected_count)
 
+	# Verify cross-island Factory road stays winding on land & places straight bridge ONLY over water spans
+	var inland_fr := _find_nearby_land(ws_sea, -1.5, 48.2, 6)
+	var eng_inland := _find_nearby_land(ws_sea, -1.5, 52.0, 6)
+	if inland_fr.x >= 0 and eng_inland.x >= 0:
+		ws_sea._claim_organic_dot(sea_p.id, inland_fr, 25, 0)
+		ws_sea._claim_organic_dot(sea_p.id, eng_inland, 25, 0)
+		var st_fr := StructureData.new()
+		st_fr.id = 9001
+		st_fr.cell = inland_fr
+		var st_eng := StructureData.new()
+		st_eng.id = 9002
+		st_eng.cell = eng_inland
+		var mixed_road: Dictionary = ws_sea._get_or_build_road(st_fr, st_eng)
+		var m_pts: PackedVector2Array = mixed_road.get("road_points", PackedVector2Array())
+		var m_spans: Array = mixed_road.get("water_spans", [])
+		var land_dev := 0.0
+		if m_pts.size() >= 3:
+			var m_chord: Vector2 = (st_eng.get_world_pos() - st_fr.get_world_pos()).normalized()
+			for pt_m: Vector2 in m_pts:
+				land_dev = maxf(land_dev, absf((pt_m - st_fr.get_world_pos()).cross(m_chord)))
+		var spans_aligned := true
+		for sp_m: Array in m_spans:
+			var found_seg := false
+			for seg_i in range(m_pts.size() - 1):
+				if (m_pts[seg_i].distance_squared_to(sp_m[0]) < 0.25 and m_pts[seg_i + 1].distance_squared_to(sp_m[1]) < 0.25):
+					found_seg = true
+					break
+			if not found_seg:
+				spans_aligned = false
+				break
+		_check(m_pts.size() > 4 and m_spans.size() >= 1 and land_dev > 0.3 and spans_aligned,
+			"Cross-island Factory road stays winding on land (pts=%d, dev=%.1fpx) with straight bridge strictly over water (%d span)" % [m_pts.size(), land_dev, m_spans.size()],
+			"pts=%d dev=%.2f spans=%d aligned=%s" % [m_pts.size(), land_dev, m_spans.size(), str(spans_aligned)])
+
 	# Verify OpenFront 1:1 Port-to-Port auto-trading ships pay BOTH partners distance-scaled Pesos + Town/Factory popups
 	sea_p.gold = 10000000.0
 	var town_spot := Vector2i(-1, -1)
-	for dy in range(-18, 19):
-		for dx in range(-18, 19):
+	for dy in range(-36, 37):
+		for dx in range(-36, 37):
 			if ws_sea.can_place_structure(sea_p.id, "town", normandy.x + dx, normandy.y + dy).get("ok", false):
 				town_spot = Vector2i(normandy.x + dx, normandy.y + dy)
 				break
@@ -328,17 +390,17 @@ func _run_all_tests() -> void:
 	ws_war.load_world()
 	ws_war.apply_command({"type": "spawn_player", "x": us_spot.x, "y": us_spot.y, "name": "Orderer", "ai_count": 0})
 	var p_war: NationData = ws_war.get_player_nation()
-	var rival_spot := Vector2i(us_spot.x + 12, us_spot.y)
-	var rival: NationData = ws_war._create_nation("Rival", Color.RED, false, rival_spot, 60)
+	var rival_spot := Vector2i(us_spot.x + 24, us_spot.y)
+	var rival: NationData = ws_war._create_nation("Rival", Color.RED, false, rival_spot, 240)
 	var rival_orig_cells: Array[int] = []
 	for idx in range(ws_war.sim_width * ws_war.sim_height):
 		if ws_war.owner_grid[idx] == rival.id:
 			rival_orig_cells.append(idx)
 	p_war.troops = 500.0
-	var wild_click := Vector2i(us_spot.x + 6, us_spot.y - 2)
-	for dy_w in range(-4, 5):
+	var wild_click := Vector2i(us_spot.x + 12, us_spot.y - 4)
+	for dy_w in range(-8, 9):
 		var cy_w: int = us_spot.y + dy_w
-		var cx_w: int = us_spot.x + 6
+		var cx_w: int = us_spot.x + 12
 		if ws_war.is_land_cell(cx_w, cy_w) and ws_war.get_owner_at(cx_w, cy_w) == 0:
 			wild_click = Vector2i(cx_w, cy_w)
 			break
@@ -479,7 +541,7 @@ func _run_all_tests() -> void:
 	_check(bool(ire_res.get("ok", false)) and str(ire_res.get("mode", "")) == "naval_landing" and ws_ire.get_owner_at(ire_spot.x, ire_spot.y) == ire_p.id,
 		"Adjacent separate-island hop (Great Britain -> Ireland) succeeds without a Port")
 
-	var falk := _find_nearby_land(ws_hop, -59.5, -51.7, 6)
+	var falk := _find_nearby_land(ws_hop, -59.5, -51.7, 12)
 	var falk_lm: int = ws_hop.landmass_grid[falk.y * ws_hop.sim_width + falk.x]
 	for idx in range(ws_hop.sim_width * ws_hop.sim_height):
 		if ws_hop.landmass_grid[idx] == falk_lm and ws_hop.owner_grid[idx] == 0:
@@ -530,7 +592,7 @@ func _run_all_tests() -> void:
 	for nid: int in ws_ai.nations.keys():
 		var n: NationData = ws_ai.nations[nid]
 		if not n.is_player:
-			if n.owned_cell_count > 62:
+			if n.owned_cell_count > 248:
 				ai_grew += 1
 			if n.structure_ids.size() > 0:
 				ai_built += 1
@@ -540,16 +602,44 @@ func _run_all_tests() -> void:
 	var theme_stream: AudioStream = load("res://assets/audio/music/world_war_pixel_theme.wav")
 	var audio_streams: Dictionary = AudioManager.get("_streams") if AudioManager != null else {}
 	var public_sfx_ok := FileAccess.file_exists("res://assets/audio/SOURCES.txt")
-	for cat_k: String in ["missile_launch", "silo_nuke_launch", "sam_launch", "sam_intercept", "nuke_blast", "cannon_fire", "battle_clash", "boat_bell", "target_lock", "warship_horn", "troop_donate", "retreat_horn"]:
+	for cat_k: String in ["missile_launch", "silo_nuke_launch", "sam_launch", "sam_intercept", "nuke_blast", "cannon_fire", "battle_clash", "boat_bell", "target_lock", "warship_horn", "troop_donate", "retreat_horn", "upgrade_instant", "land_conquer_pop", "invasion_warning", "friend_request", "defeat"]:
 		if not audio_streams.has(cat_k) or (audio_streams[cat_k] as Array).is_empty():
 			public_sfx_ok = false
+	var stereo_audio_ok := true
+	for wav_path: String in [
+		"res://assets/audio/music/world_war_pixel_theme.wav",
+		"res://assets/audio/ambience/world_ocean_ambience.wav",
+		"res://assets/audio/sfx/nuke_blast.wav",
+		"res://assets/audio/sfx/silo_nuke_launch.wav",
+		"res://assets/audio/sfx/target_lock.wav",
+		"res://assets/audio/sfx/victory_fanfare.wav",
+		"res://assets/audio/sfx/defeat_drums.wav",
+		"res://assets/audio/sfx/friend_request.wav",
+		"res://assets/audio/sfx/upgrade_001.wav",
+		"res://assets/audio/sfx/conquer_pop_001.wav",
+		"res://assets/audio/sfx/conquer_pop_006.wav",
+		"res://assets/audio/sfx/invasion_warning.wav",
+	]:
+		var ws_st: AudioStreamWAV = load(wav_path) as AudioStreamWAV
+		if ws_st == null or not ws_st.stereo or ws_st.mix_rate != 44100:
+			stereo_audio_ok = false
+	var bus_lpf_removed := true
+	for b_name: String in ["SFX", "UI"]:
+		var b_idx: int = AudioServer.get_bus_index(b_name)
+		if b_idx < 0:
+			bus_lpf_removed = false
+		else:
+			for ef_i in range(AudioServer.get_bus_effect_count(b_idx)):
+				if AudioServer.get_bus_effect(b_idx, ef_i) is AudioEffectLowPassFilter:
+					bus_lpf_removed = false
+	var pool_ok: bool = AudioManager != null and (AudioManager.get("_sfx_pool") as Array).size() >= 16
 	var geom_ships_ok := (
 		is_equal_approx(UnitsLayer.TRADE_SHIP_SIZE_PX, 2.0)
 		and is_equal_approx(UnitsLayer.EXPLORER_SHIP_SIZE_PX, 3.0)
 		and UnitsLayer.WARSHIP_DIAMOND_HALF_LEN > 2.0
 	)
-	_check(AudioManager != null and AudioServer.bus_count >= 5 and theme_stream != null and AudioManager.get("_music_player") != null and public_sfx_ok,
-		"AudioManager loads 5 buses, martial theme track & public-domain missile/silo/SAM/nuke WAVs")
+	_check(AudioManager != null and AudioServer.bus_count >= 5 and theme_stream != null and AudioManager.get("_music_player") != null and public_sfx_ok and stereo_audio_ok and bus_lpf_removed and pool_ok,
+		"AudioManager loads 5 modern buses (no LPF choke), 16-voice pool, 44.1kHz stereo orchestral theme & cinema SFX")
 	_check(geom_ships_ok and CapitalMarkersLayer.STRUCTURE_ICON_SIZE_PX >= 16.0 and CapitalMarkersLayer.STRUCTURE_LEVEL_MIN_ZOOM >= 1.4 and is_equal_approx(1.0 / maxf(0.45, 1.0), 1.0),
 		"Land icons (%.0fpx), geometric ships (2x2/3x3/diamond), non-enlarging zoom & gated levels (>=%.2fx)" % [CapitalMarkersLayer.STRUCTURE_ICON_SIZE_PX, CapitalMarkersLayer.STRUCTURE_LEVEL_MIN_ZOOM])
 	var main_ps: PackedScene = load("res://scenes/main.tscn")
@@ -596,8 +686,10 @@ func _run_all_tests() -> void:
 			hud._on_play_pressed()
 			var play_reveals_spawn: bool = (not hud.menu_overlay.visible) and hud.spawn_banner.visible and hud.top_bar.visible and hud.ping_badge.visible and (not wm.camera.auto_pan_enabled)
 			var no_color_or_slider: bool = inst.get_node_or_null("HUD/Root/SpawnBanner/VBox/Row/ColorRow") == null and inst.get_node_or_null("HUD/Root/ActionDock/HBox/CommitBox/CommitSlider") == null
-			hud.set_commit_ratio(0.20)
-			var r20: bool = is_equal_approx(hud.get_commit_ratio(), 0.20)
+			hud.set_commit_ratio(0.10)
+			var r10: bool = is_equal_approx(hud.get_commit_ratio(), 0.10)
+			hud.set_commit_ratio(0.25)
+			var r25: bool = is_equal_approx(hud.get_commit_ratio(), 0.25) and hud.attack_pct_label.text == "25%"
 			hud.set_commit_ratio(0.50)
 			var r50: bool = is_equal_approx(hud.get_commit_ratio(), 0.50)
 			hud.set_commit_ratio(0.75)
@@ -637,8 +729,15 @@ func _run_all_tests() -> void:
 				and hud.get_selected_server_name() == "Manila, PH"
 				and not hud.mp_server_edit.visible
 				and hud.expand_btn.text == "Explore"
-				and (hud.action_dock.offset_right - hud.action_dock.offset_left) <= 760.0
-				and hud.action_dock.get_combined_minimum_size().x <= 760.0
+				and (hud.action_dock.offset_right - hud.action_dock.offset_left) <= 1160.0
+				and hud.action_dock.get_combined_minimum_size().x <= 1140.0
+				and hud.action_dock.get_combined_minimum_size().y <= 70.0
+				and hud.nation_color_swatch != null
+				and hud.troop_bar != null
+				and hud.attack_preview_label != null
+				and hud.town_btn.texture_filter == CanvasItem.TEXTURE_FILTER_NEAREST
+				and hud.commit_10_btn != null
+				and hud.commit_25_btn != null
 				and hud.radial_attack_btn.text == "Attack"
 				and hud.radial_build_btn.text == "Upgrade"
 				and hud.radial_warship_btn.text == "Boat"
@@ -653,7 +752,7 @@ func _run_all_tests() -> void:
 			var ping_set_ok: bool = hud.ping_label.text == "42ms"
 			hud.update_ping(-1)
 			var ping_reset_ok: bool = hud.ping_label.text == "--ms"
-			var peso_hud_ok: bool = hud.gold_label.text.begins_with("Pesos:")
+			var peso_hud_ok: bool = hud.gold_header_lbl.text == "PESOS"
 			var l5: Node = wm.get_node_or_null("Layer5_Units") if wm != null else null
 			var smooth_filter_ok: bool = l4 != null and l5 != null and (l4 as CanvasItem).texture_filter == CanvasItem.TEXTURE_FILTER_LINEAR and (l5 as CanvasItem).texture_filter == CanvasItem.TEXTURE_FILTER_LINEAR
 			# Verify hotkeys 1..7 + nuke hotkeys 8/N (Atom), 9/H (H-Bomb), F/M (MIRV) during PLAYING phase
@@ -685,9 +784,9 @@ func _run_all_tests() -> void:
 			var hk_m: bool = hud._missile_mode == MissileUnit.KIND_MIRV
 			hud.clear_missile_mode()
 			hud._world_state.match_phase = WorldState.PHASE_SPAWN_SELECT
-			ui_ok = menu_init and cam_pan_init and cam_pan_moved and friends_open_ok and friends_back_ok and name_rem_ok and play_reveals_spawn and no_color_or_slider and r20 and r50 and r75 and hk_init and hk_off and lb_min and lb_restored and dock_icons and of_nodes and mp_nodes and ping_nodes and ping_set_ok and ping_reset_ok and peso_hud_ok and smooth_filter_ok and hk_fact and hk_ship and hk_atom and hk_h and hk_m
+			ui_ok = menu_init and cam_pan_init and cam_pan_moved and friends_open_ok and friends_back_ok and name_rem_ok and play_reveals_spawn and no_color_or_slider and r10 and r25 and r50 and r75 and hk_init and hk_off and lb_min and lb_restored and dock_icons and of_nodes and mp_nodes and ping_nodes and ping_set_ok and ping_reset_ok and peso_hud_ok and smooth_filter_ok and hk_fact and hk_ship and hk_atom and hk_h and hk_m
 			if not ui_ok:
-				print("[UI DEBUG] menu_init=", menu_init, " cam_pan_init=", cam_pan_init, " cam_pan_moved=", cam_pan_moved, " friends_open=", friends_open_ok, " friends_back=", friends_back_ok, " name_rem=", name_rem_ok, " play=", play_reveals_spawn, " lb_min=", lb_min, " lb_restored=", lb_restored, " dock_icons=", dock_icons, " dock_min=", hud.action_dock.get_combined_minimum_size(), " mp_nodes=", mp_nodes, " peso=", peso_hud_ok, " hk=", hk_fact, "/", hk_ship, "/", hk_atom, "/", hk_h, "/", hk_m)
+				print("[UI DEBUG] menu_init=", menu_init, " cam_pan_init=", cam_pan_init, " cam_pan_moved=", cam_pan_moved, " friends_open=", friends_open_ok, " friends_back=", friends_back_ok, " name_rem=", name_rem_ok, " play=", play_reveals_spawn, " r10/25=", r10, "/", r25, " lb_min=", lb_min, " lb_restored=", lb_restored, " dock_icons=", dock_icons, " dock_min=", hud.action_dock.get_combined_minimum_size(), " mp_nodes=", mp_nodes, " peso=", peso_hud_ok, " hk=", hk_fact, "/", hk_ship, "/", hk_atom, "/", hk_h, "/", hk_m)
 		_check(ok and no_army_ui and has_banner and ui_ok,
 			"Main scene verifies smooth filters, Pesos bottom HUD, hotkeys(1..9,F), PingBadge, RadialMenu & Diplomacy")
 		inst.queue_free()
@@ -720,17 +819,26 @@ func _run_openfront_feature_tests(us_spot: Vector2i, normandy: Vector2i, england
 		and is_equal_approx(StructureData.get_scaled_build_cost(StructureData.TYPE_TOWN, 1), 250000.0)
 		and is_equal_approx(StructureData.get_scaled_build_cost(StructureData.TYPE_TOWN, 2), 500000.0)
 		and is_equal_approx(StructureData.get_scaled_build_cost(StructureData.TYPE_TOWN, 3), 1000000.0)
-		and is_equal_approx(StructureData.get_scaled_build_cost(StructureData.TYPE_DEFENSE_POST, 5), 1000000.0)
+		and is_equal_approx(StructureData.get_scaled_build_cost(StructureData.TYPE_DEFENSE_POST, 0), 50000.0)
+		and is_equal_approx(StructureData.get_scaled_build_cost(StructureData.TYPE_DEFENSE_POST, 1), 100000.0)
+		and is_equal_approx(StructureData.get_scaled_build_cost(StructureData.TYPE_DEFENSE_POST, 2), 200000.0)
+		and is_equal_approx(StructureData.get_scaled_build_cost(StructureData.TYPE_DEFENSE_POST, 3), 250000.0)
+		and is_equal_approx(StructureData.get_scaled_build_cost(StructureData.TYPE_DEFENSE_POST, 5), 250000.0)
+		and StructureData.format_compact(125000.0) == "125K"
+		and StructureData.format_compact(19700.0) == "19.7K"
+		and StructureData.format_compact(4760.0) == "4.76K"
+		and StructureData.format_compact(1500000.0) == "1.5M"
+		and StructureData.format_compact(690.0) == "690"
 		and is_equal_approx(StructureData.get_build_cost(StructureData.TYPE_MISSILE_SILO), 1000000.0)
 		and is_equal_approx(StructureData.get_build_cost(StructureData.TYPE_SAM_LAUNCHER), 1500000.0)
 		and is_equal_approx(MissileUnit.get_cost(MissileUnit.KIND_ATOM), 750000.0)
 		and is_equal_approx(MissileUnit.get_cost(MissileUnit.KIND_HYDROGEN), 5000000.0)
 		and is_equal_approx(MissileUnit.get_cost(MissileUnit.KIND_MIRV), 25000000.0)
 	)
-	_check(peso_prices_ok, "Peso inflation pricing verified (Buildings 2x->1M cap, Warships 2x->750k, Silo 1M, SAM 1.5M, Nukes 750k/5M/25M)")
+	_check(peso_prices_ok, "Peso inflation pricing verified (Defense Post 250k cap, Buildings 2x->1M cap, Warships 2x->750k, Nukes 750k/5M/25M)")
 
 	# Defense Post vs unfortified conquest cost + scaling build cost
-	var rival := ws._create_nation("Tester", Color.RED, false, Vector2i(us_spot.x + 12, us_spot.y), 60)
+	var rival := ws._create_nation("Tester", Color.RED, false, Vector2i(us_spot.x + 24, us_spot.y), 240)
 	rival.gold = 5000000.0
 	var def_res: Dictionary = ws.apply_command({"type": "build_structure", "nation_id": rival.id, "structure_type": StructureData.TYPE_DEFENSE_POST, "x": rival.capital_cell.x, "y": rival.capital_cell.y})
 	var def_cost1: float = ws.get_structure_build_cost(rival.id, StructureData.TYPE_DEFENSE_POST)
@@ -740,11 +848,27 @@ func _run_openfront_feature_tests(us_spot: Vector2i, normandy: Vector2i, england
 	var mult_1: float = ws.get_defense_multiplier_at(rival.id, rival.capital_cell)
 	ws.apply_command({"type": "upgrade_structure", "nation_id": rival.id, "structure_id": def_st.id})
 	var mult_2: float = ws.get_defense_multiplier_at(rival.id, rival.capital_cell)
-	_check(def_st != null and def_st.level == 2 and mult_1 >= 1.80 and mult_2 > mult_1 and def_cost1 > StructureData.get_build_cost(StructureData.TYPE_DEFENSE_POST),
-		"Defense Post fortifies nearby border (%.2fx -> %.2fx) & scaling Peso cost increases (%s)" % [mult_1, mult_2, StructureData.format_pesos(def_cost1)])
+	var def_r_ok: bool = (
+		is_equal_approx(StructureData.get_defense_radius_for_level(1), 28.0)
+		and is_equal_approx(StructureData.get_defense_radius_for_level(10), 64.0)
+		and is_equal_approx(ws.get_defense_multiplier_at(rival.id, Vector2i(rival.capital_cell.x + 40, rival.capital_cell.y)), 1.0)
+	)
+	_check(def_st != null and def_st.level == 2 and mult_1 >= 1.80 and mult_2 > mult_1 and def_cost1 > StructureData.get_build_cost(StructureData.TYPE_DEFENSE_POST) and def_r_ok,
+		"Defense Post fortifies tight border (Lv.1 r=%.0f -> %.2fx -> %.2fx) & scaling Peso cost increases (%s)" % [StructureData.get_defense_radius_for_level(1), mult_1, mult_2, StructureData.format_pesos(def_cost1)])
+
+	# 1.5K startup troops check
+	var ws_start := WorldState.new()
+	ws_start.load_world()
+	ws_start.apply_command({"type": "spawn_player", "x": us_spot.x, "y": us_spot.y, "name": "Start1500", "ai_count": 2, "seed": 111})
+	var start_all_1500 := true
+	for nid_s: int in ws_start.nations.keys():
+		if not is_equal_approx((ws_start.nations[nid_s] as NationData).troops, 1500.0):
+			start_all_1500 = false
+	_check(start_all_1500 and ws_start.nations.size() == 3,
+		"Player and AI nations start with 1.5K troops (1500.0)")
 
 	# OpenFront 1:1 25% contested attack retreat malus
-	ws._claim_organic_dot(p.id, Vector2i(us_spot.x + 6, us_spot.y), 45, 0)
+	ws._claim_organic_dot(p.id, Vector2i(us_spot.x + 12, us_spot.y), 180, 0)
 	p.troops = 280.0
 	var ret_ord_res: Dictionary = ws.apply_command({"type": "expand_to", "nation_id": p.id, "x": rival.capital_cell.x, "y": rival.capital_cell.y, "commit_ratio": 0.50})
 	var ret_eid: int = int(ret_ord_res.get("expansion_id", 0))
@@ -770,8 +894,8 @@ func _run_openfront_feature_tests(us_spot: Vector2i, normandy: Vector2i, england
 
 	# Milestone 2: Warship build, movement, sinking enemy Landing Boat, and capturing enemy Trade Ship
 	var p_port_cell := Vector2i(-1, -1)
-	for dy in range(-8, 9):
-		for dx in range(-8, 9):
+	for dy in range(-16, 17):
+		for dx in range(-16, 17):
 			if ws_nav.can_place_structure(nav_p.id, StructureData.TYPE_PORT, normandy.x + dx, normandy.y + dy).get("ok", false):
 				p_port_cell = Vector2i(normandy.x + dx, normandy.y + dy)
 				break
@@ -784,7 +908,7 @@ func _run_openfront_feature_tests(us_spot: Vector2i, normandy: Vector2i, england
 	var w_res: Dictionary = ws_nav.apply_command({"type": "build_warship", "nation_id": nav_p.id, "port_id": np_id})
 	var ws_id: int = int(w_res.get("ship_id", 0))
 	var warship: ShipUnit = ws_nav.ships.get(ws_id, null)
-	var foe := ws_nav._create_nation("Corsair", Color.ORANGE, false, port_spot, 50)
+	var foe := ws_nav._create_nation("Corsair", Color.ORANGE, false, port_spot, 200)
 	foe.troops = 300.0
 	var nav_off: Vector2 = warship.position
 	var trade_start: Vector2 = warship.position + Vector2(-8.0, 0.0)
@@ -839,7 +963,7 @@ func _run_openfront_feature_tests(us_spot: Vector2i, normandy: Vector2i, england
 
 	# Verify manual Warship movement obeys player destination without AI wander + stays on T_OCEAN
 	var cmd_w_res: Dictionary = ws_nav.apply_command({
-		"type": "command_warship", "nation_id": nav_p.id, "ship_id": ws_id, "x": normandy.x - 14, "y": normandy.y - 6
+		"type": "command_warship", "nation_id": nav_p.id, "ship_id": ws_id, "x": normandy.x - 28, "y": normandy.y - 12
 	})
 	var manual_set_ok: bool = bool(cmd_w_res.get("ok", false)) and warship.manual_moving
 	var warship_water_ok: bool = manual_set_ok
@@ -859,13 +983,13 @@ func _run_openfront_feature_tests(us_spot: Vector2i, normandy: Vector2i, england
 	ws_nuke.apply_command({"type": "spawn_player", "x": us_spot.x, "y": us_spot.y, "name": "Atomic", "ai_count": 0, "seed": 999})
 	var ap: NationData = ws_nuke.get_player_nation()
 	ap.gold = 60000000.0
-	var target_city := _find_nearby_land(ws_nuke, -82.0, 38.0, 6)
-	var tgt_n := ws_nuke._create_nation("TargetState", Color.GREEN, false, target_city, 140)
+	var target_city := _find_nearby_land(ws_nuke, -82.0, 38.0, 10)
+	var tgt_n := ws_nuke._create_nation("TargetState", Color.GREEN, false, target_city, 560)
 	tgt_n.gold = 2000000.0
 	var s_res: Dictionary = ws_nuke.apply_command({"type": "build_structure", "nation_id": ap.id, "structure_type": StructureData.TYPE_MISSILE_SILO, "x": us_spot.x, "y": us_spot.y})
 	# Build a closer 2nd Silo east of us_spot toward target_city to verify nearest-silo dispatch
-	ws_nuke._claim_organic_dot(ap.id, Vector2i(us_spot.x + 14, us_spot.y), 80, 0)
-	var close_silo_cell := Vector2i(us_spot.x + 14, us_spot.y)
+	ws_nuke._claim_organic_dot(ap.id, Vector2i(us_spot.x + 28, us_spot.y), 320, 0)
+	var close_silo_cell := Vector2i(us_spot.x + 28, us_spot.y)
 	var s2_res: Dictionary = ws_nuke.apply_command({"type": "build_structure", "nation_id": ap.id, "structure_type": StructureData.TYPE_MISSILE_SILO, "x": close_silo_cell.x, "y": close_silo_cell.y})
 	var sam_res: Dictionary = ws_nuke.apply_command({"type": "build_structure", "nation_id": tgt_n.id, "structure_type": StructureData.TYPE_SAM_LAUNCHER, "x": target_city.x, "y": target_city.y})
 	for _t in range(32):
@@ -889,7 +1013,7 @@ func _run_openfront_feature_tests(us_spot: Vector2i, normandy: Vector2i, england
 
 	# Verify shortened SAM range + 2-consecutive-missile burst limit + slow reload + nuke building destruction!
 	var sam_st_chk: StructureData = ws_nuke.get_structure(int(sam_res.get("structure_id", 0)))
-	var sam_specs_ok: bool = sam_st_chk != null and sam_st_chk.get_sam_radius() <= 22.0 and sam_st_chk.get_sam_cooldown_ticks() >= 300
+	var sam_specs_ok: bool = sam_st_chk != null and sam_st_chk.get_sam_radius() <= 44.0 and sam_st_chk.get_sam_cooldown_ticks() >= 300
 	if sam_st_chk != null:
 		sam_st_chk.sam_ammo = StructureData.SAM_MAX_AMMO
 		sam_st_chk.sam_reload_ticks = 0
@@ -912,8 +1036,8 @@ func _run_openfront_feature_tests(us_spot: Vector2i, normandy: Vector2i, england
 		"specs=%s burst=%d sam_gone=%s" % [str(sam_specs_ok), burst_hits, str(sam_destroyed)])
 
 	# Also verify H-Bomb destroys structures cleanly within full blast radius on an intact target nation
-	var hbomb_city := _find_nearby_land(ws_nuke, -84.0, 33.0, 6)
-	var tgt_n2 := ws_nuke._create_nation("TargetStateB", Color.ORANGE, false, hbomb_city, 180)
+	var hbomb_city := _find_nearby_land(ws_nuke, -84.0, 33.0, 10)
+	var tgt_n2 := ws_nuke._create_nation("TargetStateB", Color.ORANGE, false, hbomb_city, 720)
 	tgt_n2.gold = 2000000.0
 	var tgt_town_res: Dictionary = ws_nuke.apply_command({"type": "build_structure", "nation_id": tgt_n2.id, "structure_type": StructureData.TYPE_TOWN, "x": hbomb_city.x, "y": hbomb_city.y})
 	for _t in range(32):
@@ -937,7 +1061,17 @@ func _run_openfront_feature_tests(us_spot: Vector2i, normandy: Vector2i, england
 		if s_obj != null:
 			s_obj.action_cooldown_ticks = 0
 	var unconq_mirv: Dictionary = ws_nuke.apply_command({"type": "launch_missile", "nation_id": ap.id, "missile_kind": MissileUnit.KIND_MIRV, "x": unconq_land.x, "y": unconq_land.y})
-	var far_range_atom: Dictionary = ws_nuke.apply_command({"type": "launch_missile", "nation_id": ap.id, "missile_kind": MissileUnit.KIND_ATOM, "x": clampi(us_spot.x + 360, 0, ws_nuke.sim_width - 1), "y": us_spot.y})
+	ap.gold = 60000000.0
+	var own_atom: Dictionary = ws_nuke.apply_command({"type": "launch_missile", "nation_id": ap.id, "missile_kind": MissileUnit.KIND_ATOM, "x": ap.capital_cell.x, "y": ap.capital_cell.y})
+	var own_hbomb: Dictionary = ws_nuke.apply_command({"type": "launch_missile", "nation_id": ap.id, "missile_kind": MissileUnit.KIND_HYDROGEN, "x": ap.capital_cell.x, "y": ap.capital_cell.y})
+	var own_mirv: Dictionary = ws_nuke.apply_command({"type": "launch_missile", "nation_id": ap.id, "missile_kind": MissileUnit.KIND_MIRV, "x": ap.capital_cell.x, "y": ap.capital_cell.y})
+	var own_land_blocked: bool = (
+		not bool(own_atom.get("ok", true)) and "own" in str(own_atom.get("reason", "")).to_lower()
+		and not bool(own_hbomb.get("ok", true)) and "own" in str(own_hbomb.get("reason", "")).to_lower()
+		and not bool(own_mirv.get("ok", true)) and "own" in str(own_mirv.get("reason", "")).to_lower()
+	)
+	_check(own_land_blocked, "Nuclear warheads (Atom, H-Bomb, MIRV) reject targeting own territory", "atom=%s hb=%s mirv=%s" % [str(own_atom), str(own_hbomb), str(own_mirv)])
+	var far_range_atom: Dictionary = ws_nuke.apply_command({"type": "launch_missile", "nation_id": ap.id, "missile_kind": MissileUnit.KIND_ATOM, "x": clampi(us_spot.x + 720, 0, ws_nuke.sim_width - 1), "y": us_spot.y})
 	if bool(far_range_atom.get("ok", false)):
 		ws_nuke.missiles.erase(int(far_range_atom.get("missile_id", 0)))
 	var silo_ref: StructureData = ws_nuke.get_structure(int(s_res.get("structure_id", 0)))
@@ -955,14 +1089,14 @@ func _run_openfront_feature_tests(us_spot: Vector2i, normandy: Vector2i, england
 		and StructureData.get_silo_cooldown_for_level(3) == 369
 		and StructureData.get_sam_cooldown_for_level(1) == 480
 		and StructureData.get_sam_cooldown_for_level(2) == 420
-		and is_equal_approx(StructureData.get_sam_radius_for_level(2), 18.0 * 1.15)
+		and is_equal_approx(StructureData.get_sam_radius_for_level(2), 36.0 * 1.15)
 	)
 	_check(not bool(unconq_mirv.get("ok", true)) and bool(far_range_atom.get("ok", false)) and silo_cd_ticks >= 240 and silo_sam_caps_ok,
 		"MIRV rejects unconquered land, Missiles have infinite range, Silo/SAM cap at Lv.3 (-10%% Silo CD, +15%% SAM range / -12.5%% SAM CD)" ,
 		"unconq=%s far=%s cd=%d caps=%s" % [str(unconq_mirv), str(far_range_atom), silo_cd_ticks, str(silo_sam_caps_ok)])
 
-	var mirv_city := _find_nearby_land(ws_nuke, -88.0, 41.0, 6)
-	var tgt_n3 := ws_nuke._create_nation("TargetStateC", Color.PURPLE, false, mirv_city, 220)
+	var mirv_city := _find_nearby_land(ws_nuke, -88.0, 41.0, 10)
+	var tgt_n3 := ws_nuke._create_nation("TargetStateC", Color.PURPLE, false, mirv_city, 880)
 	var pre_nuke_cells: int = tgt_n3.owned_cell_count
 	for sid_s in [int(s_res.get("structure_id", 0)), int(s2_res.get("structure_id", 0))]:
 		var s_obj: StructureData = ws_nuke.get_structure(sid_s)
@@ -983,8 +1117,8 @@ func _run_openfront_feature_tests(us_spot: Vector2i, normandy: Vector2i, england
 
 	# Verify nuclear fallout creation + exclusion during normal explore unless fallout is clicked + reclamation cost
 	var fallout_probe := Vector2i(-1, -1)
-	for dy_f in range(-8, 9):
-		for dx_f in range(-8, 9):
+	for dy_f in range(-16, 17):
+		for dx_f in range(-16, 17):
 			var fx: int = mirv_city.x + dx_f
 			var fy: int = mirv_city.y + dy_f
 			if ws_nuke.is_fallout_at(fx, fy) and ws_nuke.get_owner_at(fx, fy) == 0:
@@ -995,15 +1129,15 @@ func _run_openfront_feature_tests(us_spot: Vector2i, normandy: Vector2i, england
 	var f_idx_probe: int = fallout_probe.y * ws_nuke.sim_width + fallout_probe.x if fallout_probe.x >= 0 else 0
 	var fallout_created_ok: bool = (
 		fallout_probe.x >= 0
-		and ws_nuke.fallout_cell_count > 30
+		and ws_nuke.fallout_cell_count > 120
 		and ws_nuke.render_owner_grid[f_idx_probe] == 255
 		and bool(ws_nuke.get_cell_info(fallout_probe.x, fallout_probe.y).get("fallout", false))
 	)
 	# First verify that normal free-hand explore (clicking a clean cell) sets allow_fallout == false and skips fallout cells
-	var clean_target := Vector2i(us_spot.x + 8, us_spot.y)
+	var clean_target := Vector2i(us_spot.x + 16, us_spot.y)
 	ws_nuke._set_cell_owner(clean_target.y * ws_nuke.sim_width + clean_target.x, 0)
 	ws_nuke.fallout_grid[clean_target.y * ws_nuke.sim_width + clean_target.x] = 0
-	var adj_fallout := Vector2i(us_spot.x + 3, us_spot.y)
+	var adj_fallout := Vector2i(us_spot.x + 6, us_spot.y)
 	var adj_f_idx: int = adj_fallout.y * ws_nuke.sim_width + adj_fallout.x
 	ws_nuke._set_cell_owner(adj_f_idx, 0)
 	if ws_nuke.fallout_grid[adj_f_idx] == 0:
@@ -1025,12 +1159,12 @@ func _run_openfront_feature_tests(us_spot: Vector2i, normandy: Vector2i, england
 	var skipped_fallout_ok: bool = clean_disallows_fallout and ws_nuke.is_fallout_at(adj_fallout.x, adj_fallout.y) and ws_nuke.get_owner_at(adj_fallout.x, adj_fallout.y) == 0
 
 	var pre_reclaim_fallout: int = ws_nuke.fallout_cell_count
-	var reclaimer := ws_nuke._create_nation("Reclaimers", Color.YELLOW, false, fallout_probe, 1)
+	var reclaimer := ws_nuke._create_nation("Reclaimers", Color.YELLOW, false, fallout_probe, 4)
 	reclaimer.troops = 200.0
 	var rec_cmd := ws_nuke.apply_command({
 		"type": "expand_to",
 		"nation_id": reclaimer.id,
-		"x": clampi(fallout_probe.x + 2, 0, ws_nuke.sim_width - 1),
+		"x": clampi(fallout_probe.x + 4, 0, ws_nuke.sim_width - 1),
 		"y": fallout_probe.y,
 		"commit_ratio": 0.40,
 	})
@@ -1046,12 +1180,12 @@ func _run_openfront_feature_tests(us_spot: Vector2i, normandy: Vector2i, england
 			min_rem_troops = minf(min_rem_troops, rec_ord.remaining_troops)
 			claimed_rec_cells = maxi(claimed_rec_cells, rec_ord.cells_claimed)
 	var cost_per_cell: float = (init_rec_troops - min_rem_troops) / maxf(float(claimed_rec_cells), 1.0)
-	_check(fallout_created_ok and skipped_fallout_ok and allow_fallout_ok and claimed_rec_cells >= 5 and ws_nuke.fallout_cell_count < pre_reclaim_fallout and not ws_nuke.is_fallout_at(fallout_probe.x, fallout_probe.y) and cost_per_cell >= 2.2,
+	_check(fallout_created_ok and skipped_fallout_ok and allow_fallout_ok and claimed_rec_cells >= 20 and ws_nuke.fallout_cell_count < pre_reclaim_fallout and not ws_nuke.is_fallout_at(fallout_probe.x, fallout_probe.y) and cost_per_cell >= 0.55,
 		"Nuke leaves GPU nuclear fallout excluded unless clicked & cleared by costly troop reclamation (%.2f troops/cell, %d fallout remaining)" % [cost_per_cell, ws_nuke.fallout_cell_count],
 		"ok=%s skip=%s allow=%s probe=%s claimed=%d cost=%.2f f=%d->%d" % [str(fallout_created_ok), str(skipped_fallout_ok), str(allow_fallout_ok), str(fallout_probe), claimed_rec_cells, cost_per_cell, pre_reclaim_fallout, ws_nuke.fallout_cell_count])
 
 	# Milestone 4 & 5: Alliances, Embargo, Peso & Troop Donations, Betrayal & Factory Trains
-	var friend := ws._create_nation("AllyRealm", Color.CYAN, false, Vector2i(us_spot.x - 18, us_spot.y), 50)
+	var friend := ws._create_nation("AllyRealm", Color.CYAN, false, Vector2i(us_spot.x - 36, us_spot.y), 200)
 	friend.gold = 500000.0
 	friend.troops = 50.0
 	p.troops = 260.0
@@ -1069,14 +1203,14 @@ func _run_openfront_feature_tests(us_spot: Vector2i, normandy: Vector2i, england
 	ws_tr.apply_command({"type": "spawn_player", "x": us_spot.x, "y": us_spot.y, "name": "RailBarons", "ai_count": 0, "seed": 123})
 	var rp: NationData = ws_tr.get_player_nation()
 	rp.gold = 5000000.0
-	ws_tr._claim_organic_dot(rp.id, Vector2i(us_spot.x + 9, us_spot.y), 520, 0)
+	ws_tr._claim_organic_dot(rp.id, Vector2i(us_spot.x + 18, us_spot.y), 2080, 0)
 	var b1 := ws_tr.apply_command({"type": "build_structure", "nation_id": rp.id, "structure_type": StructureData.TYPE_TOWN, "x": us_spot.x, "y": us_spot.y})
-	var fac_pt := Vector2i(us_spot.x + 12, us_spot.y)
-	for dy in range(-18, 19):
+	var fac_pt := Vector2i(us_spot.x + 24, us_spot.y)
+	for dy in range(-36, 37):
 		var picked := false
-		for dx in range(-18, 19):
+		for dx in range(-36, 37):
 			var c_pt := Vector2i(us_spot.x + dx, us_spot.y + dy)
-			if c_pt.distance_to(us_spot) >= 11.0 and c_pt.distance_to(us_spot) <= 22.0 and ws_tr.can_place_structure(rp.id, StructureData.TYPE_FACTORY, c_pt.x, c_pt.y).get("ok", false):
+			if c_pt.distance_to(us_spot) >= 22.0 and c_pt.distance_to(us_spot) <= 44.0 and ws_tr.can_place_structure(rp.id, StructureData.TYPE_FACTORY, c_pt.x, c_pt.y).get("ok", false):
 				fac_pt = c_pt
 				picked = true
 				break
@@ -1120,6 +1254,214 @@ func _run_openfront_feature_tests(us_spot: Vector2i, normandy: Vector2i, england
 		"Irregular winding Factory roads (dev=%.1fpx) persist in _road_cache across conquests & carry Trains" % max_road_dev,
 		"b1=%s b2=%s saw=%s deliv=%s road=%s reuse=%s tr_r=%s links=%d" % [str(b1), str(b2), str(saw_train), str(tr_ev["delivered"]), str(road_irregular_ok), str(road_reused_ok), str(train_has_road), ws_tr.factory_links.size()])
 
+	# Factory-to-Factory link + Cross-border Factory link + bilateral trains + Embargo severing
+	var ws_fac := WorldState.new()
+	ws_fac.load_world()
+	ws_fac.apply_command({"type": "spawn_player", "x": us_spot.x, "y": us_spot.y, "name": "RailCorp", "ai_count": 0, "seed": 456})
+	var fp1: NationData = ws_fac.get_player_nation()
+	fp1.gold = 5000000.0
+	ws_fac._claim_organic_dot(fp1.id, Vector2i(us_spot.x + 20, us_spot.y), 1040, 0)
+	var f1_res: Dictionary = ws_fac.apply_command({"type": "build_structure", "nation_id": fp1.id, "structure_type": StructureData.TYPE_FACTORY, "x": us_spot.x, "y": us_spot.y})
+	var f2_pt := Vector2i(-1, -1)
+	for dy_f in range(-36, 37):
+		for dx_f in range(-36, 37):
+			var c_f := Vector2i(us_spot.x + dx_f, us_spot.y + dy_f)
+			var dist_f: float = c_f.distance_to(us_spot)
+			if dist_f >= 16.0 and dist_f <= 36.0 and ws_fac.can_place_structure(fp1.id, StructureData.TYPE_FACTORY, c_f.x, c_f.y).get("ok", false):
+				f2_pt = c_f
+				break
+		if f2_pt.x >= 0:
+			break
+	var f2_res: Dictionary = ws_fac.apply_command({"type": "build_structure", "nation_id": fp1.id, "structure_type": StructureData.TYPE_FACTORY, "x": f2_pt.x, "y": f2_pt.y})
+	for _t in range(32):
+		ws_fac.step_tick(ws_fac.current_tick + 1)
+	var f1_st: StructureData = ws_fac.get_structure(int(f1_res.get("structure_id", 0)))
+	var f2_st: StructureData = ws_fac.get_structure(int(f2_res.get("structure_id", 0)))
+	var f2f_links := 0
+	if f1_st != null and f2_st != null:
+		for lnk: Dictionary in ws_fac.factory_links:
+			var a_id: int = int(lnk.get("factory_id", 0))
+			var b_id: int = int(lnk.get("target_id", 0))
+			if mini(a_id, b_id) == mini(f1_st.id, f2_st.id) and maxi(a_id, b_id) == maxi(f1_st.id, f2_st.id):
+				f2f_links += 1
+	_check(
+		f1_st != null and f2_st != null and f2f_links == 1
+		and f1_st.connected_count >= 1 and f2_st.connected_count >= 1
+		and f1_st.connection_bonus > 1.0 and f2_st.connection_bonus > 1.0,
+		"Factory-to-Factory links connect cleanly without duplicate edges & boost both factories",
+		"f1=%s f2=%s links=%d c1=%d c2=%d" % [str(f1_res), str(f2_res), f2f_links, f1_st.connected_count if f1_st else -1, f2_st.connected_count if f2_st else -1]
+	)
+
+	var nb_cell := Vector2i(-1, -1)
+	for dy_n in range(-44, 45):
+		for dx_n in range(-44, 45):
+			var cn := Vector2i(us_spot.x + dx_n, us_spot.y + dy_n)
+			var dn1: float = Vector2(cn - us_spot).length()
+			var dn2: float = Vector2(cn - f2_pt).length() if f2_pt.x >= 0 else 999.0
+			if dn1 >= 20.0 and dn1 <= 40.0 and dn2 >= 16.0 and ws_fac.get_terrain_at(cn.x, cn.y) != WorldState.T_OCEAN:
+				if f1_st != null and f1_st.is_cell_in_factory_range(cn):
+					nb_cell = cn
+					break
+		if nb_cell.x >= 0:
+			break
+	var border_n := ws_fac._create_nation("BorderState", Color.ORANGE, false, nb_cell, 140)
+	border_n.gold = 5000000.0
+	var nb_town_res: Dictionary = ws_fac.apply_command({"type": "build_structure", "nation_id": border_n.id, "structure_type": StructureData.TYPE_TOWN, "x": nb_cell.x, "y": nb_cell.y})
+	for _t in range(32):
+		ws_fac.step_tick(ws_fac.current_tick + 1)
+	var nb_town_id: int = int(nb_town_res.get("structure_id", 0))
+	var has_cb_link := false
+	for lnk: Dictionary in ws_fac.factory_links:
+		var lf: StructureData = ws_fac.get_structure(int(lnk.get("factory_id", 0)))
+		var lt: StructureData = ws_fac.get_structure(int(lnk.get("target_id", 0)))
+		if lf != null and lt != null and lf.nation_id != lt.nation_id:
+			has_cb_link = true
+	var cb_pay := {"p1": false, "p2": false}
+	ws_fac.structure_income_popup.connect(func(nid: int, _pos: Vector2, g: float, k: String) -> void:
+		if k == "train" and g >= 1.0:
+			if nid == fp1.id:
+				cb_pay["p1"] = true
+			elif nid == border_n.id:
+				cb_pay["p2"] = true
+	)
+	for _t in range(280):
+		ws_fac.step_tick(ws_fac.current_tick + 1)
+		if bool(cb_pay["p1"]) and bool(cb_pay["p2"]):
+			break
+	ws_fac.apply_command({"type": "toggle_embargo", "nation_id": fp1.id, "target_nation_id": border_n.id})
+	for _t in range(4):
+		ws_fac.step_tick(ws_fac.current_tick + 1)
+	var post_embargo_cb_links := 0
+	for lnk: Dictionary in ws_fac.factory_links:
+		var lf: StructureData = ws_fac.get_structure(int(lnk.get("factory_id", 0)))
+		var lt: StructureData = ws_fac.get_structure(int(lnk.get("target_id", 0)))
+		if lf != null and lt != null and lf.nation_id != lt.nation_id:
+			post_embargo_cb_links += 1
+	var post_embargo_cb_trains := 0
+	for tr: Dictionary in ws_fac.trains:
+		var lt: StructureData = ws_fac.get_structure(int(tr.get("target_id", 0)))
+		if lt != null and lt.nation_id == border_n.id:
+			post_embargo_cb_trains += 1
+	_check(
+		nb_town_id > 0 and has_cb_link and bool(cb_pay["p1"]) and bool(cb_pay["p2"])
+		and post_embargo_cb_links == 0 and post_embargo_cb_trains == 0,
+		"Cross-border Factory connects to neighbor Town, shares train Pesos bilaterally & severs on Embargo",
+		"town=%s cb_link=%s pay=%s post_links=%d post_trains=%d" % [str(nb_town_res), str(has_cb_link), str(cb_pay), post_embargo_cb_links, post_embargo_cb_trains]
+	)
+
+	# Extended multi-hop Factory trains: Factory A -> Factory B -> Town C (beyond A's direct range)
+	var ws_ext := WorldState.new()
+	ws_ext.load_world()
+	ws_ext.apply_command({"type": "spawn_player", "x": us_spot.x, "y": us_spot.y, "name": "ExtRail", "ai_count": 0, "seed": 901})
+	var ep: NationData = ws_ext.get_player_nation()
+	ep.gold = 10000000.0
+	for ox in range(16, 176, 20):
+		ws_ext._claim_organic_dot(ep.id, Vector2i(clampi(us_spot.x + ox, 0, ws_ext.sim_width - 1), us_spot.y), 1040, 0)
+	var ex_a_res: Dictionary = ws_ext.apply_command({"type": "build_structure", "nation_id": ep.id, "structure_type": StructureData.TYPE_FACTORY, "x": us_spot.x, "y": us_spot.y})
+	var ex_a_st: StructureData = ws_ext.get_structure(int(ex_a_res.get("structure_id", 0)))
+	var ex_b_pt := Vector2i(-1, -1)
+	for dx_b in range(48, 76):
+		var cp := Vector2i(us_spot.x + dx_b, us_spot.y)
+		if ws_ext.can_place_structure(ep.id, StructureData.TYPE_FACTORY, cp.x, cp.y).get("ok", false) and ex_a_st.is_cell_in_factory_range(cp):
+			ex_b_pt = cp
+			break
+	var ex_b_res: Dictionary = ws_ext.apply_command({"type": "build_structure", "nation_id": ep.id, "structure_type": StructureData.TYPE_FACTORY, "x": ex_b_pt.x, "y": ex_b_pt.y})
+	var ex_b_st: StructureData = ws_ext.get_structure(int(ex_b_res.get("structure_id", 0)))
+	var ex_c_pt := Vector2i(-1, -1)
+	for dy_c in range(-20, 21):
+		for dx_c in range(40, 88):
+			var cp := Vector2i(ex_b_pt.x + dx_c, ex_b_pt.y + dy_c)
+			if ex_b_st != null and ex_b_st.is_cell_in_factory_range(cp) and not ex_a_st.is_cell_in_factory_range(cp):
+				if ws_ext.can_place_structure(ep.id, StructureData.TYPE_TOWN, cp.x, cp.y).get("ok", false):
+					ex_c_pt = cp
+					break
+		if ex_c_pt.x >= 0:
+			break
+	var ex_c_res: Dictionary = ws_ext.apply_command({"type": "build_structure", "nation_id": ep.id, "structure_type": StructureData.TYPE_TOWN, "x": ex_c_pt.x, "y": ex_c_pt.y})
+	var ex_c_id: int = int(ex_c_res.get("structure_id", 0))
+	for _t in range(34):
+		ws_ext.step_tick(ws_ext.current_tick + 1)
+	var mh_ev := {"saw": false, "returning": false, "delivered": false}
+	var ex_c_pos: Vector2 = ws_ext.sim_to_world(ex_c_pt)
+	ws_ext.structure_income_popup.connect(func(nid: int, pos: Vector2, _g: float, k: String) -> void:
+		if nid == ep.id and k == "train" and pos.distance_to(ex_c_pos) < 4.0:
+			mh_ev["delivered"] = true
+	)
+	for _t in range(400):
+		ws_ext.step_tick(ws_ext.current_tick + 1)
+		for tr: Dictionary in ws_ext.trains:
+			if int(tr.get("factory_id", 0)) == ex_a_st.id and int(tr.get("target_id", 0)) == ex_c_id and (tr.get("hop_ids", []) as Array).size() >= 3:
+				mh_ev["saw"] = true
+				if bool(tr.get("returning", false)):
+					mh_ev["returning"] = true
+		if bool(mh_ev["saw"]) and bool(mh_ev["returning"]) and bool(mh_ev["delivered"]):
+			break
+	_check(ex_c_id > 0 and bool(mh_ev["saw"]) and bool(mh_ev["returning"]) and bool(mh_ev["delivered"]),
+		"Factory trains traverse ALL connected roads including extended multi-hop routes (Factory A -> Factory B -> Town C)",
+		"b=%s c=%s ev=%s" % [str(ex_b_res), str(ex_c_res), str(mh_ev)])
+
+	# Buildings vs Giant Empty Land fairness check (built-up nation beats 10k-cell empty nation)
+	var ws_bal := WorldState.new()
+	ws_bal.load_world()
+	ws_bal.apply_command({"type": "spawn_player", "x": us_spot.x, "y": us_spot.y, "name": "Builder", "ai_count": 0, "seed": 505})
+	var bn_built: NationData = ws_bal.get_player_nation()
+	bn_built.gold = 20000000.0
+	var bal_south := _find_nearby_land(ws_bal, 0.0, -80.0, 12)
+	var bn_empty := ws_bal._create_nation("BigEmpty", Color.GRAY, false, bal_south, 40)
+	bn_built.owned_cell_count = 6000
+	bn_empty.owned_cell_count = 40000
+	var b_pts := [us_spot, Vector2i(us_spot.x + 16, us_spot.y), Vector2i(us_spot.x - 16, us_spot.y)]
+	for pt_b: Vector2i in b_pts:
+		ws_bal._claim_organic_dot(bn_built.id, pt_b, 80, 0)
+		var bt_res := ws_bal.apply_command({"type": "build_structure", "nation_id": bn_built.id, "structure_type": StructureData.TYPE_TOWN, "x": pt_b.x, "y": pt_b.y})
+		var btid: int = int(bt_res.get("structure_id", 0))
+		for _t in range(32):
+			ws_bal.step_tick(ws_bal.current_tick + 1)
+		ws_bal.apply_command({"type": "upgrade_structure", "nation_id": bn_built.id, "structure_id": btid})
+	var bf_pos := Vector2i(us_spot.x, us_spot.y + 16)
+	ws_bal._claim_organic_dot(bn_built.id, bf_pos, 80, 0)
+	ws_bal.apply_command({"type": "build_structure", "nation_id": bn_built.id, "structure_type": StructureData.TYPE_FACTORY, "x": bf_pos.x, "y": bf_pos.y})
+	for _t in range(32):
+		ws_bal.step_tick(ws_bal.current_tick + 1)
+	bn_built.owned_cell_count = 6000
+	bn_empty.owned_cell_count = 40000
+	ws_bal._recompute_factory_links()
+	ws_bal._recompute_all_economy_rates()
+	_check(
+		bn_built.max_troops > bn_empty.max_troops and bn_built.troops_per_sec > bn_empty.troops_per_sec and bn_built.gold_per_sec > bn_empty.gold_per_sec,
+		"Towns & Factories beat giant buildingless land (cap %.0f vs %.0f, rate %.1f vs %.1f, gold %.0f vs %.0f)" % [
+			bn_built.max_troops, bn_empty.max_troops, bn_built.troops_per_sec, bn_empty.troops_per_sec, bn_built.gold_per_sec, bn_empty.gold_per_sec
+		]
+	)
+
+	# Fastest sea-time ship routing (Panama isthmus: Pacific shore beats closer-Euclidean Caribbean shore requiring SA detour)
+	var ws_fast := WorldState.new()
+	ws_fast.load_world()
+	var carib_pt := _find_nearby_land(ws_fast, -79.9, 9.35, 10)
+	var pac_pt := _find_nearby_land(ws_fast, -81.0, 8.2, 10)
+	var pac_tgt := _find_nearby_land(ws_fast, -78.2, 7.6, 10)
+	if carib_pt.x >= 0 and pac_pt.x >= 0 and pac_tgt.x >= 0:
+		ws_fast.apply_command({"type": "spawn_player", "x": pac_pt.x, "y": pac_pt.y, "name": "Admiral", "ai_count": 0, "seed": 707})
+		var fn: NationData = ws_fast.get_player_nation()
+		ws_fast._claim_organic_dot(fn.id, carib_pt, 16, 0)
+		var tgt_r := ws_fast._create_nation("PacTarget", Color.YELLOW, false, pac_tgt, 48)
+		var fast_res: Dictionary = ws_fast.find_closest_owned_shore(fn.id, tgt_r.capital_cell)
+		var chosen_shore: Vector2i = fast_res.get("shore_cell", Vector2i(-1, -1))
+		var carib_nav := ws_fast.sea_pathfinder.find_nearest_nav_cell(carib_pt, 3)
+		var dest_nav_t := ws_fast.sea_pathfinder.find_nearest_nav_cell(fast_res.get("landing_cell", tgt_r.capital_cell), 3)
+		var carib_route := ws_fast.sea_pathfinder.find_path(carib_nav, dest_nav_t)
+		var chosen_len: float = WorldState._compute_route_length(fast_res.get("route", PackedVector2Array()))
+		var carib_len: float = WorldState._compute_route_length(carib_route)
+		var euclid_carib: float = Vector2(carib_pt - pac_tgt).length()
+		var euclid_pac: float = Vector2(pac_pt - pac_tgt).length()
+		_check(
+			bool(fast_res.get("ok", false)) and euclid_carib < euclid_pac and chosen_shore != carib_pt
+			and (carib_route.is_empty() or (carib_len > 200.0 and chosen_len < carib_len * 0.25)),
+			"Fastest sea-time ship routing launches from fast Pacific coast (route=%.0fpx) over nearer-Euclidean Atlantic/Caribbean detour (route=%.0fpx, d=%.1f vs %.1f)" % [
+				chosen_len, carib_len, euclid_carib, euclid_pac
+			]
+		)
+
 	# Homeland Counter-Attack & AI-vs-AI Warfare checks (also verifies initial spawn starts at 14 cells and grows)
 	var ws_cnt := WorldState.new()
 	ws_cnt.load_world()
@@ -1128,8 +1470,8 @@ func _run_openfront_feature_tests(us_spot: Vector2i, normandy: Vector2i, england
 	var spawn_seed_cells: int = def_p.owned_cell_count
 	for _t in range(24):
 		ws_cnt.step_tick(ws_cnt.current_tick + 1)
-	var spawn_grown_ok: bool = (spawn_seed_cells <= 16 and def_p.owned_cell_count >= 50)
-	var inv_n := ws_cnt._create_nation("InvaderAI", Color.RED, false, Vector2i(us_spot.x + 8, us_spot.y), 60)
+	var spawn_grown_ok: bool = (spawn_seed_cells <= 64 and def_p.owned_cell_count >= 200)
+	var inv_n := ws_cnt._create_nation("InvaderAI", Color.RED, false, Vector2i(us_spot.x + 16, us_spot.y), 240)
 	def_p.troops = 500.0
 	inv_n.troops = 140.0
 	var counter_ev := {"fired": false, "repelled": false}
@@ -1147,7 +1489,7 @@ func _run_openfront_feature_tests(us_spot: Vector2i, normandy: Vector2i, england
 		"grow=%s inv=%s cnt=%s ev=%s" % [str(spawn_grown_ok), str(inv_ord_res), str(counter_res), str(counter_ev)])
 
 	# OpenFront 1:1 Defense Post destroyed on enemy conquest + Conquest Gold Spoils
-	var tiny_ai := ws_cnt._create_nation("DoomedPost", Color.MAGENTA, false, Vector2i(us_spot.x - 12, us_spot.y), 1)
+	var tiny_ai := ws_cnt._create_nation("DoomedPost", Color.MAGENTA, false, Vector2i(us_spot.x - 24, us_spot.y), 1)
 	tiny_ai.gold = 500000.0
 	var dp_res: Dictionary = ws_cnt.apply_command({"type": "build_structure", "nation_id": tiny_ai.id, "structure_type": StructureData.TYPE_DEFENSE_POST, "x": tiny_ai.capital_cell.x, "y": tiny_ai.capital_cell.y})
 	var dp_id: int = int(dp_res.get("structure_id", 0))
@@ -1159,8 +1501,8 @@ func _run_openfront_feature_tests(us_spot: Vector2i, normandy: Vector2i, england
 
 	var ws_aivai := WorldState.new()
 	ws_aivai.load_world()
-	var ai_a := ws_aivai._create_nation("AI_North", Color.RED, false, us_spot, 90)
-	var ai_b := ws_aivai._create_nation("AI_South", Color.BLUE, false, Vector2i(us_spot.x + 8, us_spot.y), 90)
+	var ai_a := ws_aivai._create_nation("AI_North", Color.RED, false, us_spot, 360)
+	var ai_b := ws_aivai._create_nation("AI_South", Color.BLUE, false, Vector2i(us_spot.x + 16, us_spot.y), 360)
 	ws_aivai.match_phase = WorldState.PHASE_PLAYING
 	ws_aivai._recompute_all_economy_rates()
 	ai_a.troops = ai_a.max_troops * 0.85
@@ -1171,8 +1513,48 @@ func _run_openfront_feature_tests(us_spot: Vector2i, normandy: Vector2i, england
 		for eid: int in ws_aivai.expansions.keys():
 			if (ws_aivai.expansions[eid] as ExpansionOrder).is_contested:
 				ai_contested = true
-	_check(ai_contested or ai_a.owned_cell_count > 120 or ai_b.owned_cell_count < 90,
+	_check(ai_contested or ai_a.owned_cell_count > 480 or ai_b.owned_cell_count < 360,
 		"AI actively attacks and fights rival AI nations on shared borders (AI_A=%d, AI_B=%d)" % [ai_a.owned_cell_count, ai_b.owned_cell_count])
+
+	# Conquest audio filtering: player bubble-wrap pop ONLY on player conquest, silent on AI-vs-AI, warning ONLY when enemy takes player land
+	var ws_sfx := WorldState.new()
+	ws_sfx.load_world()
+	ws_sfx.apply_command({"type": "spawn_player", "x": us_spot.x, "y": us_spot.y, "name": "Conqueror", "ai_count": 0, "seed": 515})
+	var sfx_p: NationData = ws_sfx.get_player_nation()
+	var sfx_ev := {"conq": 0, "atk": 0, "last_attacker": 0}
+	ws_sfx.player_land_conquered.connect(func(cells: int, _cont: bool) -> void:
+		sfx_ev["conq"] = int(sfx_ev["conq"]) + cells
+	)
+	ws_sfx.player_territory_attacked.connect(func(a_id: int, cells: int) -> void:
+		sfx_ev["atk"] = int(sfx_ev["atk"]) + cells
+		sfx_ev["last_attacker"] = a_id
+	)
+	for _t in range(18):
+		ws_sfx.step_tick(ws_sfx.current_tick + 1)
+	var player_conq_ok: bool = int(sfx_ev["conq"]) > 0 and int(sfx_ev["atk"]) == 0
+	ws_sfx.expansions.clear()
+	sfx_ev["conq"] = 0
+	sfx_ev["atk"] = 0
+	var far_spot := _find_nearby_land(ws_sfx, 20.0, 20.0, 12)
+	var ai1 := ws_sfx._create_nation("OtherAI_1", Color.GREEN, false, far_spot, 160)
+	var ai2 := ws_sfx._create_nation("OtherAI_2", Color.PURPLE, false, Vector2i(far_spot.x + 16, far_spot.y), 160)
+	ai1.troops = 500.0
+	ai2.troops = 120.0
+	ws_sfx.apply_command({"type": "expand_to", "nation_id": ai1.id, "x": ai2.capital_cell.x, "y": ai2.capital_cell.y, "commit_ratio": 0.5})
+	for _t in range(25):
+		ws_sfx.step_tick(ws_sfx.current_tick + 1)
+	var ai_silent_ok: bool = int(sfx_ev["conq"]) == 0 and int(sfx_ev["atk"]) == 0
+	ws_sfx.expansions.clear()
+	var near_inv := ws_sfx._create_nation("BorderFoe", Color.RED, false, Vector2i(us_spot.x + 16, us_spot.y), 180)
+	near_inv.troops = 450.0
+	sfx_p.troops = 40.0
+	ws_sfx.apply_command({"type": "expand_to", "nation_id": near_inv.id, "x": sfx_p.capital_cell.x, "y": sfx_p.capital_cell.y, "commit_ratio": 0.6})
+	for _t in range(20):
+		ws_sfx.step_tick(ws_sfx.current_tick + 1)
+	var under_atk_warn_ok: bool = int(sfx_ev["conq"]) == 0 and int(sfx_ev["atk"]) > 0 and int(sfx_ev["last_attacker"]) == near_inv.id
+	_check(player_conq_ok and ai_silent_ok and under_atk_warn_ok,
+		"Conquest audio emits only for player pops, is silent for AI-vs-AI, and warns when player land is taken",
+		"conq=%s ai_silent=%s atk=%s" % [str(player_conq_ok), str(ai_silent_ok), str(under_atk_warn_ok)])
 
 	_run_multiplayer_lockstep_tests(us_spot, normandy)
 
@@ -1220,3 +1602,89 @@ func _run_multiplayer_lockstep_tests(us_spot: Vector2i, eu_spot: Vector2i) -> vo
 	var hash_b: int = ws_b.compute_state_hash()
 	_check(bool(ra.get("ok", false)) and bool(rb.get("ok", false)) and hash_a == hash_b and ws_a.get_nation(1).owned_cell_count == ws_b.get_nation(1).owned_cell_count,
 		"Multiplayer lockstep parity verified across 240 ticks (seed=1337, hash=%d)" % hash_a)
+
+	_run_phase2_account_and_pfp_tests()
+
+
+func _run_phase2_account_and_pfp_tests() -> void:
+	# 1. Pure-GDScript GIF89a 2-frame animated PFP decode verification
+	# Minimal 2x2 RGB 2-frame GIF (red frame -> green frame)
+	var gif_bytes := PackedByteArray([
+		0x47, 0x49, 0x46, 0x38, 0x39, 0x61, # GIF89a
+		0x02, 0x00, 0x02, 0x00, 0x80, 0x00, 0x00, # 2x2, GCT size=2
+		0xFF, 0x00, 0x00, 0x00, 0xFF, 0x00, # GCT: 0=red, 1=green
+		0x21, 0xF9, 0x04, 0x00, 0x0A, 0x00, 0x00, 0x00, # GCE 100ms
+		0x2C, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x02, 0x00, 0x00, # Image 0
+		0x02, 0x02, 0x44, 0x01, 0x00, # LZW min_code_size=2, 4 zero indices
+		0x21, 0xF9, 0x04, 0x00, 0x0A, 0x00, 0x00, 0x00, # GCE 100ms
+		0x2C, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x02, 0x00, 0x00, # Image 1
+		0x02, 0x02, 0x4C, 0x01, 0x00, # LZW min_code_size=2, 4 one indices
+		0x3B, # Trailer
+	])
+	var dec: Dictionary = GifDecoder.decode_gif_bytes(gif_bytes, 64, 16)
+	var frames_arr: Array = dec.get("frames", [])
+	var strip_img: Image = dec.get("strip_image")
+	var gif_ok := (
+		bool(dec.get("ok", false))
+		and frames_arr.size() == 2
+		and strip_img != null
+		and strip_img.get_width() == 128
+		and strip_img.get_height() == 64
+		and strip_img.get_pixel(16, 16).r > 0.8
+		and strip_img.get_pixel(80, 16).g > 0.8
+	)
+	_check(gif_ok, "GifDecoder decodes animated GIF89a into distinct 64x64 frames & 128x64 strip", "dec=%s" % str(dec.get("error", "")))
+
+	# 2. Friends list presence sorting: Online first -> Most Recent Offline -> Longest Offline
+	var sorted_fr: Array = AccountClient.sort_friends_list([
+		{"username": "OldOffline", "online": false, "last_seen_unix": 1000},
+		{"username": "ZaraOnline", "online": true, "last_seen_unix": 2000},
+		{"username": "RecentOffline", "online": false, "last_seen_unix": 9000},
+		{"username": "AlphaOnline", "online": true, "last_seen_unix": 1500},
+	])
+	var order_ok := (
+		sorted_fr.size() == 4
+		and str((sorted_fr[0] as Dictionary)["username"]) == "AlphaOnline"
+		and str((sorted_fr[1] as Dictionary)["username"]) == "ZaraOnline"
+		and str((sorted_fr[2] as Dictionary)["username"]) == "RecentOffline"
+		and str((sorted_fr[3] as Dictionary)["username"]) == "OldOffline"
+	)
+	_check(order_ok, "Friends sorting places Online friends first, then most-recent to longest-offline")
+
+	# 3. AccountClient URL normalization & CapitalMarkersLayer custom PFP binding
+	var ac := AccountClient.new()
+	ac.set_ws_url("ws://151.242.136.36:30041/ws")
+	var cml := CapitalMarkersLayer.new()
+	cml.set_nation_avatar(1, frames_arr, 100)
+	var bound_avatars: Dictionary = cml.get("_nation_avatars")
+	_check(ac.api_base_url == "http://151.242.136.36:30041" and bound_avatars.has(1),
+		"AccountClient derives HTTP API URL cleanly & CapitalMarkersLayer binds custom PFP frames")
+	cml.free()
+	ac.free()
+
+	# 4. PatchLoader patch-pack discovery order + PATCH_NOTES.md presence
+	var tmp_patch_dir := ProjectSettings.globalize_path("user://test_patches_tmp")
+	DirAccess.make_dir_recursive_absolute(tmp_patch_dir)
+	var p1 := FileAccess.open(tmp_patch_dir.path_join("patch_02.pck"), FileAccess.WRITE)
+	if p1 != null:
+		p1.store_8(0)
+		p1.close()
+	var p0 := FileAccess.open(tmp_patch_dir.path_join("patch_01.pck"), FileAccess.WRITE)
+	if p0 != null:
+		p0.store_8(0)
+		p0.close()
+	var pt_txt := FileAccess.open(tmp_patch_dir.path_join("ignore.txt"), FileAccess.WRITE)
+	if pt_txt != null:
+		pt_txt.store_8(0)
+		pt_txt.close()
+	var listed: PackedStringArray = PatchLoader.list_patch_files(tmp_patch_dir)
+	var pl_ok: bool = (
+		listed.size() == 2
+		and listed[0].ends_with("patch_01.pck")
+		and listed[1].ends_with("patch_02.pck")
+	)
+	for leftover: String in ["patch_01.pck", "patch_02.pck", "ignore.txt"]:
+		DirAccess.remove_absolute(tmp_patch_dir.path_join(leftover))
+	DirAccess.remove_absolute(tmp_patch_dir)
+	var notes_ok: bool = FileAccess.file_exists("res://PATCH_NOTES.md") and FileAccess.get_file_as_string("res://PATCH_NOTES.md").contains("Patch Notes")
+	_check(pl_ok and notes_ok, "PatchLoader sorts runtime .pck patches & PATCH_NOTES.md is packaged cleanly")

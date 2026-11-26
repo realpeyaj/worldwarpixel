@@ -8,8 +8,8 @@ import (
 )
 
 const (
-	SimWidth  = 1024
-	SimHeight = 512
+	SimWidth  = 2048
+	SimHeight = 1024
 )
 
 var allowedStructures = map[string]bool{

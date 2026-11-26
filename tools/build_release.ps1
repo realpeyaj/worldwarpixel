@@ -46,7 +46,11 @@ try {
     $ReleaseDir = Join-Path $BuildsDir 'release'
     $LauncherOut = Join-Path $BuildsDir 'WorldWarPixel.exe'
     $ClientOut = Join-Path $GameDir 'WorldWarPixel-Client.exe'
+    $PckOut = Join-Path $GameDir 'WorldWarPixel-Client.pck'
     $VersionOut = Join-Path $GameDir 'version.txt'
+    $PatchNotesSrc = Join-Path $RepoRoot 'PATCH_NOTES.md'
+    $PatchNotesGame = Join-Path $GameDir 'PATCH_NOTES.md'
+    $PatchNotesRoot = Join-Path $BuildsDir 'PATCH_NOTES.md'
 
     New-Item -ItemType Directory -Force -Path $GameDir, $ReleaseDir | Out-Null
 
@@ -57,7 +61,7 @@ try {
     Remove-Item -Force (Join-Path $GameDir 'WorldWarPixel-Client.tmp') -ErrorAction SilentlyContinue
 
     Write-Host "Building World War Pixel $TagVersion..."
-    Write-Host "1. Exporting Godot Windows Desktop client -> $ClientOut"
+    Write-Host "1. Exporting Godot Windows Desktop client -> $ClientOut (+ .pck)"
     & $GodotExe --headless --path $RepoRoot --export-release "Windows Desktop" $ClientOut
     if ($LASTEXITCODE -ne 0) {
         throw "Godot export failed with exit code $LASTEXITCODE"
@@ -65,10 +69,17 @@ try {
     if (-not (Test-Path $ClientOut)) {
         throw "Expected exported binary missing: $ClientOut"
     }
+    if (-not (Test-Path $PckOut)) {
+        throw "Expected decoupled game pack missing: $PckOut"
+    }
 
     Set-Content -Path $VersionOut -Value $TagVersion -Encoding Ascii
+    if (Test-Path $PatchNotesSrc) {
+        Copy-Item -Force $PatchNotesSrc $PatchNotesGame
+        Copy-Item -Force $PatchNotesSrc $PatchNotesRoot
+    }
 
-    Write-Host "2. Building Go auto-update launcher -> $LauncherOut"
+    Write-Host "2. Building Go launcher hub -> $LauncherOut"
     $WindresExe = $null
     $WindresCmd = Get-Command windres -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($WindresCmd) {
@@ -97,44 +108,60 @@ try {
         Pop-Location
     }
 
-    Write-Host "3. Packaging release archives in $ReleaseDir"
+    Write-Host "3. Packaging release & patch archives in $ReleaseDir"
     $ClientZip = Join-Path $ReleaseDir 'WorldWarPixel-Client.zip'
+    $PatchZip = Join-Path $ReleaseDir 'WorldWarPixel-Patch.zip'
     $BundleZip = Join-Path $ReleaseDir "WorldWarPixel-Windows-$TagVersion.zip"
     $ChecksumsFile = Join-Path $ReleaseDir 'SHA256SUMS.txt'
 
-    Remove-Item -Force $ClientZip, $BundleZip, $ChecksumsFile -ErrorAction SilentlyContinue
+    Remove-Item -Force $ClientZip, $PatchZip, $BundleZip, $ChecksumsFile -ErrorAction SilentlyContinue
 
-    # Build clean archives using Python zipfile so paths are exact
     python -c "import zipfile, pathlib, sys
-repo = pathlib.Path(sys.argv[1])
-client_exe = pathlib.Path(sys.argv[2])
+client_exe = pathlib.Path(sys.argv[1])
+pck_file = pathlib.Path(sys.argv[2])
 version_txt = pathlib.Path(sys.argv[3])
-launcher_exe = pathlib.Path(sys.argv[4])
-client_zip = pathlib.Path(sys.argv[5])
-bundle_zip = pathlib.Path(sys.argv[6])
+notes_md = pathlib.Path(sys.argv[4])
+launcher_exe = pathlib.Path(sys.argv[5])
+client_zip = pathlib.Path(sys.argv[6])
+patch_zip = pathlib.Path(sys.argv[7])
+bundle_zip = pathlib.Path(sys.argv[8])
 
 with zipfile.ZipFile(client_zip, 'w', compression=zipfile.ZIP_DEFLATED) as z:
     z.write(client_exe, 'WorldWarPixel-Client.exe')
+    z.write(pck_file, 'WorldWarPixel-Client.pck')
+    if notes_md.exists():
+        z.write(notes_md, 'PATCH_NOTES.md')
+
+with zipfile.ZipFile(patch_zip, 'w', compression=zipfile.ZIP_DEFLATED) as z:
+    z.write(pck_file, 'WorldWarPixel-Client.pck')
+    if notes_md.exists():
+        z.write(notes_md, 'PATCH_NOTES.md')
 
 with zipfile.ZipFile(bundle_zip, 'w', compression=zipfile.ZIP_DEFLATED) as z:
     z.write(launcher_exe, 'WorldWarPixel.exe')
+    if notes_md.exists():
+        z.write(notes_md, 'PATCH_NOTES.md')
+        z.write(notes_md, 'game/PATCH_NOTES.md')
     z.write(client_exe, 'game/WorldWarPixel-Client.exe')
+    z.write(pck_file, 'game/WorldWarPixel-Client.pck')
     z.write(version_txt, 'game/version.txt')
-" $RepoRoot $ClientOut $VersionOut $LauncherOut $ClientZip $BundleZip
+" $ClientOut $PckOut $VersionOut $PatchNotesGame $LauncherOut $ClientZip $PatchZip $BundleZip
     if ($LASTEXITCODE -ne 0) {
         throw "Release archive packaging failed with exit code $LASTEXITCODE"
     }
 
     $ClientHash = (Get-FileHash -Algorithm SHA256 $ClientZip).Hash.ToLowerInvariant()
+    $PatchHash = (Get-FileHash -Algorithm SHA256 $PatchZip).Hash.ToLowerInvariant()
     $BundleHash = (Get-FileHash -Algorithm SHA256 $BundleZip).Hash.ToLowerInvariant()
     $ChecksumLines = @(
         "$ClientHash  WorldWarPixel-Client.zip"
+        "$PatchHash  WorldWarPixel-Patch.zip"
         "$BundleHash  WorldWarPixel-Windows-$TagVersion.zip"
     )
     Set-Content -Path $ChecksumsFile -Value $ChecksumLines -Encoding Ascii
 
     Write-Host "Build complete:"
-    Get-Item $LauncherOut, $ClientOut, $VersionOut, $ClientZip, $BundleZip, $ChecksumsFile |
+    Get-Item $LauncherOut, $ClientOut, $PckOut, $VersionOut, $ClientZip, $PatchZip, $BundleZip, $ChecksumsFile |
         Select-Object FullName, Length | Format-Table -AutoSize
 } finally {
     Pop-Location

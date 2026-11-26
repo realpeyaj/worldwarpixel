@@ -67,16 +67,16 @@ static func get_cost(missile_kind: String) -> float:
 static func get_blast_radius(missile_kind: String) -> int:
 	match missile_kind:
 		KIND_ATOM:
-			return 20
+			return 40
 		KIND_HYDROGEN:
-			return 36
+			return 72
 		KIND_MIRV:
-			return 18
+			return 36
 		KIND_MIRV_WARHEAD:
-			return 9
+			return 18
 		KIND_SAM:
 			return 0
-	return 20
+	return 40
 
 
 static func get_speed(missile_kind: String) -> float:

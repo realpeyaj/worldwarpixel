@@ -30,3 +30,14 @@ func (c *consoleProgressUI) SetStatus(status string) {
 }
 
 func (c *consoleProgressUI) Close() {}
+
+func runLauncherHub(cfg launcherConfig) int {
+	return checkAndLaunchConsole(cfg)
+}
+
+func checkAndLaunchConsole(cfg launcherConfig) int {
+	ui := newProgressUI()
+	defer ui.Close()
+	_ = ui
+	return launchGameClient(cfg)
+}

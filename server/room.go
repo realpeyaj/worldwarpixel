@@ -31,6 +31,8 @@ const roomAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 type PlayerSlot struct {
 	NationID       int          `json:"nation_id"`
 	Name           string       `json:"name"`
+	AccountUser    string       `json:"account_username,omitempty"`
+	AvatarHash     string       `json:"avatar_hash,omitempty"`
 	ReconnectToken string       `json:"-"`
 	SpawnX         int          `json:"x"`
 	SpawnY         int          `json:"y"`
@@ -285,13 +287,15 @@ func (r *Room) snapshotPlayersLocked() []map[string]any {
 	out := make([]map[string]any, 0, len(r.Players))
 	for _, p := range r.Players {
 		out = append(out, map[string]any{
-			"nation_id": p.NationID,
-			"name":      p.Name,
-			"x":         p.SpawnX,
-			"y":         p.SpawnY,
-			"has_spawn": p.HasSpawn,
-			"connected": p.Connected,
-			"is_host":   p.IsHost,
+			"nation_id":        p.NationID,
+			"name":             p.Name,
+			"account_username": p.AccountUser,
+			"avatar_hash":      p.AvatarHash,
+			"x":                p.SpawnX,
+			"y":                p.SpawnY,
+			"has_spawn":        p.HasSpawn,
+			"connected":        p.Connected,
+			"is_host":          p.IsHost,
 		})
 	}
 	return out

@@ -73,7 +73,7 @@ func _get_sam_highlight_colors(sam_nation_id: int) -> Array[Color]:
 
 func _draw_sam_range_circle(st: StructureData, inv_z: float) -> void:
 	var st_pos: Vector2 = st.get_world_pos()
-	var sr: float = st.get_sam_radius() * 2.0
+	var sr: float = st.get_sam_radius()
 	var cols: Array[Color] = _get_sam_highlight_colors(st.nation_id)
 	draw_circle(st_pos, sr, cols[0])
 	var sam_dashes := 20
@@ -114,60 +114,68 @@ func _draw() -> void:
 		if _hover_sim_cell.x >= 0 or _staged_missile_cell.x >= 0:
 			var aim_cell: Vector2i = _staged_missile_cell if _staged_missile_cell.x >= 0 else _hover_sim_cell
 			var pos: Vector2 = _world_state.sim_to_world(aim_cell)
-			var blast_r: float = float(MissileUnit.get_blast_radius(_missile_mode)) * 2.0
+			var blast_r: float = float(MissileUnit.get_blast_radius(_missile_mode))
 			var pulse: float = 0.78 + 0.22 * sin(_elapsed * 7.0)
-			var silo_ref: StructureData = _world_state.find_ready_silo(_world_state.player_nation_id, aim_cell)
-			var ready_ok: bool = (silo_ref != null and silo_ref.action_cooldown_ticks == 0)
-			if silo_ref != null:
-				var silo_pos: Vector2 = silo_ref.get_world_pos()
-				var preview_m := MissileUnit.new()
-				preview_m.id = silo_ref.id
-				preview_m.kind = _missile_mode
-				preview_m.start_pos = silo_pos
-				preview_m.target_pos = pos
-				preview_m.target_cell = aim_cell
-				preview_m.compute_ballistic_curve(false)
+			var p_id: int = _world_state.player_nation_id
+			if _world_state.get_owner_at(aim_cell.x, aim_cell.y) == p_id:
+				var ban_col := Color(0.95, 0.28, 0.28, 0.88 * pulse)
+				draw_circle(pos, blast_r * 0.45, Color(0.45, 0.14, 0.14, 0.22))
+				draw_arc(pos, blast_r * 0.45, 0.0, TAU, 24, ban_col, 1.5 * inv_z)
+				var bx: float = 8.0 * inv_z
+				draw_line(pos - Vector2(bx, bx), pos + Vector2(bx, bx), ban_col, 2.2 * inv_z, true)
+				draw_line(pos - Vector2(bx, -bx), pos + Vector2(bx, -bx), ban_col, 2.2 * inv_z, true)
+			else:
+				var silo_ref: StructureData = _world_state.find_ready_silo(p_id, aim_cell)
+				var ready_ok: bool = (silo_ref != null and silo_ref.action_cooldown_ticks == 0)
+				if silo_ref != null:
+					var silo_pos: Vector2 = silo_ref.get_world_pos()
+					var preview_m := MissileUnit.new()
+					preview_m.id = silo_ref.id
+					preview_m.kind = _missile_mode
+					preview_m.start_pos = silo_pos
+					preview_m.target_pos = pos
+					preview_m.target_cell = aim_cell
+					preview_m.compute_ballistic_curve(false)
 
-				var curve_steps := 28
-				var curve_pts := PackedVector2Array()
-				curve_pts.resize(curve_steps + 1)
-				for ci in range(curve_steps + 1):
-					curve_pts[ci] = preview_m.get_curve_point(float(ci) / float(curve_steps))
-
-				# Check if curved pre-selection path crosses any enemy SAM range
-				var p_id: int = _world_state.player_nation_id
-				var sam_warnings: Array[Vector2] = []
-				for sid_s: int in _world_state.structures.keys():
-					var sam_chk: StructureData = _world_state.structures[sid_s]
-					if sam_chk.type != StructureData.TYPE_SAM_LAUNCHER or sam_chk.is_constructing or sam_chk.level <= 0:
-						continue
-					if sam_chk.nation_id == p_id or _world_state.are_allied(p_id, sam_chk.nation_id):
-						continue
-					var sam_w: Vector2 = sam_chk.get_world_pos()
-					var sam_rw: float = sam_chk.get_sam_radius() * 2.0
+					var curve_steps := 28
+					var curve_pts := PackedVector2Array()
+					curve_pts.resize(curve_steps + 1)
 					for ci in range(curve_steps + 1):
-						if curve_pts[ci].distance_to(sam_w) <= sam_rw:
-							sam_warnings.append(curve_pts[ci])
-							break
+						curve_pts[ci] = preview_m.get_curve_point(float(ci) / float(curve_steps))
 
-				var line_col := Color(1.0, 0.28, 0.24, 0.84) if not sam_warnings.is_empty() else Color(1.0, 0.52, 0.26, 0.68 if ready_ok else 0.30)
-				for ci in range(curve_steps):
-					if ci % 2 == 0:
-						draw_line(curve_pts[ci], curve_pts[ci + 1], line_col, 1.5 * inv_z, true)
+					# Check if curved pre-selection path crosses any enemy SAM range
+					var sam_warnings: Array[Vector2] = []
+					for sid_s: int in _world_state.structures.keys():
+						var sam_chk: StructureData = _world_state.structures[sid_s]
+						if sam_chk.type != StructureData.TYPE_SAM_LAUNCHER or sam_chk.is_constructing or sam_chk.level <= 0:
+							continue
+						if sam_chk.nation_id == p_id or _world_state.are_allied(p_id, sam_chk.nation_id):
+							continue
+						var sam_w: Vector2 = sam_chk.get_world_pos()
+						var sam_rw: float = sam_chk.get_sam_radius()
+						for ci in range(curve_steps + 1):
+							if curve_pts[ci].distance_to(sam_w) <= sam_rw:
+								sam_warnings.append(curve_pts[ci])
+								break
 
-				# Draw X warning mark at each enemy SAM range crossing along the curved path
-				var x_sz: float = (5.2 + 1.0 * sin(_elapsed * 9.0)) * inv_z
-				for w_pt: Vector2 in sam_warnings:
-					draw_circle(w_pt, x_sz * 1.45, Color(0.08, 0.03, 0.04, 0.82))
-					draw_arc(w_pt, x_sz * 1.45, 0.0, TAU, 20, Color(1.0, 0.24, 0.22, 0.95), 1.4 * inv_z)
-					draw_line(w_pt - Vector2(x_sz, x_sz), w_pt + Vector2(x_sz, x_sz), Color(1.0, 0.88, 0.24, 0.98), 2.1 * inv_z, true)
-					draw_line(w_pt - Vector2(x_sz, -x_sz), w_pt + Vector2(x_sz, -x_sz), Color(1.0, 0.88, 0.24, 0.98), 2.1 * inv_z, true)
-			var red_col := Color(1.0, 0.30, 0.24, 0.92 * pulse) if ready_ok else Color(0.70, 0.32, 0.32, 0.75)
-			draw_circle(pos, blast_r, Color(1.0, 0.24, 0.18, 0.14 if _staged_missile_cell.x < 0 else 0.26))
-			draw_arc(pos, blast_r, 0.0, TAU, 36, red_col, (2.4 if _staged_missile_cell.x >= 0 else 1.8) * inv_z)
-			if _staged_missile_cell.x >= 0:
-				draw_arc(pos, blast_r * 0.55, 0.0, TAU, 24, Color(1.0, 0.88, 0.28, 0.92 * pulse), 1.6 * inv_z)
-			_draw_crosshair(pos, 11.0 * inv_z, red_col, inv_z)
+					var line_col := Color(1.0, 0.28, 0.24, 0.84) if not sam_warnings.is_empty() else Color(1.0, 0.52, 0.26, 0.68 if ready_ok else 0.30)
+					for ci in range(curve_steps):
+						if ci % 2 == 0:
+							draw_line(curve_pts[ci], curve_pts[ci + 1], line_col, 1.5 * inv_z, true)
+
+					# Draw X warning mark at each enemy SAM range crossing along the curved path
+					var x_sz: float = (5.2 + 1.0 * sin(_elapsed * 9.0)) * inv_z
+					for w_pt: Vector2 in sam_warnings:
+						draw_circle(w_pt, x_sz * 1.45, Color(0.08, 0.03, 0.04, 0.82))
+						draw_arc(w_pt, x_sz * 1.45, 0.0, TAU, 20, Color(1.0, 0.24, 0.22, 0.95), 1.4 * inv_z)
+						draw_line(w_pt - Vector2(x_sz, x_sz), w_pt + Vector2(x_sz, x_sz), Color(1.0, 0.88, 0.24, 0.98), 2.1 * inv_z, true)
+						draw_line(w_pt - Vector2(x_sz, -x_sz), w_pt + Vector2(x_sz, -x_sz), Color(1.0, 0.88, 0.24, 0.98), 2.1 * inv_z, true)
+				var red_col := Color(1.0, 0.30, 0.24, 0.92 * pulse) if ready_ok else Color(0.70, 0.32, 0.32, 0.75)
+				draw_circle(pos, blast_r, Color(1.0, 0.24, 0.18, 0.14 if _staged_missile_cell.x < 0 else 0.26))
+				draw_arc(pos, blast_r, 0.0, TAU, 36, red_col, (2.4 if _staged_missile_cell.x >= 0 else 1.8) * inv_z)
+				if _staged_missile_cell.x >= 0:
+					draw_arc(pos, blast_r * 0.55, 0.0, TAU, 24, Color(1.0, 0.88, 0.28, 0.92 * pulse), 1.6 * inv_z)
+				_draw_crosshair(pos, 11.0 * inv_z, red_col, inv_z)
 
 	# 3. Build placement validity ring + Defense/Factory range preview (SAM range hidden unless SAM is clicked or in missile mode)
 	elif _world_state.match_phase == WorldState.PHASE_PLAYING and _build_mode != "" and _hover_sim_cell.x >= 0:
@@ -187,7 +195,7 @@ func _draw() -> void:
 			preview_st.level = 1
 			_draw_irregular_factory_range(preview_st, inv_z, Color(1.0, 0.78, 0.30, 0.12), Color(1.0, 0.78, 0.30, 0.65))
 		elif _build_mode == StructureData.TYPE_DEFENSE_POST:
-			var dr: float = 27.5 * 2.0
+			var dr: float = StructureData.get_defense_radius_for_level(1)
 			draw_circle(pos, dr, Color(0.45, 0.74, 1.0, 0.10))
 			draw_arc(pos, dr, 0.0, TAU, 32, Color(0.45, 0.76, 1.0, 0.68), 1.5 * inv_z)
 
@@ -203,7 +211,7 @@ func _draw() -> void:
 			if st.type == StructureData.TYPE_FACTORY:
 				_draw_irregular_factory_range(st, inv_z, Color(1.0, 0.78, 0.30, 0.10), Color(1.0, 0.82, 0.38, 0.72))
 			elif st.type == StructureData.TYPE_DEFENSE_POST and st.level > 0:
-				var dr: float = st.get_defense_radius() * 2.0
+				var dr: float = st.get_defense_radius()
 				draw_circle(st_pos, dr, Color(0.45, 0.74, 1.0, 0.11))
 				draw_arc(st_pos, dr, 0.0, TAU, 36, Color(0.45, 0.78, 1.0, 0.78), 1.6 * inv_z)
 				draw_arc(st_pos, dr * 0.55, 0.0, TAU, 24, Color(0.45, 0.78, 1.0, 0.28), 1.0 * inv_z)

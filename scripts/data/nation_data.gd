@@ -20,10 +20,10 @@ var territory_percent: float = 0.0
 
 var gold: float = 250.0
 var gold_per_sec: float = 1.0
-var troops: float = 160.0
-var max_troops: float = 320.0
-var troops_per_sec: float = 4.0
-var effective_troops_per_sec: float = 4.0
+var troops: float = 1500.0
+var max_troops: float = 3200.0
+var troops_per_sec: float = 42.0
+var effective_troops_per_sec: float = 42.0
 
 var structure_ids: Array[int] = []
 

@@ -25,13 +25,25 @@ const (
 	defaultRepo      = "realpeyaj/worldwarpixel"
 	defaultAPIBase   = "https://api.github.com"
 	gameDirName      = "game"
+	patchesDirName   = "patches"
 	clientExeName    = "WorldWarPixel-Client.exe"
+	clientPckName    = "WorldWarPixel-Client.pck"
 	versionFileName  = "version.txt"
-	userAgent        = "WorldWarPixel-Launcher/1.0"
+	patchNotesName   = "PATCH_NOTES.md"
+	userAgent        = "WorldWarPixel-Launcher/2.0"
 	checkTimeout     = 4 * time.Second
 	downloadTimeout  = 10 * time.Minute
 	maxPayloadBytes  = int64(512 << 20)
 	maxChecksumsSize = int64(1 << 20)
+)
+
+type updateKind int
+
+const (
+	updateNone updateKind = iota
+	updateFullClient
+	updatePackReplace
+	updateDeltaPatch
 )
 
 type ghAsset struct {
@@ -41,8 +53,21 @@ type ghAsset struct {
 }
 
 type ghRelease struct {
-	TagName string    `json:"tag_name"`
-	Assets  []ghAsset `json:"assets"`
+	TagName     string    `json:"tag_name"`
+	Name        string    `json:"name"`
+	Body        string    `json:"body"`
+	PublishedAt string    `json:"published_at"`
+	Assets      []ghAsset `json:"assets"`
+}
+
+type updatePlan struct {
+	Kind         updateKind
+	TagName      string
+	LocalVersion string
+	Payload      *ghAsset
+	Checksum     *ghAsset
+	ReleaseNotes string
+	HasClient    bool
 }
 
 type progressUI interface {
@@ -61,6 +86,7 @@ type launcherConfig struct {
 	DownloadTimeout time.Duration
 	SkipUpdate      bool
 	WaitForChild    bool
+	OpenHub         bool
 	ForwardArgs     []string
 }
 
@@ -82,9 +108,12 @@ func run(args []string) int {
 	}
 	exeDir := filepath.Dir(exePath)
 
-	skipUpdate, waitForChild, forwardArgs := parseArgs(args)
+	skipUpdate, waitForChild, openHub, forwardArgs := parseArgs(args)
 	if os.Getenv("WWP_SKIP_UPDATE") == "1" {
 		skipUpdate = true
+	}
+	if os.Getenv("WWP_NO_HUB") == "1" {
+		openHub = false
 	}
 
 	repo := strings.TrimSpace(os.Getenv("WWP_GITHUB_REPO"))
@@ -106,7 +135,13 @@ func run(args []string) int {
 		DownloadTimeout: downloadTimeout,
 		SkipUpdate:      skipUpdate,
 		WaitForChild:    waitForChild,
+		OpenHub:         openHub,
 		ForwardArgs:     forwardArgs,
+	}
+
+	// Interactive Launcher Hub window on normal double-click or --hub (unless --wait / --no-update / CLI game args are passed).
+	if cfg.OpenHub || (!cfg.WaitForChild && !cfg.SkipUpdate && len(cfg.ForwardArgs) == 0 && os.Getenv("WWP_NO_HUB") != "1") {
+		return runLauncherHub(cfg)
 	}
 
 	clientExePath := filepath.Join(cfg.GameDir, clientExeName)
@@ -124,10 +159,15 @@ func run(args []string) int {
 		ui.Close()
 	}
 
+	return launchGameClient(cfg)
+}
+
+func launchGameClient(cfg launcherConfig) int {
+	clientExePath := filepath.Join(cfg.GameDir, clientExeName)
 	if !fileExists(clientExePath) {
 		showErrorBox(
 			"World War Pixel",
-			fmt.Sprintf("Game binary missing:\n%s\n\nRe-download the release archive or connect to the internet to fetch the latest build.", clientExePath),
+			fmt.Sprintf("Game binary missing:\n%s\n\nUse Install / Update in the Launcher or connect to the internet.", clientExePath),
 		)
 		return 1
 	}
@@ -155,18 +195,20 @@ func run(args []string) int {
 	return 0
 }
 
-func parseArgs(args []string) (skipUpdate bool, waitForChild bool, forwardArgs []string) {
+func parseArgs(args []string) (skipUpdate bool, waitForChild bool, openHub bool, forwardArgs []string) {
 	for _, arg := range args {
 		switch arg {
 		case "--no-update":
 			skipUpdate = true
 		case "--wait":
 			waitForChild = true
+		case "--hub":
+			openHub = true
 		default:
 			forwardArgs = append(forwardArgs, arg)
 		}
 	}
-	return skipUpdate, waitForChild, forwardArgs
+	return skipUpdate, waitForChild, openHub, forwardArgs
 }
 
 type parsedSemver struct {
@@ -262,6 +304,23 @@ func compareSemver(a, b string) int {
 	return comparePrerelease(pa.pre, pb.pre)
 }
 
+func findChecksumForAsset(assets []ghAsset, assetName string) *ghAsset {
+	for i := range assets {
+		if strings.EqualFold(assets[i].Name, "SHA256SUMS.txt") {
+			c := assets[i]
+			return &c
+		}
+	}
+	target := strings.ToLower(assetName) + ".sha256"
+	for i := range assets {
+		if strings.ToLower(assets[i].Name) == target {
+			c := assets[i]
+			return &c
+		}
+	}
+	return nil
+}
+
 func selectReleaseAssets(assets []ghAsset) (*ghAsset, *ghAsset) {
 	var payload *ghAsset
 
@@ -285,7 +344,7 @@ func selectReleaseAssets(assets []ghAsset) (*ghAsset, *ghAsset) {
 	if payload == nil {
 		for i := range assets {
 			lower := strings.ToLower(assets[i].Name)
-			if strings.HasSuffix(lower, ".zip") {
+			if strings.HasSuffix(lower, ".zip") && !strings.Contains(lower, "patch") {
 				c := assets[i]
 				payload = &c
 				break
@@ -305,26 +364,33 @@ func selectReleaseAssets(assets []ghAsset) (*ghAsset, *ghAsset) {
 		return nil, nil
 	}
 
-	var checksum *ghAsset
-	for i := range assets {
-		if strings.EqualFold(assets[i].Name, "SHA256SUMS.txt") {
-			c := assets[i]
-			checksum = &c
-			break
-		}
-	}
-	if checksum == nil {
-		target := strings.ToLower(payload.Name) + ".sha256"
+	return payload, findChecksumForAsset(assets, payload.Name)
+}
+
+// selectPatchOrClientAssets prefers lightweight .pck patches when the client runtime (.exe) is already installed.
+func selectPatchOrClientAssets(assets []ghAsset, hasClientExe bool) (updateKind, *ghAsset, *ghAsset) {
+	if hasClientExe {
 		for i := range assets {
-			if strings.ToLower(assets[i].Name) == target {
+			lower := strings.ToLower(assets[i].Name)
+			if strings.HasPrefix(lower, "worldwarpixel-delta-") && strings.HasSuffix(lower, ".pck") {
 				c := assets[i]
-				checksum = &c
-				break
+				return updateDeltaPatch, &c, findChecksumForAsset(assets, c.Name)
+			}
+		}
+		for i := range assets {
+			lower := strings.ToLower(assets[i].Name)
+			if lower == "worldwarpixel-patch.zip" || lower == "worldwarpixel-patch.pck" {
+				c := assets[i]
+				return updatePackReplace, &c, findChecksumForAsset(assets, c.Name)
 			}
 		}
 	}
 
-	return payload, checksum
+	payload, checksum := selectReleaseAssets(assets)
+	if payload == nil {
+		return updateNone, nil, nil
+	}
+	return updateFullClient, payload, checksum
 }
 
 func verifySHA256(filePath, expectedName string, sumsBody []byte) error {
@@ -394,7 +460,7 @@ func findChecksumInManifest(expectedName string, sumsBody []byte) (string, bool)
 	return "", false
 }
 
-func extractClientZip(zipPath, destDir string, maxBytes int64) error {
+func extractZipFiltered(zipPath, destDir string, maxBytes int64, requiredFile string) error {
 	r, err := zip.OpenReader(zipPath)
 	if err != nil {
 		return err
@@ -487,10 +553,18 @@ func extractClientZip(zipPath, destDir string, maxBytes int64) error {
 		}
 	}
 
-	if !fileExists(filepath.Join(absDest, clientExeName)) {
-		return fmt.Errorf("archive does not contain %s", clientExeName)
+	if requiredFile != "" && !fileExists(filepath.Join(absDest, requiredFile)) {
+		return fmt.Errorf("archive does not contain %s", requiredFile)
 	}
 	return nil
+}
+
+func extractClientZip(zipPath, destDir string, maxBytes int64) error {
+	return extractZipFiltered(zipPath, destDir, maxBytes, clientExeName)
+}
+
+func extractPatchZip(zipPath, destDir string, maxBytes int64) error {
+	return extractZipFiltered(zipPath, destDir, maxBytes, clientPckName)
 }
 
 func sanitizeZipPath(raw string) (string, error) {
@@ -541,13 +615,12 @@ func applyStagedUpdate(stageDir, gameDir, newVersion string) error {
 		return err
 	}
 
-	normVersion := strings.TrimSpace(newVersion)
-	if normVersion != "" {
-		versionPath := filepath.Join(gameDir, versionFileName)
-		if err := os.WriteFile(versionPath, []byte(normVersion+"\n"), 0644); err != nil {
-			restoreBackup()
-			return err
-		}
+	// Base client replaced cleanly; clear old runtime delta patches.
+	_ = os.RemoveAll(filepath.Join(gameDir, patchesDirName))
+
+	if err := writeLocalVersion(gameDir, newVersion); err != nil {
+		restoreBackup()
+		return err
 	}
 
 	if hadExisting {
@@ -555,6 +628,82 @@ func applyStagedUpdate(stageDir, gameDir, newVersion string) error {
 	}
 	_ = os.RemoveAll(stageDir)
 	return nil
+}
+
+func applyPackPatch(stageDir, gameDir, newVersion string) error {
+	stagedPck := filepath.Join(stageDir, clientPckName)
+	if !fileExists(stagedPck) {
+		return fmt.Errorf("staged patch missing %s", clientPckName)
+	}
+	if err := os.MkdirAll(gameDir, 0755); err != nil {
+		return err
+	}
+
+	destPck := filepath.Join(gameDir, clientPckName)
+	backupPck := destPck + ".bak"
+	_ = os.Remove(backupPck)
+
+	hadExisting := false
+	if fileExists(destPck) {
+		if err := os.Rename(destPck, backupPck); err != nil {
+			return fmt.Errorf("cannot replace running or locked pack file: %w", err)
+		}
+		hadExisting = true
+	}
+
+	restoreBackup := func() {
+		if hadExisting {
+			_ = os.Remove(destPck)
+			_ = os.Rename(backupPck, destPck)
+		}
+	}
+
+	if err := moveStageTree(stageDir, gameDir); err != nil {
+		restoreBackup()
+		return err
+	}
+
+	// Base .pck updated; remove old delta patches now superseded by full .pck.
+	_ = os.RemoveAll(filepath.Join(gameDir, patchesDirName))
+
+	if err := writeLocalVersion(gameDir, newVersion); err != nil {
+		restoreBackup()
+		return err
+	}
+
+	if hadExisting {
+		_ = os.Remove(backupPck)
+	}
+	_ = os.RemoveAll(stageDir)
+	return nil
+}
+
+func applyDeltaPatch(srcPckPath, gameDir, fileName, newVersion string) error {
+	if !fileExists(srcPckPath) {
+		return fmt.Errorf("delta patch missing: %s", srcPckPath)
+	}
+	patchesDir := filepath.Join(gameDir, patchesDirName)
+	if err := os.MkdirAll(patchesDir, 0755); err != nil {
+		return err
+	}
+	destPath := filepath.Join(patchesDir, filepath.Base(fileName))
+	tmpPath := destPath + ".tmp"
+	if err := copyFile(srcPckPath, tmpPath); err != nil {
+		return err
+	}
+	_ = os.Remove(destPath)
+	if err := os.Rename(tmpPath, destPath); err != nil {
+		return err
+	}
+	return writeLocalVersion(gameDir, newVersion)
+}
+
+func writeLocalVersion(gameDir, newVersion string) error {
+	normVersion := strings.TrimSpace(newVersion)
+	if normVersion == "" {
+		return nil
+	}
+	return os.WriteFile(filepath.Join(gameDir, versionFileName), []byte(normVersion+"\n"), 0644)
 }
 
 func moveStageTree(srcDir, dstDir string) error {
@@ -610,7 +759,57 @@ func copyFile(src, dst string) error {
 	return closeErr
 }
 
-func checkAndUpdate(ctx context.Context, cfg launcherConfig, ui progressUI) error {
+// buildUpdatePlan queries releases & patch notes without modifying files on disk.
+func buildUpdatePlan(ctx context.Context, cfg launcherConfig) (updatePlan, error) {
+	client := cfg.HTTPClient
+	if client == nil {
+		client = &http.Client{}
+	}
+	if cfg.CheckTimeout <= 0 {
+		cfg.CheckTimeout = checkTimeout
+	}
+
+	clientExePath := filepath.Join(cfg.GameDir, clientExeName)
+	hasExistingClient := fileExists(clientExePath)
+	localVersion := readLocalVersion(filepath.Join(cfg.GameDir, versionFileName))
+
+	plan := updatePlan{
+		Kind:         updateNone,
+		LocalVersion: localVersion,
+		HasClient:    hasExistingClient,
+	}
+
+	releases, statusCode, err := fetchReleases(ctx, client, cfg.APIBase, cfg.Repo, cfg.CheckTimeout)
+	if err != nil || statusCode == http.StatusNotFound || len(releases) == 0 {
+		plan.ReleaseNotes = formatPatchNotes(nil, cfg.GameDir, cfg.ExeDir)
+		if err != nil {
+			return plan, err
+		}
+		return plan, fmt.Errorf("no published release found in %s", cfg.Repo)
+	}
+
+	latest := releases[0]
+	plan.TagName = latest.TagName
+	plan.ReleaseNotes = formatPatchNotes(releases, cfg.GameDir, cfg.ExeDir)
+
+	if hasExistingClient && localVersion != "" && compareSemver(latest.TagName, localVersion) <= 0 {
+		return plan, nil
+	}
+
+	kind, payload, checksum := selectPatchOrClientAssets(latest.Assets, hasExistingClient)
+	if payload == nil || kind == updateNone {
+		return plan, fmt.Errorf("release %s does not include a downloadable Windows client or patch asset", latest.TagName)
+	}
+	plan.Kind = kind
+	plan.Payload = payload
+	plan.Checksum = checksum
+	return plan, nil
+}
+
+func executeUpdatePlan(ctx context.Context, cfg launcherConfig, plan updatePlan, onStatus func(status string, pct int)) error {
+	if plan.Kind == updateNone || plan.Payload == nil {
+		return nil
+	}
 	client := cfg.HTTPClient
 	if client == nil {
 		client = &http.Client{}
@@ -629,74 +828,147 @@ func checkAndUpdate(ctx context.Context, cfg launcherConfig, ui progressUI) erro
 	defer os.RemoveAll(tmpDir)
 	defer os.RemoveAll(stageDir)
 
-	clientExePath := filepath.Join(cfg.GameDir, clientExeName)
-	hasExistingClient := fileExists(clientExePath)
-	localVersion := readLocalVersion(filepath.Join(cfg.GameDir, versionFileName))
-
-	release, statusCode, err := fetchLatestRelease(ctx, client, cfg.APIBase, cfg.Repo, cfg.CheckTimeout)
-	if err != nil {
-		if hasExistingClient {
-			return nil
-		}
-		return fmt.Errorf("unable to check for game updates: %w", err)
+	actionVerb := "Updating"
+	if !plan.HasClient {
+		actionVerb = "Installing"
+	} else if plan.Kind == updatePackReplace || plan.Kind == updateDeltaPatch {
+		actionVerb = "Patching"
 	}
-	if statusCode == http.StatusNotFound || release == nil {
-		if hasExistingClient {
-			return nil
-		}
-		return fmt.Errorf("no published release found in %s", cfg.Repo)
+	if onStatus != nil {
+		onStatus(fmt.Sprintf("%s World War Pixel %s...", actionVerb, plan.TagName), 2)
 	}
-
-	if hasExistingClient && localVersion != "" && compareSemver(release.TagName, localVersion) <= 0 {
-		return nil
-	}
-
-	payload, checksum := selectReleaseAssets(release.Assets)
-	if payload == nil {
-		if hasExistingClient {
-			return nil
-		}
-		return fmt.Errorf("release %s does not include a downloadable Windows client asset", release.TagName)
-	}
-
-	ui.Show(fmt.Sprintf("Updating World War Pixel to %s...", release.TagName))
 
 	if err := os.MkdirAll(tmpDir, 0755); err != nil {
 		return err
 	}
-	payloadPath := filepath.Join(tmpDir, filepath.Base(payload.Name))
-	if err := downloadFileWithProgress(ctx, client, payload.BrowserDownloadURL, payloadPath, cfg.DownloadTimeout, maxPayloadBytes, func(done, total int64) {
-		ui.SetStatus(formatDownloadProgress(release.TagName, done, total))
+	payloadPath := filepath.Join(tmpDir, filepath.Base(plan.Payload.Name))
+	if err := downloadFileWithProgress(ctx, client, plan.Payload.BrowserDownloadURL, payloadPath, cfg.DownloadTimeout, maxPayloadBytes, func(done, total int64) {
+		pct := 15
+		if total > 0 {
+			pct = int((done * 80) / total)
+			if pct > 80 {
+				pct = 80
+			}
+		}
+		if onStatus != nil {
+			onStatus(formatDownloadProgress(plan.TagName, done, total), pct)
+		}
 	}); err != nil {
 		return err
 	}
 
-	if checksum != nil {
-		ui.SetStatus(fmt.Sprintf("Verifying World War Pixel %s...", release.TagName))
-		sumsBody, err := fetchSmallBytes(ctx, client, checksum.BrowserDownloadURL, cfg.CheckTimeout, maxChecksumsSize)
+	if plan.Checksum != nil {
+		if onStatus != nil {
+			onStatus(fmt.Sprintf("Verifying SHA-256 for %s...", plan.Payload.Name), 85)
+		}
+		sumsBody, err := fetchSmallBytes(ctx, client, plan.Checksum.BrowserDownloadURL, cfg.CheckTimeout, maxChecksumsSize)
 		if err != nil {
 			return fmt.Errorf("failed to download checksums: %w", err)
 		}
-		if err := verifySHA256(payloadPath, payload.Name, sumsBody); err != nil {
+		if err := verifySHA256(payloadPath, plan.Payload.Name, sumsBody); err != nil {
 			return err
 		}
 	}
 
-	ui.SetStatus(fmt.Sprintf("Installing World War Pixel %s...", release.TagName))
-	if err := os.MkdirAll(stageDir, 0755); err != nil {
-		return err
+	if onStatus != nil {
+		onStatus(fmt.Sprintf("Installing World War Pixel %s...", plan.TagName), 92)
 	}
-	if strings.HasSuffix(strings.ToLower(payload.Name), ".zip") {
-		if err := extractClientZip(payloadPath, stageDir, maxPayloadBytes); err != nil {
+
+	switch plan.Kind {
+	case updateDeltaPatch:
+		if err := applyDeltaPatch(payloadPath, cfg.GameDir, plan.Payload.Name, plan.TagName); err != nil {
 			return err
 		}
-	} else {
-		if err := copyFile(payloadPath, filepath.Join(stageDir, clientExeName)); err != nil {
+	case updatePackReplace:
+		if err := os.MkdirAll(stageDir, 0755); err != nil {
+			return err
+		}
+		if strings.HasSuffix(strings.ToLower(plan.Payload.Name), ".zip") {
+			if err := extractPatchZip(payloadPath, stageDir, maxPayloadBytes); err != nil {
+				return err
+			}
+		} else {
+			if err := copyFile(payloadPath, filepath.Join(stageDir, clientPckName)); err != nil {
+				return err
+			}
+		}
+		if err := applyPackPatch(stageDir, cfg.GameDir, plan.TagName); err != nil {
+			return err
+		}
+	default:
+		if err := os.MkdirAll(stageDir, 0755); err != nil {
+			return err
+		}
+		if strings.HasSuffix(strings.ToLower(plan.Payload.Name), ".zip") {
+			if err := extractClientZip(payloadPath, stageDir, maxPayloadBytes); err != nil {
+				return err
+			}
+		} else {
+			if err := copyFile(payloadPath, filepath.Join(stageDir, clientExeName)); err != nil {
+				return err
+			}
+		}
+		if err := applyStagedUpdate(stageDir, cfg.GameDir, plan.TagName); err != nil {
 			return err
 		}
 	}
 
-	return applyStagedUpdate(stageDir, cfg.GameDir, release.TagName)
+	if onStatus != nil {
+		onStatus(fmt.Sprintf("Ready · World War Pixel %s installed.", plan.TagName), 100)
+	}
+	return nil
+}
+
+func checkAndUpdate(ctx context.Context, cfg launcherConfig, ui progressUI) error {
+	plan, err := buildUpdatePlan(ctx, cfg)
+	if err != nil {
+		if plan.HasClient {
+			return nil
+		}
+		return fmt.Errorf("unable to check for game updates: %w", err)
+	}
+	if plan.Kind == updateNone || plan.Payload == nil {
+		return nil
+	}
+
+	ui.Show(fmt.Sprintf("Updating World War Pixel to %s...", plan.TagName))
+	return executeUpdatePlan(ctx, cfg, plan, func(status string, _ int) {
+		ui.SetStatus(status)
+	})
+}
+
+func fetchReleases(ctx context.Context, client *http.Client, apiBase, repo string, timeout time.Duration) ([]ghRelease, int, error) {
+	reqCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	endpoint := strings.TrimRight(apiBase, "/") + "/repos/" + repo + "/releases?per_page=5"
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", userAgent)
+
+	resp, err := client.Do(req)
+	if err == nil {
+		defer resp.Body.Close()
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxChecksumsSize))
+			if readErr == nil {
+				var list []ghRelease
+				if jsonErr := json.Unmarshal(body, &list); jsonErr == nil && len(list) > 0 && strings.TrimSpace(list[0].TagName) != "" {
+					return list, resp.StatusCode, nil
+				}
+			}
+		}
+	}
+
+	// Fallback to /releases/latest (also supports test servers stubbing only /releases/latest).
+	latest, code, latestErr := fetchLatestRelease(ctx, client, apiBase, repo, timeout)
+	if latestErr != nil || latest == nil {
+		return nil, code, latestErr
+	}
+	return []ghRelease{*latest}, code, nil
 }
 
 func fetchLatestRelease(ctx context.Context, client *http.Client, apiBase, repo string, timeout time.Duration) (*ghRelease, int, error) {
@@ -736,6 +1008,51 @@ func fetchLatestRelease(ctx context.Context, client *http.Client, apiBase, repo 
 		return nil, resp.StatusCode, errors.New("release tag_name missing")
 	}
 	return &release, resp.StatusCode, nil
+}
+
+func normalizeCRLFs(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	return strings.ReplaceAll(s, "\n", "\r\n")
+}
+
+func formatPatchNotes(releases []ghRelease, gameDir, exeDir string) string {
+	if len(releases) > 0 {
+		var b strings.Builder
+		for i, rel := range releases {
+			if i > 0 {
+				b.WriteString("\n----------------------------------------\n\n")
+			}
+			title := strings.TrimSpace(rel.Name)
+			if title == "" {
+				title = rel.TagName
+			} else if !strings.Contains(title, rel.TagName) {
+				title = rel.TagName + " — " + title
+			}
+			b.WriteString(title)
+			if len(rel.PublishedAt) >= 10 {
+				b.WriteString("  (" + rel.PublishedAt[:10] + ")")
+			}
+			b.WriteString("\n")
+			body := strings.TrimSpace(rel.Body)
+			if body != "" {
+				b.WriteString(body + "\n")
+			} else {
+				b.WriteString("- Maintenance & performance improvements.\n")
+			}
+		}
+		return normalizeCRLFs(b.String())
+	}
+
+	for _, candidate := range []string{
+		filepath.Join(gameDir, patchNotesName),
+		filepath.Join(exeDir, patchNotesName),
+		filepath.Join(filepath.Dir(exeDir), patchNotesName),
+	} {
+		if raw, err := os.ReadFile(candidate); err == nil && len(bytes.TrimSpace(raw)) > 0 {
+			return normalizeCRLFs(string(raw))
+		}
+	}
+	return normalizeCRLFs("World War Pixel\nNo remote patch notes available offline.")
 }
 
 func fetchSmallBytes(ctx context.Context, client *http.Client, url string, timeout time.Duration, maxBytes int64) ([]byte, error) {

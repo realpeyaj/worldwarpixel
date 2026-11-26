@@ -11,13 +11,13 @@
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_borders"]
 shader = ExtResource("2_sb")
-shader_parameter/sim_size = Vector2(1024, 512)
+shader_parameter/sim_size = Vector2(2048, 1024)
 shader_parameter/lut_width = 256.0
 shader_parameter/border_visibility = 1.0
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_political"]
 shader = ExtResource("3_sp")
-shader_parameter/sim_size = Vector2(1024, 512)
+shader_parameter/sim_size = Vector2(2048, 1024)
 shader_parameter/lut_width = 256.0
 shader_parameter/political_opacity = 0.42
 

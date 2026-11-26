@@ -6,11 +6,12 @@ import math
 import os
 from typing import Callable, Dict, List, Tuple
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 
 SPRITES_DIR = os.path.join("assets", "sprites")
 UI_DIR = os.path.join("assets", "ui")
 CACHE_DIR = os.path.join("tools", "cache")
+CUSTOM_ICONS_DIR = os.path.join(CACHE_DIR, "custom_icons")
 
 SS = 4  # 4x supersampling for silky smooth anti-aliased silhouettes
 
@@ -53,40 +54,135 @@ def _draw_banner() -> Tuple[Image.Image, Image.Image | None]:
     return base, mask
 
 
+def _load_custom_alpha_mask(filename: str, size: int, pad_px: int) -> Image.Image | None:
+    """Loads a custom silhouette asset's alpha mask, centered inside size x size with uniform padding."""
+    path = os.path.join(CUSTOM_ICONS_DIR, filename)
+    if not os.path.exists(path):
+        return None
+    src = Image.open(path).convert("RGBA")
+    alpha = src.getchannel("A")
+    bbox = alpha.point(lambda a: 255 if a > 16 else 0).getbbox()
+    if bbox is None:
+        return None
+    cropped = alpha.crop(bbox)
+    inner = max(4, size - pad_px * 2)
+    scale = min(inner / float(cropped.width), inner / float(cropped.height))
+    nw = max(4, int(round(cropped.width * scale)))
+    nh = max(4, int(round(cropped.height * scale)))
+    resized = cropped.resize((nw, nh), Image.Resampling.LANCZOS)
+    canvas = Image.new("L", (size, size), 0)
+    canvas.paste(resized, ((size - nw) // 2, (size - nh) // 2))
+    return canvas
+
+
+def _build_custom_map_pair(filename: str, out_px: int = 64) -> Tuple[Image.Image, Image.Image] | None:
+    """Builds a 4x-supersampled outline/steel base + inset team-color mask from a custom silhouette."""
+    hi = out_px * SS
+    alpha = _load_custom_alpha_mask(filename, hi, pad_px=int(hi * 0.10))
+    if alpha is None:
+        return None
+
+    outline_a = alpha.filter(ImageFilter.MaxFilter(15))
+    inner_a = alpha.filter(ImageFilter.MinFilter(5))
+
+    outline_layer = Image.new("RGBA", (hi, hi), COL_OUTLINE)
+    outline_layer.putalpha(outline_a)
+
+    # Subtle top-to-bottom light-steel bevel gradient on base silhouette
+    fg = Image.new("RGBA", (hi, hi), (0, 0, 0, 0))
+    fpx = fg.load()
+    apx = alpha.load()
+    for y in range(hi):
+        t = y / float(max(hi - 1, 1))
+        r = int(COL_WHITE[0] * (1.0 - t) + COL_LIGHT[0] * t)
+        g = int(COL_WHITE[1] * (1.0 - t) + COL_LIGHT[1] * t)
+        b = int(COL_WHITE[2] * (1.0 - t) + COL_LIGHT[2] * t)
+        for x in range(hi):
+            a = apx[x, y]
+            if a > 0:
+                fpx[x, y] = (r, g, b, a)
+
+    base = outline_layer
+    base.alpha_composite(fg)
+
+    # Team-color tint mask fills the inset body at ~82% opacity, preserving outline + outer highlight rim
+    mask = Image.new("RGBA", (hi, hi), (0, 0, 0, 0))
+    mpx = mask.load()
+    ipx = inner_a.load()
+    for y in range(hi):
+        t = y / float(max(hi - 1, 1))
+        shade = int(255 * (1.0 - t * 0.22))
+        for x in range(hi):
+            a = ipx[x, y]
+            if a > 0:
+                mpx[x, y] = (shade, shade, shade, int(a * 0.84))
+
+    return base, mask
+
+
+def _build_custom_solid_icon(
+    filename: str,
+    top_col: Tuple[int, int, int],
+    bot_col: Tuple[int, int, int],
+    out_px: int = 64,
+    pad_frac: float = 0.11,
+) -> Image.Image | None:
+    """Builds a 4x-supersampled colored silhouette icon with dark outline."""
+    hi = out_px * SS
+    alpha = _load_custom_alpha_mask(filename, hi, pad_px=max(2, int(hi * pad_frac)))
+    if alpha is None:
+        return None
+    k_rad = max(3, int(round(out_px * SS * 0.032)) * 2 + 1)
+    outline_a = alpha.filter(ImageFilter.MaxFilter(k_rad))
+    out = Image.new("RGBA", (hi, hi), COL_OUTLINE)
+    out.putalpha(outline_a)
+
+    fg = Image.new("RGBA", (hi, hi), (0, 0, 0, 0))
+    fpx = fg.load()
+    apx = alpha.load()
+    for y in range(hi):
+        t = y / float(max(hi - 1, 1))
+        r = int(top_col[0] * (1.0 - t) + bot_col[0] * t)
+        g = int(top_col[1] * (1.0 - t) + bot_col[1] * t)
+        b = int(top_col[2] * (1.0 - t) + bot_col[2] * t)
+        for x in range(hi):
+            a = apx[x, y]
+            if a > 0:
+                fpx[x, y] = (r, g, b, a)
+    out.alpha_composite(fg)
+    return out
+
+
 def _draw_town() -> Tuple[Image.Image, Image.Image | None]:
-    # Minimalist clean 3-spire skyline silhouette (open airy profile, no square frame)
+    custom = _build_custom_map_pair("buildings.png", 64)
+    if custom is not None:
+        return custom
+    # Fallback minimalist 3-spire skyline silhouette
     base, bd, mask, md = _new_pair(64, 64, True)
-    # Left lower roof wing
     left_poly = [(36, 206), (36, 134), (66, 102), (96, 134), (96, 206)]
-    # Right wing
     right_poly = [(158, 206), (158, 122), (190, 90), (220, 122), (220, 206)]
-    # Tall center spire tower
     center_poly = [(86, 206), (86, 86), (128, 34), (170, 86), (170, 206)]
     for poly in (left_poly, right_poly):
         bd.polygon(poly, fill=COL_STEEL, outline=COL_OUTLINE, width=8)
     bd.polygon(center_poly, fill=COL_LIGHT, outline=COL_OUTLINE, width=8)
-    # Nation color pitched roofs + subtle center banner stripe
     md.polygon([(38, 134), (66, 104), (94, 134)], fill=MASK_MID)
     md.polygon([(160, 122), (190, 92), (218, 122)], fill=MASK_MID)
     md.polygon([(88, 86), (128, 38), (168, 86)], fill=MASK_FULL)
-    # Clean slender ground bar
     bd.rounded_rectangle([28, 198, 228, 214], radius=7, fill=COL_DARK, outline=COL_OUTLINE, width=5)
     return base, mask
 
 
 def _draw_port() -> Tuple[Image.Image, Image.Image | None]:
-    # Minimalist sleek curved anchor silhouette
+    custom = _build_custom_map_pair("anchor.png", 64)
+    if custom is not None:
+        return custom
     base, bd, mask, md = _new_pair(64, 64, True)
-    # Top mooring ring
     bd.ellipse([104, 24, 152, 72], outline=COL_OUTLINE, width=18)
     bd.ellipse([108, 28, 148, 68], outline=COL_WHITE, width=10)
-    # Vertical shank & crossbar
     bd.rounded_rectangle([118, 66, 138, 216], radius=9, fill=COL_LIGHT, outline=COL_OUTLINE, width=6)
     bd.rounded_rectangle([76, 88, 180, 106], radius=8, fill=COL_STEEL, outline=COL_OUTLINE, width=6)
-    # Smooth semicircular bottom crescent (arc)
     bd.arc([44, 96, 212, 224], start=12, end=168, fill=COL_OUTLINE, width=26)
     bd.arc([48, 100, 208, 220], start=14, end=166, fill=COL_WHITE, width=14)
-    # Flukes at crescent tips (tinted with nation color)
     left_fluke = [(36, 144), (62, 124), (70, 160)]
     right_fluke = [(220, 144), (194, 124), (186, 160)]
     bd.polygon(left_fluke, fill=COL_DARK, outline=COL_OUTLINE, width=6)
@@ -98,18 +194,16 @@ def _draw_port() -> Tuple[Image.Image, Image.Image | None]:
 
 
 def _draw_factory() -> Tuple[Image.Image, Image.Image | None]:
-    # Minimalist asymmetric sawtooth roof + slender smokestack + wisp
+    custom = _build_custom_map_pair("factory.png", 64)
+    if custom is not None:
+        return custom
     base, bd, mask, md = _new_pair(64, 64, True)
-    # Slender chimney on right
     bd.polygon([(178, 178), (186, 60), (210, 60), (218, 178)], fill=COL_STEEL, outline=COL_OUTLINE, width=7)
     md.rectangle([188, 72, 208, 92], fill=MASK_FULL)
-    # Soft curved minimalist smoke wisps
     bd.ellipse([188, 30, 218, 50], fill=(195, 204, 214, 190))
     bd.ellipse([204, 16, 232, 34], fill=(215, 222, 230, 140))
-    # Asymmetric twin sawtooth silhouette (not boxy)
     hall = [(30, 212), (30, 126), (92, 86), (92, 126), (154, 86), (154, 134), (222, 134), (222, 212)]
     bd.polygon(hall, fill=COL_LIGHT, outline=COL_OUTLINE, width=8)
-    # Team accent roof fascia triangles
     md.polygon([(34, 126), (90, 90), (90, 126)], fill=MASK_FULL)
     md.polygon([(94, 126), (152, 90), (152, 126)], fill=MASK_FULL)
     bd.rounded_rectangle([24, 204, 232, 220], radius=7, fill=COL_DARK, outline=COL_OUTLINE, width=5)
@@ -136,60 +230,76 @@ def _draw_defense_post() -> Tuple[Image.Image, Image.Image | None]:
 
 
 def _draw_silo() -> Tuple[Image.Image, Image.Image | None]:
-    # Unmistakable Nuclear Missile Silo: open blast doors + subterranean launch pit + tall ICBM warhead + radiation emblem
+    custom = _build_custom_map_pair("missile-launcher.png", 64)
+    if custom is not None:
+        return custom
     base, bd, mask, md = _new_pair(64, 64, True)
-    # Outer armored concrete bunker ring & open left/right blast hatch doors
     bd.rounded_rectangle([16, 128, 72, 224], radius=10, fill=COL_STEEL, outline=COL_OUTLINE, width=7)
     bd.rounded_rectangle([184, 128, 240, 224], radius=10, fill=COL_STEEL, outline=COL_OUTLINE, width=7)
     md.rounded_rectangle([24, 138, 64, 214], radius=6, fill=MASK_MID)
     md.rounded_rectangle([192, 138, 232, 214], radius=6, fill=MASK_MID)
-    # Subterranean launch pit with hazard rim & ignition glow
     bd.ellipse([44, 136, 212, 236], fill=COL_DARK, outline=COL_OUTLINE, width=9)
     md.ellipse([54, 146, 202, 226], outline=MASK_FULL, width=14)
     bd.ellipse([68, 158, 188, 216], fill=(22, 26, 34, 255), outline=COL_GOLD, width=6)
     bd.ellipse([88, 172, 168, 208], fill=(242, 128, 42, 220))
-    # Prominent ICBM nuclear missile rising vertically from the silo pit
     fins_l = [(96, 132), (62, 172), (62, 192), (102, 178)]
     fins_r = [(160, 132), (194, 172), (194, 192), (154, 178)]
     bd.polygon(fins_l, fill=COL_RED, outline=COL_OUTLINE, width=7)
     bd.polygon(fins_r, fill=COL_RED, outline=COL_OUTLINE, width=7)
     body = [(96, 68), (160, 68), (164, 182), (92, 182)]
     bd.polygon(body, fill=COL_WHITE, outline=COL_OUTLINE, width=8)
-    # Nation color band + red nuclear warhead nosecone
     md.rectangle([102, 114, 154, 142], fill=MASK_FULL)
     nose = [(128, 12), (162, 68), (94, 68)]
     bd.polygon(nose, fill=COL_RED, outline=COL_OUTLINE, width=8)
-    # High-contrast radiation warning band & nuclear core dot on fuselage
     bd.rectangle([100, 74, 156, 98], fill=COL_GOLD, outline=COL_OUTLINE, width=5)
     bd.ellipse([118, 148, 138, 168], fill=COL_GOLD, outline=COL_OUTLINE, width=5)
     return base, mask
 
 
 def _draw_sam() -> Tuple[Image.Image, Image.Image | None]:
-    # Unmistakable Twin-Tube SAM Air-Defense Battery + Parabolic Radar Dish + Cyan Sweep Waves
+    custom = _build_custom_map_pair("radar-dish.png", 64)
+    if custom is not None:
+        return custom
     base, bd, mask, md = _new_pair(64, 64, True)
-    # Heavy armored SAM turret pedestal at bottom
     bd.rounded_rectangle([32, 184, 224, 232], radius=12, fill=COL_DARK, outline=COL_OUTLINE, width=8)
     md.rounded_rectangle([46, 194, 210, 222], radius=8, fill=MASK_FULL)
     bd.ellipse([86, 152, 170, 204], fill=COL_STEEL, outline=COL_OUTLINE, width=7)
-    # Parabolic radar dish on lower-left + glowing cyan radar detection arcs
     bd.arc([16, 84, 108, 184], start=125, end=305, fill=COL_WHITE, width=18)
     bd.line([(56, 136), (86, 112)], fill=COL_GOLD, width=8)
     bd.arc([18, 22, 172, 168], start=210, end=330, fill=(100, 236, 255, 255), width=10)
     bd.arc([38, 46, 148, 150], start=210, end=330, fill=COL_WHITE, width=8)
-    # Twin angled SAM launch tubes + 2 protruding red-tipped interceptor rockets aiming up-right
     tube1 = [(74, 142), (168, 48), (192, 72), (98, 166)]
     tube2 = [(104, 172), (198, 78), (222, 102), (128, 196)]
     for tb, m_fill in ((tube1, MASK_FULL), (tube2, MASK_MID)):
         bd.polygon(tb, fill=COL_STEEL, outline=COL_OUTLINE, width=8)
     md.polygon([(84, 140), (154, 70), (168, 84), (98, 154)], fill=MASK_FULL)
     md.polygon([(114, 170), (184, 100), (198, 114), (128, 184)], fill=MASK_MID)
-    # Protruding red/white SAM interceptor warhead tips
     tip1 = [(172, 44), (214, 22), (196, 68)]
     tip2 = [(202, 74), (242, 52), (226, 98)]
     bd.polygon(tip1, fill=COL_RED, outline=COL_OUTLINE, width=6)
     bd.polygon(tip2, fill=COL_RED, outline=COL_OUTLINE, width=6)
     return base, mask
+
+
+def _draw_atom_map() -> Tuple[Image.Image, Image.Image | None]:
+    custom = _build_custom_solid_icon("radioactive.png", (255, 226, 96), (232, 154, 38), 64)
+    if custom is not None:
+        return custom, None
+    return _draw_missile()
+
+
+def _draw_hbomb_map() -> Tuple[Image.Image, Image.Image | None]:
+    custom = _build_custom_solid_icon("bomb.png", (255, 192, 88), (234, 92, 44), 64)
+    if custom is not None:
+        return custom, None
+    return _draw_missile()
+
+
+def _draw_mirv_map() -> Tuple[Image.Image, Image.Image | None]:
+    custom = _build_custom_solid_icon("missile-swarm.png", (255, 132, 164), (236, 58, 108), 64)
+    if custom is not None:
+        return custom, None
+    return _draw_missile()
 
 
 def _draw_attack() -> Tuple[Image.Image, Image.Image | None]:
@@ -354,6 +464,9 @@ GENERATORS: Dict[str, Tuple[bool, Callable[[], Tuple[Image.Image, Image.Image | 
     "icon_warship": (True, _draw_warship),
     "icon_train": (True, _draw_train),
     "icon_missile": (False, _draw_missile),
+    "icon_atom": (False, _draw_atom_map),
+    "icon_hbomb": (False, _draw_hbomb_map),
+    "icon_mirv": (False, _draw_mirv_map),
     "icon_diplomacy": (False, _draw_diplomacy),
     "icon_wifi": (False, _draw_wifi),
     "icon_upgrade": (False, _draw_upgrade),
@@ -466,6 +579,13 @@ def generate_ui_9patch_textures() -> None:
             cut_top=False,
             cut_bottom=True,
             top_border=(36, 56, 80, 255),
+        ),
+        "bottom_bar_9patch.png": dict(
+            size=16,
+            fill=(16, 19, 26, 242),
+            border=(7, 9, 13, 255),
+            hi=(42, 50, 66, 255),
+            sh=(10, 12, 18, 255),
         ),
         # Neutral grayscale stepped bevels tinted cleanly via StyleBoxTexture.modulate_color
         "btn_normal_9patch.png": dict(
@@ -655,6 +775,225 @@ def generate_pixel_ui_icons() -> None:
         print(f"[ui-icon] Generated {dest} ({img.width}x{img.height})")
 
 
+def _render_pixel_sprite(rows: List[str], size_px: int, scale_to: int = 0) -> Image.Image:
+    """Renders a crisp monochrome/gold HUD icon bitmap, optionally integer-upscaled via NEAREST."""
+    img = Image.new("RGBA", (size_px, size_px), (0, 0, 0, 0))
+    px = img.load()
+    palette = {
+        "#": (246, 249, 255, 255),
+        "s": (176, 188, 204, 255),
+        "d": (28, 34, 46, 255),
+        "g": (244, 192, 74, 255),
+        "y": (255, 228, 126, 255),
+        "a": (218, 142, 54, 255),
+        "k": (22, 18, 12, 255),
+    }
+    for y in range(min(size_px, len(rows))):
+        row = rows[y]
+        for x in range(min(size_px, len(row))):
+            ch = row[x]
+            if ch in palette:
+                px[x, y] = palette[ch]
+    if scale_to > 0 and scale_to != size_px:
+        return img.resize((scale_to, scale_to), Image.Resampling.NEAREST)
+    return img
+
+
+def generate_pixel_hud_dock_icons() -> None:
+    """Generates crisp bottom-bar monochrome & gold pixel icons (12x12->24x24 and 1:1 20x20 for Silo/SAM)."""
+    os.makedirs(SPRITES_DIR, exist_ok=True)
+    bitmaps_12 = {
+        "hud_town": [
+            "..####......",
+            "..####......",
+            "..#d#d......",
+            "..####......",
+            "..#d#d.####.",
+            "..####.####.",
+            "..#d#d.#d#d.",
+            "..####.####.",
+            "..#d#d.#d#d.",
+            "..####.####.",
+            ".###########",
+            "............",
+        ],
+        "hud_factory": [
+            ".##.........",
+            ".##.........",
+            ".##.........",
+            ".##..#..#..#",
+            ".##.##.##.##",
+            ".###########",
+            ".###########",
+            ".###########",
+            ".###########",
+            ".###########",
+            ".###########",
+            "............",
+        ],
+        "hud_port": [
+            "....####....",
+            "....#..#....",
+            "....####....",
+            "..########..",
+            ".....##.....",
+            ".....##.....",
+            ".#...##...#.",
+            ".##..##..##.",
+            "..###..###..",
+            "...######...",
+            ".....##.....",
+            "............",
+        ],
+        "hud_defense": [
+            "..########..",
+            ".##########.",
+            ".##......##.",
+            ".##......##.",
+            ".##......##.",
+            ".##......##.",
+            "..##....##..",
+            "..##....##..",
+            "...##..##...",
+            "....####....",
+            ".....##.....",
+            "............",
+        ],
+        "hud_warship": [
+            ".....##.....",
+            ".....##.....",
+            "....####....",
+            "...######...",
+            "..########..",
+            ".##########.",
+            "....####....",
+            ".ss.####.ss.",
+            "s...####...s",
+            "...ss..ss...",
+            "............",
+            "............",
+        ],
+        "hud_atom": [
+            "...gggggg...",
+            "..gggggggg..",
+            ".ggkkggkkgg.",
+            ".gkkkggkkkg.",
+            "gggkkggkkggg",
+            "gggggggggggg",
+            "gggggkkggggg",
+            "gggggkkggggg",
+            ".gggkkkkggg.",
+            ".ggggkkgggg.",
+            "..gggggggg..",
+            "...aaaaaa...",
+        ],
+        "hud_hbomb": [
+            "..yyyyyyyy..",
+            ".yyyyyyyyyy.",
+            "yyyyggggggyy",
+            "ggaaaaaaaaaa",
+            "....ssss....",
+            "....gggg....",
+            "....gggg....",
+            "....gggg....",
+            "..aayyyyaa..",
+            ".ssssssssss.",
+            "............",
+            "............",
+        ],
+        "hud_mirv": [
+            ".yg....yg...",
+            ".ygg...ygg..",
+            "..gga...gga.",
+            "...ga....ga.",
+            "............",
+            "....yg......",
+            "....ygg.....",
+            ".....gga....",
+            "......ga....",
+            "............",
+            "............",
+            "............",
+        ],
+    }
+    bitmaps_20 = {
+        "hud_silo": [
+            "....................",
+            "................##..",
+            "...............####.",
+            "..............#####.",
+            ".............###d##.",
+            "............###d###.",
+            "...........#######..",
+            "..........#######...",
+            "........########....",
+            "......####.#####....",
+            ".....###..########..",
+            "....##...######.###.",
+            "........######...##.",
+            ".......##s###.....#.",
+            "......##.sss........",
+            "....ss..ss..........",
+            "...s...s............",
+            "..s.................",
+            "....................",
+            "....................",
+        ],
+        "hud_sam": [
+            "....................",
+            "....................",
+            ".............####...",
+            "..........########..",
+            ".......#####dd####..",
+            ".....######dd#####..",
+            "....ssss##########..",
+            ".......########s....",
+            ".........####.......",
+            ".........####.......",
+            "........######......",
+            "........######......",
+            ".......###..###.....",
+            "......###....###....",
+            ".....###......###...",
+            "....###........###..",
+            "..##################",
+            "..ssssssssssssssssss",
+            "....................",
+            "....................",
+        ],
+    }
+    for name, rows in bitmaps_12.items():
+        img = _render_pixel_sprite(rows, 12, 24)
+        dest = os.path.join(SPRITES_DIR, f"{name}.png")
+        img.save(dest, format="PNG")
+        print(f"[hud-icon] Generated {dest} ({img.width}x{img.height})")
+    for name, rows in bitmaps_20.items():
+        img = _render_pixel_sprite(rows, 20, 20)
+        dest = os.path.join(SPRITES_DIR, f"{name}.png")
+        img.save(dest, format="PNG")
+        print(f"[hud-icon] Generated {dest} ({img.width}x{img.height})")
+
+    # Override dock icons with user's crisp default silhouettes (clean 20x20 outlined HUD badges)
+    custom_hud_specs = {
+        "hud_town": ("buildings.png", (244, 248, 255), (192, 204, 220)),
+        "hud_port": ("anchor.png", (244, 248, 255), (192, 204, 220)),
+        "hud_factory": ("factory.png", (244, 248, 255), (192, 204, 220)),
+        "hud_sam": ("radar-dish.png", (236, 250, 255), (168, 212, 232)),
+        "hud_silo": ("missile-launcher.png", (250, 244, 244), (212, 184, 188)),
+        "hud_warship": ("cruiser-front-view.png", (244, 248, 255), (182, 206, 230)),
+        "hud_atom": ("radioactive.png", (255, 228, 108), (228, 152, 46)),
+        "hud_hbomb": ("bomb.png", (255, 198, 96), (232, 98, 48)),
+        "hud_mirv": ("missile-swarm.png", (255, 148, 176), (234, 72, 118)),
+    }
+    for name, (src_fn, tc, bc) in custom_hud_specs.items():
+        hi_hud = _build_custom_solid_icon(src_fn, tc, bc, out_px=20, pad_frac=0.09)
+        if hi_hud is not None:
+            hud_img = hi_hud.resize((20, 20), Image.Resampling.LANCZOS)
+            dest = os.path.join(SPRITES_DIR, f"{name}.png")
+            hud_img.save(dest, format="PNG")
+            print(f"[hud-icon] Custom 20x20 {dest} <- {src_fn}")
+
+
 def generate_pixel_logo() -> None:
     """Generates a crisp nearest-neighbor pixel-art logo for the Home Screen (352x96)."""
     pw, ph = 92, 25
@@ -785,6 +1124,7 @@ def main() -> None:
     os.makedirs(CACHE_DIR, exist_ok=True)
     generate_ui_9patch_textures()
     generate_pixel_ui_icons()
+    generate_pixel_hud_dock_icons()
     generate_pixel_logo()
 
     cell_w, cell_h = 112, 84

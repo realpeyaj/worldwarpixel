@@ -27,9 +27,27 @@ var _popups: Array = []
 var _upgrade_pulses: Dictionary = {}  # structure_id -> age
 var _label_visual_pos: Dictionary = {}  # nation_id -> Vector2
 var _label_visual_scale: Dictionary = {}  # nation_id -> float
+var _nation_avatars: Dictionary = {}  # nation_id -> {"frames": Array, "delay_ms": int}
+var _avatar_elapsed_ms: float = 0.0
+var _last_avatar_tick: int = -1
 var _dirty: bool = true
 var _last_zoom: float = -1.0
 var _troop_label_timer: float = 0.0
+
+
+func set_nation_avatar(nation_id: int, frames: Array, delay_ms: int = 100) -> void:
+	if nation_id <= 0 or frames.is_empty():
+		_nation_avatars.erase(nation_id)
+	else:
+		_nation_avatars[nation_id] = {"frames": frames, "delay_ms": clampi(delay_ms, 40, 1000)}
+	_dirty = true
+	queue_redraw()
+
+
+func clear_nation_avatars() -> void:
+	_nation_avatars.clear()
+	_dirty = true
+	queue_redraw()
 
 
 func setup(world_state: WorldState, camera: Camera2D) -> void:
@@ -106,6 +124,18 @@ func _on_structure_upgraded(sid: int, _new_level: int) -> void:
 func _process(delta: float) -> void:
 	if _world_state == null:
 		return
+	if not _nation_avatars.is_empty():
+		_avatar_elapsed_ms += delta * 1000.0
+		for nid_k: int in _nation_avatars.keys():
+			var av_entry: Dictionary = _nation_avatars[nid_k]
+			var frames_arr: Array = av_entry.get("frames", [])
+			if frames_arr.size() > 1:
+				var dms: int = maxi(40, int(av_entry.get("delay_ms", 100)))
+				var frame_step: int = int(_avatar_elapsed_ms / float(dms))
+				if frame_step != _last_avatar_tick:
+					_last_avatar_tick = frame_step
+					_dirty = true
+				break
 	var anim_active := (not _popups.is_empty()) or (not _upgrade_pulses.is_empty())
 	for i in range(_popups.size() - 1, -1, -1):
 		var p: Dictionary = _popups[i]
@@ -177,20 +207,37 @@ func _draw() -> void:
 	var inv_z: float = icon_scale
 	var font: Font = ThemeDB.fallback_font
 
-	# 1. Draw subtle thin Factory roads (or straight low-opacity causeway Bridges when crossing water)
+	# 1. Draw subtle thin Factory roads on land and straight low-opacity pixel Bridges ONLY over water spans
 	for link: Dictionary in _world_state.factory_links:
 		var nation: NationData = _world_state.get_nation(int(link.get("nation_id", 0)))
 		var col: Color = nation.color if nation != null else Color.WHITE
 		var from_w: Vector2 = link["from_world"]
 		var to_w: Vector2 = link["to_world"]
-		var is_bridge: bool = bool(link.get("crosses_water", false))
-		if is_bridge:
-			_draw_pixel_bridge(from_w, to_w, inv_z, col)
-		else:
-			var road_pts: PackedVector2Array = link.get("road_points", PackedVector2Array([from_w, to_w]))
+		var road_pts: PackedVector2Array = link.get("road_points", PackedVector2Array([from_w, to_w]))
+		var water_spans: Array = link.get("water_spans", [])
+		var road_dark := Color(0.08, 0.09, 0.11, 0.36)
+		var road_light := Color(0.58, 0.55, 0.48, 0.54).lerp(col, 0.16)
+		if water_spans.is_empty():
 			if road_pts.size() >= 2:
-				draw_polyline(road_pts, Color(0.08, 0.09, 0.11, 0.36), 1.85 * inv_z, true)
-				draw_polyline(road_pts, Color(0.58, 0.55, 0.48, 0.54).lerp(col, 0.16), 1.0 * inv_z, true)
+				draw_polyline(road_pts, road_dark, 1.85 * inv_z, true)
+				draw_polyline(road_pts, road_light, 1.0 * inv_z, true)
+		elif road_pts.size() >= 2:
+			for seg_i in range(road_pts.size() - 1):
+				var pa: Vector2 = road_pts[seg_i]
+				var pb: Vector2 = road_pts[seg_i + 1]
+				var seg_is_water := false
+				for sp: Array in water_spans:
+					if sp.size() >= 2:
+						var s0: Vector2 = sp[0]
+						var s1: Vector2 = sp[1]
+						if (pa.distance_squared_to(s0) < 0.25 and pb.distance_squared_to(s1) < 0.25) or (pa.distance_squared_to(s1) < 0.25 and pb.distance_squared_to(s0) < 0.25):
+							seg_is_water = true
+							break
+				if seg_is_water:
+					_draw_pixel_bridge(pa, pb, inv_z, col)
+				else:
+					draw_line(pa, pb, road_dark, 1.85 * inv_z, true)
+					draw_line(pa, pb, road_light, 1.0 * inv_z, true)
 
 	# 2. Draw dynamic territory-tracking national banner ON TOP of growing nation name & standby armies
 	var zoom_comp: float = minf(1.0, 1.4 / maxf(z, 1.0))
@@ -230,6 +277,20 @@ func _draw() -> void:
 
 		var b_sz: float = 12.0 * eff
 		var banner_center: Vector2 = anchor_pos + Vector2(0.0, -7.0 * eff)
+		if _nation_avatars.has(nid):
+			var av_d: Dictionary = _nation_avatars[nid]
+			var av_frames: Array = av_d.get("frames", [])
+			if not av_frames.is_empty():
+				var pfp_sz: float = 14.0 * eff
+				var dms: float = maxf(40.0, float(av_d.get("delay_ms", 100)))
+				var f_idx: int = int(_avatar_elapsed_ms / dms) % av_frames.size()
+				var pfp_tex: Texture2D = av_frames[f_idx] as Texture2D
+				var pfp_rect := Rect2(banner_center - Vector2(pfp_sz * 0.5, pfp_sz * 0.5), Vector2(pfp_sz, pfp_sz))
+				draw_rect(pfp_rect.grow(1.4 * eff), Color(0.03, 0.05, 0.08, 0.92), true)
+				if pfp_tex != null:
+					draw_texture_rect(pfp_tex, pfp_rect, false, Color.WHITE)
+				draw_rect(pfp_rect.grow(0.7 * eff), nation.color.lightened(0.22), false, 1.35 * eff)
+				continue
 		var banner_rect := Rect2(banner_center - Vector2(b_sz * 0.5, b_sz * 0.5), Vector2(b_sz, b_sz))
 		draw_texture_rect(_tex_banner, banner_rect, false, Color(1.0, 1.0, 1.0, 0.96))
 		draw_texture_rect(_tex_banner_mask, banner_rect, false, nation.color.lightened(0.22))

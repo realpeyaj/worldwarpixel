@@ -51,7 +51,7 @@ func _setup_textures_and_shaders() -> void:
 	var terrain_tex: Texture2D = load(TERRAIN_TEX_PATH)
 	layer1_terrain.texture = terrain_tex
 
-	_owner_image = Image.create(1024, 512, false, Image.FORMAT_R8)
+	_owner_image = Image.create(2048, 1024, false, Image.FORMAT_R8)
 	_owner_image.fill(Color(0, 0, 0, 1))
 	_owner_texture = ImageTexture.create_from_image(_owner_image)
 
@@ -60,9 +60,9 @@ func _setup_textures_and_shaders() -> void:
 	_lut_texture = ImageTexture.create_from_image(_lut_image)
 
 	layer2_boundaries.texture = _owner_texture
-	layer2_boundaries.scale = Vector2(2.0, 2.0)
+	layer2_boundaries.scale = Vector2.ONE
 	layer3_political.texture = _owner_texture
-	layer3_political.scale = Vector2(2.0, 2.0)
+	layer3_political.scale = Vector2.ONE
 
 	if layer2_boundaries.material is ShaderMaterial:
 		var mat2 := layer2_boundaries.material as ShaderMaterial
@@ -77,6 +77,14 @@ func _setup_textures_and_shaders() -> void:
 
 func bind_world_state(world_state: WorldState) -> void:
 	_world_state = world_state
+	var sim_sz := Vector2(float(_world_state.sim_width), float(_world_state.sim_height))
+	var sc := Vector2(_world_state.sim_scale, _world_state.sim_scale)
+	layer2_boundaries.scale = sc
+	layer3_political.scale = sc
+	if layer2_boundaries.material is ShaderMaterial:
+		(layer2_boundaries.material as ShaderMaterial).set_shader_parameter("sim_size", sim_sz)
+	if layer3_political.material is ShaderMaterial:
+		(layer3_political.material as ShaderMaterial).set_shader_parameter("sim_size", sim_sz)
 	if not _world_state.nation_spawned.is_connected(_on_nation_spawned):
 		_world_state.nation_spawned.connect(_on_nation_spawned)
 	if not _world_state.structure_changed.is_connected(_on_structure_changed):
@@ -171,6 +179,9 @@ func _handle_map_click(world_pos: Vector2, cell: Vector2i, is_double_click: bool
 		return
 
 	if _missile_mode != "":
+		if _world_state.get_owner_at(cell.x, cell.y) == _world_state.player_nation_id:
+			_world_state.command_rejected.emit("Cannot launch warheads onto your own territory.")
+			return
 		var now_ms: int = Time.get_ticks_msec()
 		var confirmed: bool = is_double_click or (
 			_staged_missile_cell.x >= 0

@@ -25,7 +25,7 @@ const MAX_BUILD_COST := {
 	TYPE_TOWN: 1000000.0,
 	TYPE_PORT: 1000000.0,
 	TYPE_FACTORY: 1000000.0,
-	TYPE_DEFENSE_POST: 1000000.0,
+	TYPE_DEFENSE_POST: 250000.0,
 	TYPE_MISSILE_SILO: 1000000.0,
 	TYPE_SAM_LAUNCHER: 1500000.0,
 }
@@ -47,6 +47,25 @@ static func format_pesos(amount: float) -> String:
 		var s := "%.1fk" % (a / 1000.0)
 		return sym + s.replace(".0k", "k")
 	return sym + ("%d" % int(round(a)))
+
+
+static func format_compact(amount: float) -> String:
+	var a: float = maxf(0.0, amount)
+	if a >= 1000000.0:
+		var sm := "%.1fM" % (a / 1000000.0)
+		return sm.replace(".0M", "M")
+	if a >= 100000.0:
+		return "%dK" % int(round(a / 1000.0))
+	if a >= 10000.0:
+		return ("%.1fK" % (a / 1000.0)).replace(".0K", "K")
+	if a >= 1000.0:
+		var s2 := "%.2fK" % (a / 1000.0)
+		if s2.ends_with(".00K"):
+			return s2.trim_suffix(".00K") + "K"
+		if s2.ends_with("0K"):
+			return s2.trim_suffix("0K") + "K"
+		return s2
+	return "%d" % int(round(a))
 
 var id: int = 0
 var nation_id: int = 0
@@ -92,7 +111,7 @@ func get_display_name() -> String:
 
 
 func get_world_pos() -> Vector2:
-	return Vector2((float(cell.x) + 0.5) * 2.0, (float(cell.y) + 0.5) * 2.0)
+	return Vector2(float(cell.x) + 0.5, float(cell.y) + 0.5)
 
 
 func get_progress_ratio() -> float:
@@ -117,26 +136,32 @@ func get_gold_per_sec() -> float:
 func get_max_troops_bonus() -> float:
 	if type != TYPE_TOWN or level <= 0:
 		return 0.0
-	return 240.0 * float(level)
+	return 3000.0 * float(level) * factory_boost
 
 
 func get_troops_per_sec_bonus() -> float:
 	if type != TYPE_TOWN or level <= 0:
 		return 0.0
-	return 2.4 * float(level)
+	return 28.0 * float(level) * factory_boost
 
 
 func get_supply_radius() -> float:
 	if type == TYPE_TOWN and level > 0:
-		return 55.0 + float(level) * 8.0
+		return 110.0 + float(level) * 16.0
 	if type == TYPE_PORT and level > 0:
-		return 50.0 + float(level) * 5.0
+		return 100.0 + float(level) * 10.0
 	return 0.0
+
+
+static func get_defense_radius_for_level(lvl: int) -> float:
+	if lvl <= 0:
+		return 0.0
+	return 24.0 + float(lvl) * 4.0
 
 
 func get_defense_radius() -> float:
 	if type == TYPE_DEFENSE_POST and level > 0:
-		return 24.0 + float(level) * 3.5
+		return get_defense_radius_for_level(level)
 	return 0.0
 
 
@@ -159,7 +184,7 @@ func get_max_level() -> int:
 static func get_sam_radius_for_level(lvl: int) -> float:
 	if lvl <= 0:
 		return 0.0
-	return 18.0 * pow(1.15, float(clampi(lvl, 1, MAX_SILO_SAM_LEVEL) - 1))
+	return 36.0 * pow(1.15, float(clampi(lvl, 1, MAX_SILO_SAM_LEVEL) - 1))
 
 
 func get_sam_radius() -> float:
@@ -198,7 +223,7 @@ func get_ship_speed() -> float:
 
 func get_factory_base_radius(for_level: int = -1) -> float:
 	var lvl: int = maxi(1, level) if for_level < 0 else maxi(1, for_level)
-	return 38.0 + float(lvl) * 7.0
+	return 76.0 + float(lvl) * 14.0
 
 
 func get_factory_radius_at_angle(angle: float, for_level: int = -1) -> float:
@@ -224,7 +249,7 @@ func get_organic_range_polygon(sample_count: int = 56, for_level: int = -1) -> P
 	var origin: Vector2 = get_world_pos()
 	for i in range(sample_count):
 		var ang: float = (float(i) / float(sample_count)) * TAU
-		var r_world: float = get_factory_radius_at_angle(ang, for_level) * 2.0
+		var r_world: float = get_factory_radius_at_angle(ang, for_level)
 		pts[i] = origin + Vector2(cos(ang), sin(ang)) * r_world
 	return pts
 
@@ -246,13 +271,13 @@ func get_next_level_summary() -> String:
 	var nxt: int = level + 1
 	match type:
 		TYPE_TOWN:
-			return "Lv.%d gains: +%s/s, +240 Pop Cap, +2.4/s Troops, +8 Supply" % [nxt, format_pesos(520.0)]
+			return "Lv.%d gains: +%s/s, +3K Pop Cap, +28/s Troops, +8 Supply" % [nxt, format_pesos(520.0)]
 		TYPE_PORT:
 			return "Lv.%d gains: %d Trade Ships, +%s/s, +1.2 Spd, +8%% Trade" % [nxt, get_max_trade_ships(nxt), format_pesos(400.0)]
 		TYPE_FACTORY:
 			return "Lv.%d gains: +%s/s base, +7 Organic Range, +Synergy" % [nxt, format_pesos(900.0)]
 		TYPE_DEFENSE_POST:
-			return "Lv.%d gains: %.2fx Defense, +3.5 Fortify Radius" % [nxt, 1.85 + float(nxt - 1) * 0.22]
+			return "Lv.%d gains: %.2fx Defense, +2.0 Fortify Radius" % [nxt, 1.85 + float(nxt - 1) * 0.22]
 		TYPE_MISSILE_SILO:
 			return "Lv.%d/%d gains: -10%% Silo Reload Cooldown (%.1fs)" % [nxt, max_l, float(get_silo_cooldown_for_level(nxt)) / 24.0]
 		TYPE_SAM_LAUNCHER:

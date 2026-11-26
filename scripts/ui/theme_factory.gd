@@ -107,6 +107,16 @@ static func apply_panel_variant(panel: PanelContainer, variant: String) -> void:
 				"panel",
 				_make_9patch_box("res://assets/ui/dock_bottom_9patch.png", 4, 8.0, 4.0, Color(0.05, 0.09, 0.14, 0.96), Color(0.04, 0.06, 0.09))
 			)
+		"bottom_bar":
+			panel.add_theme_stylebox_override(
+				"panel",
+				_make_9patch_box("res://assets/ui/bottom_bar_9patch.png", 4, 10.0, 5.0, Color(0.06, 0.07, 0.10, 0.95), Color(0.03, 0.04, 0.06))
+			)
+		"util_strip":
+			panel.add_theme_stylebox_override(
+				"panel",
+				_make_9patch_box("res://assets/ui/bottom_bar_9patch.png", 4, 8.0, 3.0, Color(0.06, 0.07, 0.10, 0.92), Color(0.03, 0.04, 0.06))
+			)
 		"flat":
 			panel.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
 		_:
@@ -163,6 +173,53 @@ static func set_slot_active(btn: Button, active: bool, accent_border: Color = Co
 		var idle := _make_empty_box(4.0, 2.0)
 		var hov := _make_pixel_flat(Color(0.28, 0.42, 0.60, 0.46), Color(0.62, 0.80, 0.98, 0.55), 1, 4.0, 2.0)
 		var prs := _make_pixel_flat(Color(0.36, 0.54, 0.76, 0.62), accent_border, 1, 4.0, 2.0)
+		btn.add_theme_stylebox_override("normal", idle)
+		btn.add_theme_stylebox_override("disabled", idle)
+		btn.add_theme_stylebox_override("hover", hov)
+		btn.add_theme_stylebox_override("focus", hov)
+		btn.add_theme_stylebox_override("pressed", prs)
+
+
+static func set_commit_pill_active(btn: Button, active: bool) -> void:
+	if btn == null:
+		return
+	if active:
+		var act := _make_pixel_flat(Color(0.24, 0.20, 0.08, 0.95), Color(0.86, 0.70, 0.24, 1.0), 1, 5.0, 3.0)
+		btn.add_theme_stylebox_override("normal", act)
+		btn.add_theme_stylebox_override("hover", act)
+		btn.add_theme_stylebox_override("focus", act)
+		btn.add_theme_stylebox_override("pressed", act)
+		btn.add_theme_color_override("font_color", Color(1.0, 0.88, 0.42))
+		btn.add_theme_color_override("font_hover_color", Color(1.0, 0.92, 0.52))
+	else:
+		var idle := _make_pixel_flat(Color(0.12, 0.14, 0.19, 0.92), Color(0.22, 0.26, 0.34, 0.90), 1, 5.0, 3.0)
+		var hov := _make_pixel_flat(Color(0.18, 0.21, 0.28, 0.96), Color(0.38, 0.46, 0.58, 0.95), 1, 5.0, 3.0)
+		btn.add_theme_stylebox_override("normal", idle)
+		btn.add_theme_stylebox_override("disabled", idle)
+		btn.add_theme_stylebox_override("hover", hov)
+		btn.add_theme_stylebox_override("focus", hov)
+		btn.add_theme_stylebox_override("pressed", hov)
+		btn.add_theme_color_override("font_color", Color(0.82, 0.86, 0.92))
+		btn.add_theme_color_override("font_hover_color", Color.WHITE)
+
+
+static func set_photo_slot_active(btn: Button, active: bool, accent: Color = Color(0.92, 0.82, 0.46, 0.95)) -> void:
+	if btn == null:
+		return
+	if active:
+		var act := _make_pixel_flat(Color(accent.r * 0.25, accent.g * 0.25, accent.b * 0.25, 0.78), accent, 1, 4.0, 2.0)
+		act.content_margin_top = 12.0
+		btn.add_theme_stylebox_override("normal", act)
+		btn.add_theme_stylebox_override("hover", act)
+		btn.add_theme_stylebox_override("focus", act)
+		btn.add_theme_stylebox_override("pressed", act)
+	else:
+		var idle := _make_empty_box(4.0, 2.0)
+		idle.content_margin_top = 12.0
+		var hov := _make_pixel_flat(Color(0.16, 0.22, 0.32, 0.55), Color(0.45, 0.62, 0.84, 0.55), 1, 4.0, 2.0)
+		hov.content_margin_top = 12.0
+		var prs := _make_pixel_flat(Color(accent.r * 0.25, accent.g * 0.25, accent.b * 0.25, 0.78), accent, 1, 4.0, 2.0)
+		prs.content_margin_top = 12.0
 		btn.add_theme_stylebox_override("normal", idle)
 		btn.add_theme_stylebox_override("disabled", idle)
 		btn.add_theme_stylebox_override("hover", hov)

@@ -1,7 +1,13 @@
 package main
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
+	"image"
+	"image/color"
+	"image/gif"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -29,7 +35,7 @@ func TestValidateAntiSpoofingAndBounds(t *testing.T) {
 
 	// Out of bounds coordinate rejection
 	if _, err := ValidateAndSanitizeCommand(1, map[string]any{
-		"type": "expand_to", "x": 1500, "y": 100,
+		"type": "expand_to", "x": 2500, "y": 100,
 	}); err == nil {
 		t.Fatal("expected out-of-bounds error")
 	}
@@ -194,5 +200,164 @@ func TestTwoPlayerMatchAndReconnectFlow(t *testing.T) {
 	batches, _ := snap["batches"].([]any)
 	if len(batches) == 0 {
 		t.Fatal("expected historical batches in match_snapshot on reconnect")
+	}
+}
+
+func postJSONTest(t *testing.T, url, token string, body any) (int, map[string]any) {
+	t.Helper()
+	b, _ := json.Marshal(body)
+	req, _ := http.NewRequest(http.MethodPost, url, bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST %s failed: %v", url, err)
+	}
+	defer resp.Body.Close()
+	var out map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	return resp.StatusCode, out
+}
+
+func getJSONTest(t *testing.T, url, token string) (int, map[string]any) {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodGet, url, nil)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET %s failed: %v", url, err)
+	}
+	defer resp.Body.Close()
+	var out map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	return resp.StatusCode, out
+}
+
+func TestAccountFriendsSearchPresenceAndAvatar(t *testing.T) {
+	store, err := NewMatchStore(t.Context(), "")
+	if err != nil {
+		t.Fatalf("NewMatchStore failed: %v", err)
+	}
+	acct := NewAccountService(store)
+	rm := NewRoomManager(store)
+	defer rm.StopAll()
+
+	srv := httptest.NewServer(newServerMux(rm, store, acct))
+	defer srv.Close()
+
+	// 1. Register permanent usernames (case-insensitive unique check)
+	st, rAlice := postJSONTest(t, srv.URL+"/api/auth/register", "", map[string]any{"username": "Alice", "password": "secret1"})
+	if st != http.StatusCreated {
+		t.Fatalf("register Alice failed: status=%d body=%v", st, rAlice)
+	}
+	tokAlice := rAlice["token"].(string)
+
+	stDup, _ := postJSONTest(t, srv.URL+"/api/auth/register", "", map[string]any{"username": "alice", "password": "secret1"})
+	if stDup != http.StatusConflict {
+		t.Fatalf("expected 409 conflict for duplicate case-insensitive username, got %d", stDup)
+	}
+
+	stWrong, _ := postJSONTest(t, srv.URL+"/api/auth/login", "", map[string]any{"username": "Alice", "password": "bad"})
+	if stWrong != http.StatusUnauthorized {
+		t.Fatalf("expected 401 on wrong password, got %d", stWrong)
+	}
+
+	_, rBob := postJSONTest(t, srv.URL+"/api/auth/register", "", map[string]any{"username": "Bob", "password": "secret2"})
+	tokBob := rBob["token"].(string)
+	_, rCharlie := postJSONTest(t, srv.URL+"/api/auth/register", "", map[string]any{"username": "Charlie", "password": "secret3"})
+	tokCharlie := rCharlie["token"].(string)
+	_, rDave := postJSONTest(t, srv.URL+"/api/auth/register", "", map[string]any{"username": "Dave", "password": "secret4"})
+	tokDave := rDave["token"].(string)
+
+	// 2. DB Player Search verification
+	stS, sRes := getJSONTest(t, srv.URL+"/api/users/search?q=bo", tokAlice)
+	users, _ := sRes["users"].([]any)
+	if stS != http.StatusOK || len(users) != 1 || users[0].(map[string]any)["username"] != "Bob" {
+		t.Fatalf("expected search 'bo' -> [Bob], got status=%d users=%v", stS, users)
+	}
+	_, sNone := getJSONTest(t, srv.URL+"/api/users/search?q=nobody_xyz", tokAlice)
+	if len(sNone["users"].([]any)) != 0 {
+		t.Fatalf("expected empty search result for unknown player")
+	}
+
+	// 3. Friend requests & acceptance
+	stNF, _ := postJSONTest(t, srv.URL+"/api/friends/request", tokAlice, map[string]any{"username": "GhostUser"})
+	if stNF != http.StatusNotFound {
+		t.Fatalf("expected 404 adding non-existent user, got %d", stNF)
+	}
+	postJSONTest(t, srv.URL+"/api/friends/request", tokAlice, map[string]any{"username": "Bob"})
+	postJSONTest(t, srv.URL+"/api/friends/request", tokAlice, map[string]any{"username": "Charlie"})
+	postJSONTest(t, srv.URL+"/api/friends/request", tokAlice, map[string]any{"username": "Dave"})
+
+	postJSONTest(t, srv.URL+"/api/friends/respond", tokBob, map[string]any{"username": "Alice", "accept": true})
+	postJSONTest(t, srv.URL+"/api/friends/respond", tokCharlie, map[string]any{"username": "Alice", "accept": true})
+	postJSONTest(t, srv.URL+"/api/friends/respond", tokDave, map[string]any{"username": "Alice", "accept": true})
+
+	// 4. Online -> most recent offline -> longest offline sorting
+	now := time.Now().UTC()
+	acct.mu.Lock()
+	acct.accounts["bob"].LastSeenAt = now
+	acct.accounts["charlie"].LastSeenAt = now.Add(-5 * time.Minute)
+	acct.accounts["dave"].LastSeenAt = now.Add(-72 * time.Hour)
+	acct.mu.Unlock()
+
+	_, ov := getJSONTest(t, srv.URL+"/api/friends", tokAlice)
+	frList, _ := ov["friends"].([]any)
+	if len(frList) != 3 {
+		t.Fatalf("expected 3 friends, got %d", len(frList))
+	}
+	gotOrder := []string{
+		frList[0].(map[string]any)["username"].(string),
+		frList[1].(map[string]any)["username"].(string),
+		frList[2].(map[string]any)["username"].(string),
+	}
+	if gotOrder[0] != "Bob" || gotOrder[1] != "Charlie" || gotOrder[2] != "Dave" {
+		t.Fatalf("expected [Bob (online), Charlie (5m ago), Dave (3d ago)], got %v", gotOrder)
+	}
+	if !frList[0].(map[string]any)["online"].(bool) || frList[1].(map[string]any)["online"].(bool) {
+		t.Fatalf("expected Bob online=true and Charlie online=false")
+	}
+
+	// 5. Animated GIF PFP upload -> decoded 2-frame 128x64 PNG strip
+	pal := color.Palette{color.RGBA{255, 0, 0, 255}, color.RGBA{0, 255, 0, 255}}
+	f0 := image.NewPaletted(image.Rect(0, 0, 16, 16), pal)
+	f1 := image.NewPaletted(image.Rect(0, 0, 16, 16), pal)
+	for i := range f1.Pix {
+		f1.Pix[i] = 1
+	}
+	var gifBuf bytes.Buffer
+	if err := gif.EncodeAll(&gifBuf, &gif.GIF{Image: []*image.Paletted{f0, f1}, Delay: []int{12, 12}}); err != nil {
+		t.Fatalf("gif encode failed: %v", err)
+	}
+	reqUp, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/profile/avatar", bytes.NewReader(gifBuf.Bytes()))
+	reqUp.Header.Set("Authorization", "Bearer "+tokAlice)
+	respUp, err := http.DefaultClient.Do(reqUp)
+	if err != nil || respUp.StatusCode != http.StatusOK {
+		t.Fatalf("avatar upload failed: err=%v status=%v", err, respUp)
+	}
+	var upBody map[string]any
+	_ = json.NewDecoder(respUp.Body).Decode(&upBody)
+	_ = respUp.Body.Close()
+	userObj := upBody["user"].(map[string]any)
+	if int(userObj["avatar_frames"].(float64)) != 2 {
+		t.Fatalf("expected 2 avatar frames, got %v", userObj["avatar_frames"])
+	}
+	stripBytes, err := base64.StdEncoding.DecodeString(userObj["avatar_b64"].(string))
+	if err != nil {
+		t.Fatalf("decode avatar_b64 failed: %v", err)
+	}
+	stripImg, err := png.Decode(bytes.NewReader(stripBytes))
+	if err != nil || stripImg.Bounds().Dx() != 128 || stripImg.Bounds().Dy() != 64 {
+		t.Fatalf("expected 128x64 strip PNG, got err=%v bounds=%v", err, stripImg.Bounds())
+	}
+
+	// Verify /api/avatar/Alice serves same 2-frame PFP publicly
+	stAv, avRes := getJSONTest(t, srv.URL+"/api/avatar/Alice", "")
+	if stAv != http.StatusOK || int(avRes["user"].(map[string]any)["avatar_frames"].(float64)) != 2 {
+		t.Fatalf("GET /api/avatar/Alice failed: %d %v", stAv, avRes)
 	}
 }

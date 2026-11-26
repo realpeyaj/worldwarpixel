@@ -245,9 +245,9 @@ static func _pick_missile_target(ws: WorldState, nation: NationData) -> Vector2i
 		if nid == nation.id or ws.are_allied(nation.id, nid):
 			continue
 		var en: NationData = ws.nations[nid]
-		if not en.alive or en.owned_cell_count < 60:
+		if not en.alive or en.owned_cell_count < 240:
 			continue
-		var score: float = float(en.owned_cell_count) + float(en.structure_ids.size()) * 40.0
+		var score: float = float(en.owned_cell_count) * 0.25 + float(en.structure_ids.size()) * 40.0
 		if score > best_score:
 			best_score = score
 			best_pt = en.capital_cell
@@ -265,7 +265,7 @@ static func _pick_peaceful_ally_candidate(ws: WorldState, nation: NationData) ->
 			continue
 		var other: NationData = ws.nations[nid]
 		if other.alive and not other.is_betrayer(ws.current_tick) and not other.incoming_alliances.has(nation.id):
-			if nation.owned_cell_count >= 90 and other.capital_cell.distance_to(nation.capital_cell) < 28.0:
+			if nation.owned_cell_count >= 360 and other.capital_cell.distance_to(nation.capital_cell) < 56.0:
 				continue
 			return nid
 	return 0
@@ -289,7 +289,7 @@ static func _pick_build_cell(ws: WorldState, nation: NationData, s_type: String)
 			var anchor: StructureData = ws.structures.get(sid, null)
 			if anchor == null or anchor.type == StructureData.TYPE_FACTORY:
 				continue
-			for r in [14, 22, 30]:
+			for r in [28, 44, 60]:
 				for angle_i in range(8):
 					var ang: float = float(angle_i) * (TAU / 8.0)
 					var cx: int = clampi(anchor.cell.x + int(round(cos(ang) * r)), 0, ws.sim_width - 1)
@@ -297,7 +297,7 @@ static func _pick_build_cell(ws: WorldState, nation: NationData, s_type: String)
 					if ws.can_place_structure(nation.id, s_type, cx, cy).get("ok", false):
 						return Vector2i(cx, cy)
 
-	for r in [0, 12, 22, 34]:
+	for r in [0, 24, 44, 68]:
 		for angle_i in range(8):
 			var ang: float = float(angle_i) * (TAU / 8.0)
 			var cx: int = clampi(cap.x + int(round(cos(ang) * r)), 0, ws.sim_width - 1)
@@ -321,8 +321,8 @@ static func _pick_smart_land_target(ws: WorldState, nation: NationData, borders:
 		var sx: int = b_idx % ws.sim_width
 		var sy: int = int(b_idx / ws.sim_width)
 		for dir: Vector2i in [
-			Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1),
-			Vector2i(8, 0), Vector2i(-8, 0), Vector2i(0, 8), Vector2i(0, -8),
+			Vector2i(2, 0), Vector2i(-2, 0), Vector2i(0, 2), Vector2i(0, -2),
+			Vector2i(16, 0), Vector2i(-16, 0), Vector2i(0, 16), Vector2i(0, -16),
 		]:
 			var nx: int = sx + dir.x
 			var ny: int = sy + dir.y
@@ -362,7 +362,7 @@ static func _pick_overseas_target(ws: WorldState, nation: NationData, tick: int)
 		return Vector2i(-1, -1)
 	var cap_lm: int = ws.landmass_grid[nation.capital_cell.y * ws.sim_width + nation.capital_cell.x]
 	var best := Vector2i(-1, -1)
-	var best_d2 := 15625.0  # <= 125 sim cells
+	var best_d2 := 62500.0  # <= 250 1px cells (=125 old cells)
 	var start: int = (tick + nation.id * 5) % cands.size()
 	for i in range(mini(cands.size(), 10)):
 		var pt: Vector2i = cands[(start + i) % cands.size()]

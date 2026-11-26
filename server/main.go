@@ -21,8 +21,15 @@ var wsUpgrader = websocket.Upgrader{
 	},
 }
 
-func newServerMux(rm *RoomManager, store *MatchStore) http.Handler {
+func newServerMux(rm *RoomManager, store *MatchStore, acct ...*AccountService) http.Handler {
 	mux := http.NewServeMux()
+	var accountSvc *AccountService
+	if len(acct) > 0 && acct[0] != nil {
+		accountSvc = acct[0]
+	} else {
+		accountSvc = NewAccountService(store)
+	}
+	RegisterAccountRoutes(mux, accountSvc)
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -59,6 +66,15 @@ func newServerMux(rm *RoomManager, store *MatchStore) http.Handler {
 		roomCode := q.Get("room")
 		playerName := q.Get("name")
 		token := q.Get("token")
+		acctToken := q.Get("account_token")
+
+		var authedRec *AccountRecord
+		if acctToken != "" {
+			if rec, authErr := accountSvc.Authenticate(r.Context(), acctToken, true); authErr == nil {
+				authedRec = rec
+				playerName = rec.Username
+			}
+		}
 
 		room, err := rm.CreateOrGetRoom(roomCode)
 		if err != nil {
@@ -87,6 +103,12 @@ func newServerMux(rm *RoomManager, store *MatchStore) http.Handler {
 			_ = conn.WriteMessage(websocket.TextMessage, mustJSON(map[string]any{"type": "error", "message": err.Error()}))
 			_ = conn.Close()
 			return
+		}
+		if authedRec != nil {
+			room.mu.Lock()
+			slot.AccountUser = authedRec.Username
+			slot.AvatarHash = authedRec.AvatarHash
+			room.mu.Unlock()
 		}
 
 		// Writer pump with 20s ping keepalive
@@ -164,12 +186,13 @@ func main() {
 	defer store.Close()
 
 	rm := NewRoomManager(store)
+	acctSvc := NewAccountService(store)
 	stopJanitor := make(chan struct{})
 	go rm.StartJanitor(stopJanitor)
 
 	srv := &http.Server{
 		Addr:              ":" + port,
-		Handler:           newServerMux(rm, store),
+		Handler:           newServerMux(rm, store, acctSvc),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

@@ -24,6 +24,7 @@ buses/default_bus_layout="res://resources/default_bus_layout.tres"
 
 [autoload]
 
+PatchLoader="*res://scripts/util/patch_loader.gd"
 AudioManager="*res://scripts/audio/audio_manager.gd"
 
 [display]

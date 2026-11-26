@@ -8,6 +8,7 @@ extends Node
 var world_state := WorldState.new()
 var simulation_clock := SimulationClock.new()
 var mp_client := MPClient.new()
+var account_client := AccountClient.new()
 var is_multiplayer: bool = false
 var _mp_spawning: bool = false
 var _pending_batches: Array[Dictionary] = []
@@ -61,10 +62,48 @@ func _ready() -> void:
 	hud.mp_connect_requested.connect(_on_mp_connect_requested)
 	hud.mp_disconnect_requested.connect(_on_mp_disconnect_requested)
 	hud.mp_start_match_requested.connect(func(ai_c: int) -> void: mp_client.send_start_match(ai_c))
-	hud.friend_invite_requested.connect(func(f_name: String, _code: String) -> void: mp_client.send_friend_invite(f_name))
+	hud.friend_invite_requested.connect(func(f_name: String, r_code: String) -> void:
+		mp_client.send_friend_invite(f_name)
+		account_client.send_room_invite(f_name, r_code)
+	)
+	hud.account_login_requested.connect(func(u: String, pw: String) -> void: account_client.login_account(u, pw))
+	hud.account_register_requested.connect(func(u: String, pw: String) -> void: account_client.register_account(u, pw))
+	hud.account_logout_requested.connect(func() -> void: account_client.logout())
+	hud.pfp_file_selected.connect(func(p: String) -> void: account_client.import_and_upload_avatar(p))
+	hud.friend_search_requested.connect(func(q: String) -> void: account_client.search_players(q))
+	hud.friend_request_send_requested.connect(func(u: String) -> void: account_client.send_friend_request(u))
+	hud.friend_request_respond_requested.connect(func(u: String, acc: bool) -> void: account_client.respond_friend_request(u, acc))
+	hud.friend_remove_requested.connect(func(u: String) -> void: account_client.remove_friend(u))
+	hud.friends_refresh_requested.connect(func() -> void: account_client.fetch_friends_overview())
 	hud.menu_visibility_changed.connect(_on_menu_visibility_changed)
 	hud.quit_requested.connect(func() -> void: get_tree().quit(0))
 	_on_menu_visibility_changed(hud.menu_overlay.visible)
+
+	add_child(account_client)
+	hud.set_avatar_cache_lookup(account_client.get_cached_avatar)
+	hud.set_account_state(account_client.is_logged_in, account_client.username)
+	hud.set_local_avatar(account_client.local_avatar_frames, account_client.local_avatar_delay_ms)
+	account_client.auth_changed.connect(_on_account_auth_changed)
+	account_client.auth_error.connect(func(msg: String) -> void:
+		hud.set_account_error(msg)
+		hud.show_toast(msg, true)
+		AudioManager.play_error()
+	)
+	account_client.avatar_updated.connect(_on_avatar_updated)
+	account_client.search_results_received.connect(hud.update_search_results)
+	account_client.friends_overview_received.connect(hud.update_friends_overview)
+	account_client.friend_action_result.connect(func(ok: bool, msg: String) -> void:
+		hud.show_toast(msg, not ok)
+		if ok:
+			AudioManager.play_ui_tap()
+		else:
+			AudioManager.play_error()
+	)
+	account_client.incoming_friend_request_notified.connect(func(cnt: int) -> void:
+		AudioManager.play_friend_request()
+		hud.show_toast("Incoming Friend Request (%d)!" % cnt, false)
+	)
+	account_client.incoming_room_invite_notified.connect(_on_mp_invite_received)
 
 	mp_client.lobby_updated.connect(hud.update_mp_lobby)
 	mp_client.spawn_phase_started.connect(_on_mp_spawn_phase_started)
@@ -72,12 +111,14 @@ func _ready() -> void:
 	mp_client.tick_batch_received.connect(_on_mp_tick_batch)
 	mp_client.snapshot_received.connect(_on_mp_snapshot_received)
 	mp_client.ping_updated.connect(hud.update_ping)
-	mp_client.invite_received.connect(hud.show_incoming_invite)
+	mp_client.invite_received.connect(_on_mp_invite_received)
 	mp_client.disconnected.connect(_on_mp_disconnected)
 	mp_client.server_error.connect(func(msg: String) -> void: hud.show_toast(msg, true))
 
 	world_state.match_started.connect(_on_match_started)
 	world_state.territory_changed.connect(func() -> void: hud.mark_leaderboard_dirty())
+	world_state.player_land_conquered.connect(_on_player_land_conquered)
+	world_state.player_territory_attacked.connect(_on_player_territory_attacked)
 	world_state.expansion_updated.connect(func() -> void: hud.mark_expansions_dirty())
 	world_state.structure_changed.connect(func(_sid: int) -> void: hud.refresh_all())
 	world_state.structure_upgraded.connect(_on_structure_upgraded)
@@ -183,6 +224,7 @@ func _on_spawn_requested(cell: Vector2i) -> void:
 
 func _on_match_started() -> void:
 	hud.on_match_started()
+	_sync_local_player_map_avatar()
 	AudioManager.start_game_music(2.5)
 	hud.show_toast("Nation founded! Use [1] Attack or build Towns, Ports & Factories.", false)
 
@@ -196,6 +238,7 @@ func _on_new_match_requested() -> void:
 	world_state.reset_match()
 	simulation_clock.tick_count = 0
 	simulation_clock.accumulator = 0.0
+	world_map.layer4_cities.clear_nation_avatars()
 	world_map.set_build_mode("")
 	world_map.set_missile_mode("")
 	world_map.set_selected_ship(0)
@@ -211,10 +254,11 @@ func _on_mp_connect_requested(ws_url: String, room_code: String, player_name: St
 	if _http_ping_inflight:
 		_tcp_ping.disconnect_from_host()
 		_http_ping_inflight = false
+	account_client.set_ws_url(ws_url)
 	is_multiplayer = true
 	_mp_spawning = false
 	_pending_batches.clear()
-	mp_client.connect_to_room(ws_url, room_code, player_name)
+	mp_client.connect_to_room(ws_url, room_code, player_name, "", account_client.session_token)
 
 
 func _on_mp_disconnect_requested() -> void:
@@ -247,6 +291,8 @@ func _on_mp_match_begun(seed_val: int, local_nid: int, ai_count: int, players: A
 		"ai_count": ai_count,
 		"players": players,
 	})
+	_sync_local_player_map_avatar()
+	_fetch_mp_player_avatars(players)
 	world_map._refresh_lut()
 	world_map.sync_owner_texture()
 
@@ -259,13 +305,16 @@ func _on_mp_snapshot_received(snap: Dictionary) -> void:
 	is_multiplayer = true
 	_mp_spawning = false
 	_pending_batches.clear()
+	var mp_players: Array = snap.get("players", [])
 	world_state.apply_command({
 		"type": "start_mp_match",
 		"seed": int(snap.get("seed", 1)),
 		"local_nation_id": int(snap.get("local_nation_id", 1)),
 		"ai_count": int(snap.get("ai_count", 4)),
-		"players": snap.get("players", []),
+		"players": mp_players,
 	})
+	_sync_local_player_map_avatar()
+	_fetch_mp_player_avatars(mp_players)
 	for batch_v: Variant in snap.get("batches", []):
 		if batch_v is Dictionary:
 			var b := batch_v as Dictionary
@@ -279,6 +328,41 @@ func _on_mp_snapshot_received(snap: Dictionary) -> void:
 	world_map.sync_owner_texture()
 	hud.refresh_all()
 	hud.show_toast("Reconnected & synced to tick %d!" % world_state.current_tick, false)
+
+
+func _on_account_auth_changed(logged_in: bool, uname: String, msg: String) -> void:
+	hud.set_account_state(logged_in, uname, msg)
+	hud.set_local_avatar(account_client.local_avatar_frames, account_client.local_avatar_delay_ms)
+	_sync_local_player_map_avatar()
+	if not msg.is_empty() and not hud.account_card.visible:
+		hud.show_toast(msg, false)
+
+
+func _on_avatar_updated(uname: String, frames: Array, delay_ms: int) -> void:
+	if uname.to_lower() == account_client.username.to_lower() or account_client.username.is_empty():
+		hud.set_local_avatar(frames, delay_ms)
+		_sync_local_player_map_avatar()
+
+
+func _sync_local_player_map_avatar() -> void:
+	if world_state.player_nation_id > 0 and not account_client.local_avatar_frames.is_empty():
+		world_map.layer4_cities.set_nation_avatar(world_state.player_nation_id, account_client.local_avatar_frames, account_client.local_avatar_delay_ms)
+
+
+func _fetch_mp_player_avatars(players: Array) -> void:
+	for pv: Variant in players:
+		if not (pv is Dictionary):
+			continue
+		var pd := pv as Dictionary
+		var nid: int = int(pd.get("nation_id", 0))
+		var acct_u: String = str(pd.get("account_username", "")).strip_edges()
+		if nid <= 0 or nid == world_state.player_nation_id or acct_u.is_empty():
+			continue
+		if str(pd.get("avatar_hash", "")).is_empty():
+			continue
+		account_client.fetch_remote_avatar(acct_u, func(_u: String, frames: Array, dms: int) -> void:
+			world_map.layer4_cities.set_nation_avatar(nid, frames, dms)
+		)
 
 
 func _on_mp_disconnected(reason: String) -> void:
@@ -411,6 +495,14 @@ func _on_trade_completed(nation_id: int, _world_pos: Vector2, _gold_amount: floa
 		AudioManager.play_trade_gold()
 
 
+func _on_player_land_conquered(cells_claimed: int, is_contested: bool) -> void:
+	AudioManager.play_land_conquer_pop(cells_claimed, is_contested)
+
+
+func _on_player_territory_attacked(_attacker_id: int, _cells_lost: int) -> void:
+	AudioManager.play_under_attack_warning()
+
+
 func _on_command_rejected(reason: String) -> void:
 	hud.show_toast(reason, true)
 	AudioManager.play_error()
@@ -424,7 +516,7 @@ func _on_nation_eliminated(dead_nid: int, conqueror_nid: int) -> void:
 		world_map.set_missile_mode("")
 		world_map.set_selected_ship(0)
 		world_map.set_selected_structure(0)
-		AudioManager.play_retreat_horn()
+		AudioManager.play_defeat()
 		hud.enter_spectator_mode(c_name)
 	else:
 		var d_n: NationData = world_state.get_nation(dead_nid)
@@ -437,11 +529,19 @@ func _on_victory_reached(winner_id: int, pct: float) -> void:
 	var nation: NationData = world_state.get_nation(winner_id)
 	var name_str: String = nation.name if nation != null else "Nation #%d" % winner_id
 	hud.show_toast("VICTORY: %s controls %.1f%% of Earth!" % [name_str, pct], false)
-	AudioManager.play_victory()
+	if winner_id == world_state.player_nation_id:
+		AudioManager.play_victory()
+	else:
+		AudioManager.play_defeat()
 	hud.refresh_all()
 	hud.show_victory_screen(winner_id, pct)
 	if is_multiplayer and mp_client.is_socket_active():
 		mp_client.send_match_over(winner_id)
+
+
+func _on_mp_invite_received(from_name: String, room_code: String) -> void:
+	AudioManager.play_friend_request()
+	hud.show_incoming_invite(from_name, room_code)
 
 
 func _on_cancel_ship_requested(sid: int) -> void:

@@ -5,13 +5,13 @@ extends Node
 const SFX_DIR := "res://assets/audio/sfx/"
 const AMBIENCE_PATH := "res://assets/audio/ambience/world_ocean_ambience.wav"
 const THEME_PATH := "res://assets/audio/music/world_war_pixel_theme.wav"
-const SFX_POOL_SIZE := 10
+const SFX_POOL_SIZE := 16
 
 var _categories: Dictionary = {
 	"ui_tap": ["drop_001.wav", "drop_002.wav"],
 	"expand_launch": ["glass_001.wav", "glass_002.wav"],
 	"build_placed": ["maximize_001.wav", "maximize_002.wav"],
-	"upgrade_instant": ["maximize_001.wav", "maximize_002.wav"],
+	"upgrade_instant": ["upgrade_001.wav", "upgrade_002.wav"],
 	"trade_gold": ["pluck_001.wav", "pluck_002.wav"],
 	"victory": ["victory_fanfare.wav"],
 	"error": ["error_001.wav"],
@@ -35,6 +35,17 @@ var _categories: Dictionary = {
 	"warship_horn": ["warship_horn.wav"],
 	"troop_donate": ["troop_donate.wav"],
 	"retreat_horn": ["retreat_horn.wav"],
+	"land_conquer_pop": [
+		"conquer_pop_001.wav",
+		"conquer_pop_002.wav",
+		"conquer_pop_003.wav",
+		"conquer_pop_004.wav",
+		"conquer_pop_005.wav",
+		"conquer_pop_006.wav",
+	],
+	"invasion_warning": ["invasion_warning.wav"],
+	"friend_request": ["friend_request.wav"],
+	"defeat": ["defeat_drums.wav"],
 }
 
 var _category_buses: Dictionary = {
@@ -65,6 +76,10 @@ var _category_buses: Dictionary = {
 	"warship_horn": "SFX",
 	"troop_donate": "SFX",
 	"retreat_horn": "UI",
+	"land_conquer_pop": "SFX",
+	"invasion_warning": "UI",
+	"friend_request": "UI",
+	"defeat": "SFX",
 }
 
 var _category_cooldown_ms: Dictionary = {
@@ -95,6 +110,10 @@ var _category_cooldown_ms: Dictionary = {
 	"warship_horn": 220,
 	"troop_donate": 150,
 	"retreat_horn": 180,
+	"land_conquer_pop": 72,
+	"invasion_warning": 2800,
+	"friend_request": 500,
+	"defeat": 800,
 }
 
 var _streams: Dictionary = {}
@@ -105,6 +124,7 @@ var _ambience_player: AudioStreamPlayer
 var _music_player: AudioStreamPlayer
 var _duck_tween: Tween
 var _music_tween: Tween
+var _music_duck_tween: Tween
 var _is_muted: bool = false
 var _is_headless: bool = false
 
@@ -131,6 +151,8 @@ func _exit_tree() -> void:
 		_duck_tween.kill()
 	if _music_tween != null and _music_tween.is_valid():
 		_music_tween.kill()
+	if _music_duck_tween != null and _music_duck_tween.is_valid():
+		_music_duck_tween.kill()
 	AudioServer.lock()
 	if _ambience_player != null:
 		_ambience_player.stop()
@@ -216,24 +238,28 @@ func start_world_ambience(fade_sec: float = 2.0) -> void:
 		_ambience_player.volume_db = -30.0
 		_ambience_player.play()
 	var tw := create_tween()
-	tw.tween_property(_ambience_player, "volume_db", -6.0, fade_sec)
+	tw.tween_property(_ambience_player, "volume_db", -9.5, fade_sec)
 
 
 func start_game_music(fade_sec: float = 2.5) -> void:
 	if _is_headless or _music_player == null or _music_player.stream == null:
 		return
+	if _music_duck_tween != null and _music_duck_tween.is_valid():
+		_music_duck_tween.kill()
 	if _music_tween != null and _music_tween.is_valid():
 		_music_tween.kill()
 	if not _music_player.playing:
 		_music_player.volume_db = -32.0
 		_music_player.play()
 	_music_tween = create_tween()
-	_music_tween.tween_property(_music_player, "volume_db", -11.0, fade_sec)
+	_music_tween.tween_property(_music_player, "volume_db", -13.0, fade_sec)
 
 
 func stop_game_music(fade_sec: float = 0.8) -> void:
 	if _is_headless or _music_player == null:
 		return
+	if _music_duck_tween != null and _music_duck_tween.is_valid():
+		_music_duck_tween.kill()
 	if _music_tween != null and _music_tween.is_valid():
 		_music_tween.kill()
 	if not _music_player.playing:
@@ -259,11 +285,17 @@ func play_sfx(category: String, volume_db: float = -8.0, pitch_center: float = 1
 		return
 	_last_played_ms[category] = now
 
-	var player: AudioStreamPlayer = _sfx_pool[_pool_cursor]
-	_pool_cursor = (_pool_cursor + 1) % _sfx_pool.size()
+	var player: AudioStreamPlayer = null
+	for p_cand: AudioStreamPlayer in _sfx_pool:
+		if not p_cand.playing:
+			player = p_cand
+			break
+	if player == null:
+		player = _sfx_pool[_pool_cursor]
+		_pool_cursor = (_pool_cursor + 1) % _sfx_pool.size()
 	player.stream = variants[randi() % variants.size()]
 	player.bus = StringName(_category_buses.get(category, "SFX"))
-	player.volume_db = volume_db
+	player.volume_db = volume_db + randf_range(-0.6, 0.4)
 	player.pitch_scale = pitch_center + randf_range(-pitch_jitter, pitch_jitter)
 	player.play()
 
@@ -320,6 +352,7 @@ func play_panel_close() -> void:
 func play_victory() -> void:
 	play_sfx("victory", -5.0, 1.0, 0.01)
 	duck_ambience(1.4, -8.0)
+	duck_music(1.6, -5.0)
 
 
 func play_error() -> void:
@@ -346,6 +379,7 @@ func play_sam_launch() -> void:
 func play_nuke_blast() -> void:
 	play_sfx("nuke_blast", -4.5, 0.95, 0.03)
 	duck_ambience(1.3, -7.5)
+	duck_music(1.4, -4.5)
 
 
 func play_sam_intercept() -> void:
@@ -359,6 +393,7 @@ func play_diplomacy_chime() -> void:
 func play_betrayal_alert() -> void:
 	play_sfx("betrayal_alert", -7.0, 0.96, 0.02)
 	duck_ambience(0.85, -5.0)
+	duck_music(0.85, -3.5)
 
 
 func play_boat_bell() -> void:
@@ -381,15 +416,47 @@ func play_retreat_horn() -> void:
 	play_sfx("retreat_horn", -10.5, 1.0, 0.02)
 
 
+func play_land_conquer_pop(cells_claimed: int = 1, is_contested: bool = false) -> void:
+	var vol_db: float = (-7.2 if is_contested else -8.5) + (0.5 if cells_claimed >= 5 else 0.0)
+	var pitch_c: float = 0.96 if is_contested else 1.03
+	play_sfx("land_conquer_pop", vol_db, pitch_c, 0.08)
+
+
+func play_under_attack_warning() -> void:
+	play_sfx("invasion_warning", -8.5, 1.0, 0.015)
+	duck_music(0.75, -3.0)
+
+
+func play_friend_request() -> void:
+	play_sfx("friend_request", -8.0, 1.0, 0.015)
+
+
+func play_defeat() -> void:
+	play_sfx("defeat", -5.0, 1.0, 0.01)
+	duck_ambience(1.6, -8.0)
+	duck_music(1.8, -5.5)
+
+
 func duck_ambience(duration_sec: float = 0.7, duck_offset_db: float = -6.0) -> void:
 	if _is_headless or _ambience_player == null:
 		return
 	if _duck_tween != null and _duck_tween.is_valid():
 		_duck_tween.kill()
 	_duck_tween = create_tween()
-	_duck_tween.tween_property(_ambience_player, "volume_db", -6.0 + duck_offset_db, 0.08)
+	_duck_tween.tween_property(_ambience_player, "volume_db", -9.5 + duck_offset_db, 0.08)
 	_duck_tween.tween_interval(duration_sec)
-	_duck_tween.tween_property(_ambience_player, "volume_db", -6.0, 0.45)
+	_duck_tween.tween_property(_ambience_player, "volume_db", -9.5, 0.45)
+
+
+func duck_music(duration_sec: float = 1.0, duck_offset_db: float = -4.5) -> void:
+	if _is_headless or _music_player == null or not _music_player.playing or _music_player.volume_db <= -35.0:
+		return
+	if _music_duck_tween != null and _music_duck_tween.is_valid():
+		_music_duck_tween.kill()
+	_music_duck_tween = create_tween()
+	_music_duck_tween.tween_property(_music_player, "volume_db", clampf(-13.0 + duck_offset_db, -40.0, 0.0), 0.08)
+	_music_duck_tween.tween_interval(duration_sec)
+	_music_duck_tween.tween_property(_music_player, "volume_db", -13.0, 0.55)
 
 
 func set_bus_volume(bus_name: String, linear: float) -> void:

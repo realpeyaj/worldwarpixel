@@ -23,8 +23,8 @@ from scipy import ndimage
 
 MAP_W = 2048
 MAP_H = 1024
-SIM_W = 1024
-SIM_H = 512
+SIM_W = 2048
+SIM_H = 1024
 NAV_W = 1024
 NAV_H = 512
 SEED = 42
@@ -247,28 +247,28 @@ def _get_real_strait_sim_cells() -> List[Tuple[int, int]]:
         # Irish Sea North Channel
         (494, 98), (494, 99), (495, 98),
         # Messina, Bonifacio, Tartary, La Perouse, Palk
-        (int(round(lon_to_x(15.65, SIM_W))), int(round(lat_to_y(38.15, SIM_H)))),
-        (int(round(lon_to_x(9.2, SIM_W))), int(round(lat_to_y(41.35, SIM_H)))),
-        (int(round(lon_to_x(141.6, SIM_W))), int(round(lat_to_y(52.2, SIM_H)))),
-        (int(round(lon_to_x(142.0, SIM_W))), int(round(lat_to_y(45.7, SIM_H)))),
-        (int(round(lon_to_x(79.6, SIM_W))), int(round(lat_to_y(9.2, SIM_H)))),
+        (int(round(lon_to_x(15.65, NAV_W))), int(round(lat_to_y(38.15, NAV_H)))),
+        (int(round(lon_to_x(9.2, NAV_W))), int(round(lat_to_y(41.35, NAV_H)))),
+        (int(round(lon_to_x(141.6, NAV_W))), int(round(lat_to_y(52.2, NAV_H)))),
+        (912, 126), (913, 126), (914, 126), (915, 126), (916, 126),
+        (int(round(lon_to_x(79.6, NAV_W))), int(round(lat_to_y(9.2, NAV_H)))),
         # Strait of Gibraltar
         (495, 154), (496, 154), (497, 154),
-        # Oresund / Kattegat -> Baltic Sea
-        (544, 96), (545, 96), (545, 97), (546, 97), (547, 97), (547, 98), (548, 98),
+        # Skagerrak / Kattegat / Oresund -> Baltic Sea
+        (543, 92), (544, 91), (544, 96), (545, 96), (545, 97), (546, 97), (547, 97), (547, 98), (548, 98),
         # Aegean Cyclades channel -> Dardanelles & Bosporus -> Kerch Strait
         (585, 148), (585, 149), (585, 150), (585, 151), (586, 151), (586, 152),
         (586, 142), (586, 141), (587, 141), (588, 141),
         (588, 140), (589, 140), (590, 140), (591, 140), (592, 140), (592, 139), (593, 139), (593, 138),
         (616, 126), (616, 127), (616, 128),
         # Bab-el-Mandeb (Red Sea <-> Gulf of Aden)
-        (632, 216), (633, 216), (633, 217), (633, 218), (634, 218), (634, 219), (635, 219), (635, 220),
+        (632, 216), (633, 216), (633, 217), (633, 218), (634, 218), (634, 219), (635, 219), (635, 220), (636, 220),
         # Strait of Hormuz (Persian Gulf <-> Gulf of Oman)
         (670, 181), (671, 181), (672, 181), (673, 181),
         # White Sea Throat
         (626, 68), (626, 67), (627, 67),
     ]
-    return [(sx, sy) for sx, sy in cells if 0 <= sx < SIM_W and 0 <= sy < SIM_H]
+    return [(sx, sy) for sx, sy in cells if 0 <= sx < NAV_W and 0 <= sy < NAV_H]
 
 
 def _open_sea_straits_hi(land_hi: np.ndarray) -> np.ndarray:
@@ -494,8 +494,8 @@ def downsample_to_sim_grid(grid_hi: np.ndarray) -> np.ndarray:
 
 
 def build_ocean_nav_grid(sim_grid: np.ndarray) -> np.ndarray:
-    """Build 1024x512 strict water-only nav grid (0=blocked, 1=coastal/strait T_OCEAN, 2=deep ocean)."""
-    open_ocean = sim_grid == T_OCEAN
+    """Build 1024x512 strict water-only nav grid (all 2x2 sim sub-pixels strictly T_OCEAN)."""
+    open_ocean = (sim_grid.reshape(NAV_H, 2, NAV_W, 2) == T_OCEAN).all(axis=(1, 3))
     # Keep strictly the single 4-connected global ocean component so boats never tunnel across land.
     comp, _ = ndimage.label(open_ocean)
     sizes = np.bincount(comp.ravel())
@@ -507,7 +507,8 @@ def build_ocean_nav_grid(sim_grid: np.ndarray) -> np.ndarray:
     nav = np.zeros((NAV_H, NAV_W), dtype=np.uint8)
     nav[connected] = 1
     nav[connected & (dist >= 2.0)] = 2
-    assert int(np.sum((nav > 0) & (sim_grid != T_OCEAN))) == 0, "Ocean nav grid overlapped non-ocean terrain!"
+    nav_hi = np.repeat(np.repeat(nav > 0, 2, axis=0), 2, axis=1)
+    assert int(np.sum(nav_hi & (sim_grid != T_OCEAN))) == 0, "Ocean nav grid overlapped non-ocean terrain!"
     return nav
 
 
@@ -547,10 +548,11 @@ def main() -> None:
     terrain_img = render_crisp_pixel_art_terrain(grid_hi, elev, gj["ne_50m_rivers_lake_centerlines.geojson"], rng)
     terrain_img.save(os.path.join(ASSET_MAP_DIR, "world_terrain.png"), format="PNG")
 
-    print("[map-builder] Building 1024x512 simulation grid and strict 1024x512 ocean nav grid...")
-    sim_grid = downsample_to_sim_grid(grid_hi)
+    print("[map-builder] Building 1:1 2048x1024 simulation grid and strict 1024x512 ocean nav grid...")
+    sim_grid = grid_hi.copy()
     nav_grid = build_ocean_nav_grid(sim_grid)
-    assert int(np.sum((nav_grid > 0) & (sim_grid != T_OCEAN))) == 0
+    nav_hi = np.repeat(np.repeat(nav_grid > 0, 2, axis=0), 2, axis=1)
+    assert int(np.sum(nav_hi & (sim_grid != T_OCEAN))) == 0
 
     # Verify all major world seas/gulfs are navigable and part of the unified connected ocean
     sea_comp, _ = ndimage.label(nav_grid > 0)
@@ -568,7 +570,7 @@ def main() -> None:
         ("Persian Gulf", 51.5, 26.5),
         ("Baltic Sea", 19.8, 57.5),
         ("North Sea", 3.5, 56.0),
-        ("English Channel", -1.5, 50.0),
+        ("English Channel", -1.5, 50.2),
         ("Hudson Bay", -84.0, 59.5),
         ("Gulf of Mexico", -90.0, 25.0),
         ("Caribbean Sea", -75.0, 15.0),
@@ -607,7 +609,7 @@ def main() -> None:
         ("Falklands", -59.5, -51.7),
         ("Antarctica South Pole", 0.0, -82.0),
     ]:
-        assert find_nearest_land(sim_grid, lon, lat, max_r=4) is not None, f"Missing {label}"
+        assert find_nearest_land(sim_grid, lon, lat, max_r=8) is not None, f"Missing {label}"
 
     region_specs = [
         ("North America", -100.0, 44.0), ("United States", -96.0, 38.0), ("Canada", -102.0, 58.0),
@@ -637,7 +639,7 @@ def main() -> None:
     ]
     ai_spawns = []
     for lon, lat in ai_coords:
-        pt = find_nearest_land(sim_grid, lon, lat, max_r=6)
+        pt = find_nearest_land(sim_grid, lon, lat, max_r=12)
         if pt is not None:
             ai_spawns.append({"x": pt[0], "y": pt[1]})
 

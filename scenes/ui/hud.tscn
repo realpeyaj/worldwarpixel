@@ -18,17 +18,11 @@ mouse_filter = 2
 [node name="TopBar" type="PanelContainer" parent="Root"]
 visible = false
 layout_mode = 1
-anchors_preset = 7
-anchor_left = 0.5
-anchor_top = 1.0
-anchor_right = 0.5
-anchor_bottom = 1.0
-offset_left = -374.0
-offset_top = -90.0
-offset_right = 374.0
-offset_bottom = -56.0
-grow_horizontal = 2
-grow_vertical = 0
+anchors_preset = 0
+offset_left = 10.0
+offset_top = 10.0
+offset_right = 290.0
+offset_bottom = 38.0
 
 [node name="HBox" type="HBoxContainer" parent="Root/TopBar"]
 layout_mode = 2
@@ -43,47 +37,13 @@ text = "WORLD WAR PIXEL"
 visible = false
 layout_mode = 2
 
-[node name="GoldIcon" type="TextureRect" parent="Root/TopBar/HBox"]
-custom_minimum_size = Vector2(15, 15)
-layout_mode = 2
-size_flags_vertical = 4
-stretch_mode = 5
-
-[node name="GoldLabel" type="Label" parent="Root/TopBar/HBox"]
-layout_mode = 2
-modulate = Color(0.98, 0.90, 0.56, 1)
-text = "Pesos: --"
-
-[node name="VSep2" type="VSeparator" parent="Root/TopBar/HBox"]
-layout_mode = 2
-
-[node name="TroopsIcon" type="TextureRect" parent="Root/TopBar/HBox"]
-custom_minimum_size = Vector2(15, 15)
-layout_mode = 2
-size_flags_vertical = 4
-stretch_mode = 5
-
-[node name="TroopsLabel" type="Label" parent="Root/TopBar/HBox"]
-layout_mode = 2
-modulate = Color(0.80, 0.92, 1.0, 1)
-text = "Troops: --"
-
-[node name="VSep3" type="VSeparator" parent="Root/TopBar/HBox"]
-layout_mode = 2
-
-[node name="WorldPctLabel" type="Label" parent="Root/TopBar/HBox"]
-layout_mode = 2
-size_flags_horizontal = 3
-text = "Select Spawn Point"
-clip_text = true
-
-[node name="VSep4" type="VSeparator" parent="Root/TopBar/HBox"]
-layout_mode = 2
-
 [node name="ClockLabel" type="Label" parent="Root/TopBar/HBox"]
 layout_mode = 2
 modulate = Color(0.82, 0.88, 0.95, 1)
 text = "Day 1  00:00"
+
+[node name="VSep4" type="VSeparator" parent="Root/TopBar/HBox"]
+layout_mode = 2
 
 [node name="MapModeBtn" type="Button" parent="Root/TopBar/HBox"]
 layout_mode = 2
@@ -148,9 +108,9 @@ anchor_left = 0.5
 anchor_top = 1.0
 anchor_right = 0.5
 anchor_bottom = 1.0
-offset_left = -374.0
-offset_top = -56.0
-offset_right = 374.0
+offset_left = -562.0
+offset_top = -76.0
+offset_right = 562.0
 offset_bottom = -8.0
 grow_horizontal = 2
 grow_vertical = 0
@@ -158,82 +118,519 @@ grow_vertical = 0
 [node name="HBox" type="HBoxContainer" parent="Root/ActionDock"]
 layout_mode = 2
 alignment = 1
+theme_override_constants/separation = 8
+
+[node name="IdentityBlock" type="HBoxContainer" parent="Root/ActionDock/HBox"]
+custom_minimum_size = Vector2(114, 0)
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_constants/separation = 7
+
+[node name="NationColorSwatch" type="ColorRect" parent="Root/ActionDock/HBox/IdentityBlock"]
+custom_minimum_size = Vector2(18, 18)
+layout_mode = 2
+size_flags_vertical = 4
+color = Color(0.28, 0.54, 0.94, 1)
+
+[node name="IdentityVBox" type="VBoxContainer" parent="Root/ActionDock/HBox/IdentityBlock"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+theme_override_constants/separation = 1
+
+[node name="NationNameLabel" type="Label" parent="Root/ActionDock/HBox/IdentityBlock/IdentityVBox"]
+layout_mode = 2
+text = "Commander"
+clip_text = true
+
+[node name="WorldPctLabel" type="Label" parent="Root/ActionDock/HBox/IdentityBlock/IdentityVBox"]
+layout_mode = 2
+modulate = Color(0.68, 0.73, 0.80, 1)
+text = "0.00% of the world"
+clip_text = true
+
+[node name="VSepId" type="VSeparator" parent="Root/ActionDock/HBox"]
+layout_mode = 2
+
+[node name="TroopsBlock" type="VBoxContainer" parent="Root/ActionDock/HBox"]
+custom_minimum_size = Vector2(138, 0)
+layout_mode = 2
+size_flags_vertical = 4
 theme_override_constants/separation = 2
 
-[node name="ExpandBtn" type="Button" parent="Root/ActionDock/HBox"]
+[node name="TopRow" type="HBoxContainer" parent="Root/ActionDock/HBox/TroopsBlock"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="TroopsIcon" type="TextureRect" parent="Root/ActionDock/HBox/TroopsBlock/TopRow"]
+custom_minimum_size = Vector2(12, 12)
+layout_mode = 2
+size_flags_vertical = 4
+stretch_mode = 5
+
+[node name="HeaderLbl" type="Label" parent="Root/ActionDock/HBox/TroopsBlock/TopRow"]
+layout_mode = 2
+modulate = Color(0.66, 0.72, 0.78, 1)
+text = "TROOPS"
+
+[node name="Spacer" type="Control" parent="Root/ActionDock/HBox/TroopsBlock/TopRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="TroopsRateLabel" type="Label" parent="Root/ActionDock/HBox/TroopsBlock/TopRow"]
+layout_mode = 2
+modulate = Color(0.24, 0.90, 0.48, 1)
+text = "+0/s"
+
+[node name="ValRow" type="HBoxContainer" parent="Root/ActionDock/HBox/TroopsBlock"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="TroopsLabel" type="Label" parent="Root/ActionDock/HBox/TroopsBlock/ValRow"]
+layout_mode = 2
+modulate = Color(0.20, 0.92, 0.48, 1)
+text = "0"
+
+[node name="TroopsMaxLabel" type="Label" parent="Root/ActionDock/HBox/TroopsBlock/ValRow"]
+layout_mode = 2
+size_flags_vertical = 8
+modulate = Color(0.64, 0.70, 0.76, 1)
+text = "/ 0"
+
+[node name="TroopBar" type="Control" parent="Root/ActionDock/HBox/TroopsBlock"]
+custom_minimum_size = Vector2(134, 12)
+layout_mode = 2
+
+[node name="VSepTroops" type="VSeparator" parent="Root/ActionDock/HBox"]
+layout_mode = 2
+
+[node name="AttackBlock" type="VBoxContainer" parent="Root/ActionDock/HBox"]
+custom_minimum_size = Vector2(178, 0)
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_constants/separation = 2
+
+[node name="TopRow" type="HBoxContainer" parent="Root/ActionDock/HBox/AttackBlock"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="ExpandBtn" type="Button" parent="Root/ActionDock/HBox/AttackBlock/TopRow"]
 layout_mode = 2
 text = "Explore"
 
-[node name="TownBtn" type="Button" parent="Root/ActionDock/HBox"]
+[node name="Spacer" type="Control" parent="Root/ActionDock/HBox/AttackBlock/TopRow"]
 layout_mode = 2
-text = "1·125k"
+size_flags_horizontal = 3
 
-[node name="FactoryBtn" type="Button" parent="Root/ActionDock/HBox"]
+[node name="AttackPctLabel" type="Label" parent="Root/ActionDock/HBox/AttackBlock/TopRow"]
 layout_mode = 2
-text = "2·125k"
+modulate = Color(0.98, 0.84, 0.34, 1)
+text = "35%"
 
-[node name="PortBtn" type="Button" parent="Root/ActionDock/HBox"]
-layout_mode = 2
-text = "3·125k"
-
-[node name="DefenseBtn" type="Button" parent="Root/ActionDock/HBox"]
-layout_mode = 2
-text = "4·50k"
-
-[node name="SiloBtn" type="Button" parent="Root/ActionDock/HBox"]
-layout_mode = 2
-text = "5·1M"
-
-[node name="SamBtn" type="Button" parent="Root/ActionDock/HBox"]
-layout_mode = 2
-text = "6·1.5M"
-
-[node name="WarshipBtn" type="Button" parent="Root/ActionDock/HBox"]
-layout_mode = 2
-text = "7·250k"
-
-[node name="NukeSep" type="VSeparator" parent="Root/ActionDock/HBox"]
-layout_mode = 2
-
-[node name="AtomDockBtn" type="Button" parent="Root/ActionDock/HBox"]
-layout_mode = 2
-text = "8·750k"
-
-[node name="HbombDockBtn" type="Button" parent="Root/ActionDock/HBox"]
-layout_mode = 2
-text = "9·5M"
-
-[node name="MirvDockBtn" type="Button" parent="Root/ActionDock/HBox"]
-layout_mode = 2
-text = "F·25M"
-
-[node name="CommitSep" type="VSeparator" parent="Root/ActionDock/HBox"]
-layout_mode = 2
-
-[node name="CommitBox" type="HBoxContainer" parent="Root/ActionDock/HBox"]
+[node name="CommitBox" type="HBoxContainer" parent="Root/ActionDock/HBox/AttackBlock"]
 layout_mode = 2
 theme_override_constants/separation = 2
 
-[node name="Lbl" type="Label" parent="Root/ActionDock/HBox/CommitBox"]
-visible = false
+[node name="Commit10Btn" type="Button" parent="Root/ActionDock/HBox/AttackBlock/CommitBox"]
 layout_mode = 2
-text = "Commit"
+size_flags_horizontal = 3
+text = "10%"
 
-[node name="Commit20Btn" type="Button" parent="Root/ActionDock/HBox/CommitBox"]
+[node name="Commit25Btn" type="Button" parent="Root/ActionDock/HBox/AttackBlock/CommitBox"]
 layout_mode = 2
-text = "20%"
+size_flags_horizontal = 3
+text = "25%"
 
-[node name="Commit35Btn" type="Button" parent="Root/ActionDock/HBox/CommitBox"]
+[node name="Commit35Btn" type="Button" parent="Root/ActionDock/HBox/AttackBlock/CommitBox"]
 layout_mode = 2
+size_flags_horizontal = 3
 text = "35%"
 
-[node name="Commit50Btn" type="Button" parent="Root/ActionDock/HBox/CommitBox"]
+[node name="Commit50Btn" type="Button" parent="Root/ActionDock/HBox/AttackBlock/CommitBox"]
 layout_mode = 2
+size_flags_horizontal = 3
 text = "50%"
 
-[node name="Commit75Btn" type="Button" parent="Root/ActionDock/HBox/CommitBox"]
+[node name="Commit75Btn" type="Button" parent="Root/ActionDock/HBox/AttackBlock/CommitBox"]
 layout_mode = 2
+size_flags_horizontal = 3
 text = "75%"
+
+[node name="AttackPreviewLabel" type="Label" parent="Root/ActionDock/HBox/AttackBlock"]
+layout_mode = 2
+modulate = Color(0.66, 0.71, 0.78, 1)
+text = "Sends 0 troops · Defense 1.0x"
+clip_text = true
+
+[node name="VSepAttack" type="VSeparator" parent="Root/ActionDock/HBox"]
+layout_mode = 2
+
+[node name="PesosBlock" type="VBoxContainer" parent="Root/ActionDock/HBox"]
+custom_minimum_size = Vector2(92, 0)
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_constants/separation = 3
+
+[node name="TopRow" type="HBoxContainer" parent="Root/ActionDock/HBox/PesosBlock"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="GoldIcon" type="TextureRect" parent="Root/ActionDock/HBox/PesosBlock/TopRow"]
+custom_minimum_size = Vector2(12, 12)
+layout_mode = 2
+size_flags_vertical = 4
+stretch_mode = 5
+
+[node name="GoldHeaderLbl" type="Label" parent="Root/ActionDock/HBox/PesosBlock/TopRow"]
+layout_mode = 2
+modulate = Color(0.66, 0.72, 0.78, 1)
+text = "PESOS"
+
+[node name="Spacer" type="Control" parent="Root/ActionDock/HBox/PesosBlock/TopRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="GoldRateLabel" type="Label" parent="Root/ActionDock/HBox/PesosBlock/TopRow"]
+layout_mode = 2
+modulate = Color(0.24, 0.90, 0.48, 1)
+text = "+0/s"
+
+[node name="GoldLabel" type="Label" parent="Root/ActionDock/HBox/PesosBlock"]
+layout_mode = 2
+modulate = Color(0.98, 0.84, 0.34, 1)
+text = "0"
+
+[node name="VSepPesos" type="VSeparator" parent="Root/ActionDock/HBox"]
+layout_mode = 2
+
+[node name="SlotsRow" type="HBoxContainer" parent="Root/ActionDock/HBox"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_constants/separation = 2
+
+[node name="TownBtn" type="Button" parent="Root/ActionDock/HBox/SlotsRow"]
+custom_minimum_size = Vector2(42, 52)
+layout_mode = 2
+text = "125K"
+
+[node name="TopMeta" type="HBoxContainer" parent="Root/ActionDock/HBox/SlotsRow/TownBtn"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 3.0
+offset_top = 1.0
+offset_right = -3.0
+offset_bottom = 12.0
+grow_horizontal = 2
+mouse_filter = 2
+
+[node name="KeyLbl" type="Label" parent="Root/ActionDock/HBox/SlotsRow/TownBtn/TopMeta"]
+layout_mode = 2
+mouse_filter = 2
+modulate = Color(0.56, 0.62, 0.68, 1)
+text = "1"
+
+[node name="Spacer" type="Control" parent="Root/ActionDock/HBox/SlotsRow/TownBtn/TopMeta"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="CountLbl" type="Label" parent="Root/ActionDock/HBox/SlotsRow/TownBtn/TopMeta"]
+layout_mode = 2
+mouse_filter = 2
+modulate = Color(0.62, 0.68, 0.74, 1)
+text = "×0"
+
+[node name="VS1" type="VSeparator" parent="Root/ActionDock/HBox/SlotsRow"]
+layout_mode = 2
+
+[node name="FactoryBtn" type="Button" parent="Root/ActionDock/HBox/SlotsRow"]
+custom_minimum_size = Vector2(42, 52)
+layout_mode = 2
+text = "125K"
+
+[node name="TopMeta" type="HBoxContainer" parent="Root/ActionDock/HBox/SlotsRow/FactoryBtn"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 3.0
+offset_top = 1.0
+offset_right = -3.0
+offset_bottom = 12.0
+grow_horizontal = 2
+mouse_filter = 2
+
+[node name="KeyLbl" type="Label" parent="Root/ActionDock/HBox/SlotsRow/FactoryBtn/TopMeta"]
+layout_mode = 2
+mouse_filter = 2
+modulate = Color(0.56, 0.62, 0.68, 1)
+text = "2"
+
+[node name="Spacer" type="Control" parent="Root/ActionDock/HBox/SlotsRow/FactoryBtn/TopMeta"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="CountLbl" type="Label" parent="Root/ActionDock/HBox/SlotsRow/FactoryBtn/TopMeta"]
+layout_mode = 2
+mouse_filter = 2
+modulate = Color(0.62, 0.68, 0.74, 1)
+text = "×0"
+
+[node name="VS2" type="VSeparator" parent="Root/ActionDock/HBox/SlotsRow"]
+layout_mode = 2
+
+[node name="PortBtn" type="Button" parent="Root/ActionDock/HBox/SlotsRow"]
+custom_minimum_size = Vector2(42, 52)
+layout_mode = 2
+text = "125K"
+
+[node name="TopMeta" type="HBoxContainer" parent="Root/ActionDock/HBox/SlotsRow/PortBtn"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 3.0
+offset_top = 1.0
+offset_right = -3.0
+offset_bottom = 12.0
+grow_horizontal = 2
+mouse_filter = 2
+
+[node name="KeyLbl" type="Label" parent="Root/ActionDock/HBox/SlotsRow/PortBtn/TopMeta"]
+layout_mode = 2
+mouse_filter = 2
+modulate = Color(0.56, 0.62, 0.68, 1)
+text = "3"
+
+[node name="Spacer" type="Control" parent="Root/ActionDock/HBox/SlotsRow/PortBtn/TopMeta"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="CountLbl" type="Label" parent="Root/ActionDock/HBox/SlotsRow/PortBtn/TopMeta"]
+layout_mode = 2
+mouse_filter = 2
+modulate = Color(0.62, 0.68, 0.74, 1)
+text = "×0"
+
+[node name="VS3" type="VSeparator" parent="Root/ActionDock/HBox/SlotsRow"]
+layout_mode = 2
+
+[node name="DefenseBtn" type="Button" parent="Root/ActionDock/HBox/SlotsRow"]
+custom_minimum_size = Vector2(42, 52)
+layout_mode = 2
+text = "50K"
+
+[node name="TopMeta" type="HBoxContainer" parent="Root/ActionDock/HBox/SlotsRow/DefenseBtn"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 3.0
+offset_top = 1.0
+offset_right = -3.0
+offset_bottom = 12.0
+grow_horizontal = 2
+mouse_filter = 2
+
+[node name="KeyLbl" type="Label" parent="Root/ActionDock/HBox/SlotsRow/DefenseBtn/TopMeta"]
+layout_mode = 2
+mouse_filter = 2
+modulate = Color(0.56, 0.62, 0.68, 1)
+text = "4"
+
+[node name="Spacer" type="Control" parent="Root/ActionDock/HBox/SlotsRow/DefenseBtn/TopMeta"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="CountLbl" type="Label" parent="Root/ActionDock/HBox/SlotsRow/DefenseBtn/TopMeta"]
+layout_mode = 2
+mouse_filter = 2
+modulate = Color(0.62, 0.68, 0.74, 1)
+text = "×0"
+
+[node name="VS4" type="VSeparator" parent="Root/ActionDock/HBox/SlotsRow"]
+layout_mode = 2
+
+[node name="SiloBtn" type="Button" parent="Root/ActionDock/HBox/SlotsRow"]
+custom_minimum_size = Vector2(42, 52)
+layout_mode = 2
+text = "1M"
+
+[node name="TopMeta" type="HBoxContainer" parent="Root/ActionDock/HBox/SlotsRow/SiloBtn"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 3.0
+offset_top = 1.0
+offset_right = -3.0
+offset_bottom = 12.0
+grow_horizontal = 2
+mouse_filter = 2
+
+[node name="KeyLbl" type="Label" parent="Root/ActionDock/HBox/SlotsRow/SiloBtn/TopMeta"]
+layout_mode = 2
+mouse_filter = 2
+modulate = Color(0.56, 0.62, 0.68, 1)
+text = "5"
+
+[node name="Spacer" type="Control" parent="Root/ActionDock/HBox/SlotsRow/SiloBtn/TopMeta"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="CountLbl" type="Label" parent="Root/ActionDock/HBox/SlotsRow/SiloBtn/TopMeta"]
+layout_mode = 2
+mouse_filter = 2
+modulate = Color(0.62, 0.68, 0.74, 1)
+text = "×0"
+
+[node name="VS5" type="VSeparator" parent="Root/ActionDock/HBox/SlotsRow"]
+layout_mode = 2
+
+[node name="SamBtn" type="Button" parent="Root/ActionDock/HBox/SlotsRow"]
+custom_minimum_size = Vector2(42, 52)
+layout_mode = 2
+text = "1.5M"
+
+[node name="TopMeta" type="HBoxContainer" parent="Root/ActionDock/HBox/SlotsRow/SamBtn"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 3.0
+offset_top = 1.0
+offset_right = -3.0
+offset_bottom = 12.0
+grow_horizontal = 2
+mouse_filter = 2
+
+[node name="KeyLbl" type="Label" parent="Root/ActionDock/HBox/SlotsRow/SamBtn/TopMeta"]
+layout_mode = 2
+mouse_filter = 2
+modulate = Color(0.56, 0.62, 0.68, 1)
+text = "6"
+
+[node name="Spacer" type="Control" parent="Root/ActionDock/HBox/SlotsRow/SamBtn/TopMeta"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="CountLbl" type="Label" parent="Root/ActionDock/HBox/SlotsRow/SamBtn/TopMeta"]
+layout_mode = 2
+mouse_filter = 2
+modulate = Color(0.62, 0.68, 0.74, 1)
+text = "×0"
+
+[node name="VS6" type="VSeparator" parent="Root/ActionDock/HBox/SlotsRow"]
+layout_mode = 2
+
+[node name="WarshipBtn" type="Button" parent="Root/ActionDock/HBox/SlotsRow"]
+custom_minimum_size = Vector2(42, 52)
+layout_mode = 2
+text = "250K"
+
+[node name="TopMeta" type="HBoxContainer" parent="Root/ActionDock/HBox/SlotsRow/WarshipBtn"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 3.0
+offset_top = 1.0
+offset_right = -3.0
+offset_bottom = 12.0
+grow_horizontal = 2
+mouse_filter = 2
+
+[node name="KeyLbl" type="Label" parent="Root/ActionDock/HBox/SlotsRow/WarshipBtn/TopMeta"]
+layout_mode = 2
+mouse_filter = 2
+modulate = Color(0.56, 0.62, 0.68, 1)
+text = "7"
+
+[node name="Spacer" type="Control" parent="Root/ActionDock/HBox/SlotsRow/WarshipBtn/TopMeta"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="CountLbl" type="Label" parent="Root/ActionDock/HBox/SlotsRow/WarshipBtn/TopMeta"]
+layout_mode = 2
+mouse_filter = 2
+modulate = Color(0.62, 0.68, 0.74, 1)
+text = "×0"
+
+[node name="VS7" type="VSeparator" parent="Root/ActionDock/HBox/SlotsRow"]
+layout_mode = 2
+
+[node name="AtomDockBtn" type="Button" parent="Root/ActionDock/HBox/SlotsRow"]
+custom_minimum_size = Vector2(42, 52)
+layout_mode = 2
+text = "750K"
+
+[node name="TopMeta" type="HBoxContainer" parent="Root/ActionDock/HBox/SlotsRow/AtomDockBtn"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 3.0
+offset_top = 1.0
+offset_right = -3.0
+offset_bottom = 12.0
+grow_horizontal = 2
+mouse_filter = 2
+
+[node name="KeyLbl" type="Label" parent="Root/ActionDock/HBox/SlotsRow/AtomDockBtn/TopMeta"]
+layout_mode = 2
+mouse_filter = 2
+modulate = Color(0.56, 0.62, 0.68, 1)
+text = "8"
+
+[node name="VS8" type="VSeparator" parent="Root/ActionDock/HBox/SlotsRow"]
+layout_mode = 2
+
+[node name="HbombDockBtn" type="Button" parent="Root/ActionDock/HBox/SlotsRow"]
+custom_minimum_size = Vector2(42, 52)
+layout_mode = 2
+text = "5M"
+
+[node name="TopMeta" type="HBoxContainer" parent="Root/ActionDock/HBox/SlotsRow/HbombDockBtn"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 3.0
+offset_top = 1.0
+offset_right = -3.0
+offset_bottom = 12.0
+grow_horizontal = 2
+mouse_filter = 2
+
+[node name="KeyLbl" type="Label" parent="Root/ActionDock/HBox/SlotsRow/HbombDockBtn/TopMeta"]
+layout_mode = 2
+mouse_filter = 2
+modulate = Color(0.56, 0.62, 0.68, 1)
+text = "9"
+
+[node name="VS9" type="VSeparator" parent="Root/ActionDock/HBox/SlotsRow"]
+layout_mode = 2
+
+[node name="MirvDockBtn" type="Button" parent="Root/ActionDock/HBox/SlotsRow"]
+custom_minimum_size = Vector2(42, 52)
+layout_mode = 2
+text = "25M"
+
+[node name="TopMeta" type="HBoxContainer" parent="Root/ActionDock/HBox/SlotsRow/MirvDockBtn"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 3.0
+offset_top = 1.0
+offset_right = -3.0
+offset_bottom = 12.0
+grow_horizontal = 2
+mouse_filter = 2
+
+[node name="KeyLbl" type="Label" parent="Root/ActionDock/HBox/SlotsRow/MirvDockBtn/TopMeta"]
+layout_mode = 2
+mouse_filter = 2
+modulate = Color(0.56, 0.62, 0.68, 1)
+text = "F"
 
 [node name="HoverCard" type="PanelContainer" parent="Root"]
 visible = false
@@ -242,9 +639,9 @@ anchors_preset = 2
 anchor_top = 1.0
 anchor_bottom = 1.0
 offset_left = 14.0
-offset_top = -124.0
+offset_top = -172.0
 offset_right = 310.0
-offset_bottom = -44.0
+offset_bottom = -92.0
 grow_vertical = 0
 mouse_filter = 2
 
@@ -460,9 +857,9 @@ anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
 offset_left = -324.0
-offset_top = -236.0
+offset_top = -314.0
 offset_right = -12.0
-offset_bottom = -14.0
+offset_bottom = -92.0
 grow_horizontal = 0
 grow_vertical = 0
 
@@ -510,9 +907,9 @@ anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
 offset_left = -148.0
-offset_top = -42.0
+offset_top = -120.0
 offset_right = -12.0
-offset_bottom = -14.0
+offset_bottom = -92.0
 grow_horizontal = 0
 grow_vertical = 0
 text = "World Control ▲"
@@ -673,6 +1070,31 @@ text = ""
 [node name="HSep1" type="HSeparator" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
 layout_mode = 2
 
+[node name="ProfileRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="AvatarPreview" type="TextureRect" parent="Root/MenuOverlay/Center/MenuCard/VBox/ProfileRow"]
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
+size_flags_vertical = 4
+stretch_mode = 5
+
+[node name="AccountStatusLabel" type="Label" parent="Root/MenuOverlay/Center/MenuCard/VBox/ProfileRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+modulate = Color(0.78, 0.86, 0.94, 0.95)
+text = "Guest · Sign in for permanent name"
+clip_text = true
+
+[node name="ChangePfpBtn" type="Button" parent="Root/MenuOverlay/Center/MenuCard/VBox/ProfileRow"]
+layout_mode = 2
+text = "PFP"
+
+[node name="AccountBtn" type="Button" parent="Root/MenuOverlay/Center/MenuCard/VBox/ProfileRow"]
+layout_mode = 2
+text = "Account"
+
 [node name="NameRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
 layout_mode = 2
 theme_override_constants/separation = 8
@@ -744,6 +1166,12 @@ custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Audio"
+
+[node name="PatchNotesBtn" type="Button" parent="Root/MenuOverlay/Center/MenuCard/VBox/FooterRow"]
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Notes"
 
 [node name="QuitBtn" type="Button" parent="Root/MenuOverlay/Center/MenuCard/VBox/FooterRow"]
 custom_minimum_size = Vector2(0, 30)
@@ -916,11 +1344,23 @@ theme_override_constants/separation = 6
 [node name="FriendNameEdit" type="LineEdit" parent="Root/MenuOverlay/Center/FriendsCard/VBox/FriendAddRow"]
 layout_mode = 2
 size_flags_horizontal = 3
-placeholder_text = "Enter player name..."
+placeholder_text = "Search players in database..."
 
 [node name="AddFriendBtn" type="Button" parent="Root/MenuOverlay/Center/FriendsCard/VBox/FriendAddRow"]
 layout_mode = 2
-text = "Add"
+text = "Search"
+
+[node name="SearchStatusLabel" type="Label" parent="Root/MenuOverlay/Center/FriendsCard/VBox"]
+visible = false
+layout_mode = 2
+modulate = Color(0.78, 0.88, 0.98, 0.92)
+text = ""
+autowrap_mode = 2
+
+[node name="SearchResultsBox" type="VBoxContainer" parent="Root/MenuOverlay/Center/FriendsCard/VBox"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 4
 
 [node name="InviteRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/FriendsCard/VBox"]
 visible = false
@@ -960,6 +1400,98 @@ layout_mode = 2
 modulate = Color(0.70, 0.80, 0.90, 0.88)
 text = "Invite a friend to auto-create a Manila, PH room."
 autowrap_mode = 2
+
+[node name="AccountCard" type="PanelContainer" parent="Root/MenuOverlay/Center"]
+visible = false
+custom_minimum_size = Vector2(390, 0)
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="Root/MenuOverlay/Center/AccountCard"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="HeaderRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/AccountCard/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="AccountBackBtn" type="Button" parent="Root/MenuOverlay/Center/AccountCard/VBox/HeaderRow"]
+layout_mode = 2
+text = "Back"
+
+[node name="Title" type="Label" parent="Root/MenuOverlay/Center/AccountCard/VBox/HeaderRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+horizontal_alignment = 1
+text = "PLAYER ACCOUNT"
+
+[node name="HSep" type="HSeparator" parent="Root/MenuOverlay/Center/AccountCard/VBox"]
+layout_mode = 2
+
+[node name="AccountUserEdit" type="LineEdit" parent="Root/MenuOverlay/Center/AccountCard/VBox"]
+layout_mode = 2
+placeholder_text = "Permanent Username (3-20 chars)"
+
+[node name="AccountPassEdit" type="LineEdit" parent="Root/MenuOverlay/Center/AccountCard/VBox"]
+layout_mode = 2
+secret = true
+placeholder_text = "Password (4+ chars)"
+
+[node name="AuthBtnRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/AccountCard/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="LoginBtn" type="Button" parent="Root/MenuOverlay/Center/AccountCard/VBox/AuthBtnRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Sign In"
+
+[node name="RegisterBtn" type="Button" parent="Root/MenuOverlay/Center/AccountCard/VBox/AuthBtnRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Create Account"
+
+[node name="AccountCardStatus" type="Label" parent="Root/MenuOverlay/Center/AccountCard/VBox"]
+layout_mode = 2
+modulate = Color(0.75, 0.86, 0.96, 0.92)
+text = "Permanent name locks once signed in."
+autowrap_mode = 2
+
+[node name="LogoutBtn" type="Button" parent="Root/MenuOverlay/Center/AccountCard/VBox"]
+visible = false
+layout_mode = 2
+text = "Sign Out"
+
+[node name="PatchNotesCard" type="PanelContainer" parent="Root/MenuOverlay/Center"]
+visible = false
+custom_minimum_size = Vector2(460, 0)
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="Root/MenuOverlay/Center/PatchNotesCard"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="HeaderRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/PatchNotesCard/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="PatchNotesBackBtn" type="Button" parent="Root/MenuOverlay/Center/PatchNotesCard/VBox/HeaderRow"]
+layout_mode = 2
+text = "Back"
+
+[node name="Title" type="Label" parent="Root/MenuOverlay/Center/PatchNotesCard/VBox/HeaderRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+horizontal_alignment = 1
+text = "PATCH NOTES"
+
+[node name="HSep" type="HSeparator" parent="Root/MenuOverlay/Center/PatchNotesCard/VBox"]
+layout_mode = 2
+
+[node name="PatchNotesText" type="TextEdit" parent="Root/MenuOverlay/Center/PatchNotesCard/VBox"]
+custom_minimum_size = Vector2(0, 260)
+layout_mode = 2
+editable = false
+wrap_mode = 1
 
 [node name="AudioPopover" type="PanelContainer" parent="Root"]
 visible = false
@@ -1189,3 +1721,13 @@ text = "Spectate"
 [node name="SpecNewMatchBtn" type="Button" parent="Root/SpectatorBanner/HBox"]
 layout_mode = 2
 text = "New Match"
+
+[node name="PfpFileDialog" type="FileDialog" parent="Root"]
+title = "Select Custom PFP (Photo or Animated GIF)"
+initial_position = 2
+size = Vector2i(620, 420)
+ok_button_text = "Select PFP"
+file_mode = 0
+access = 2
+use_native_dialog = true
+filters = PackedStringArray("*.png, *.jpg, *.jpeg, *.webp, *.gif ; Images & GIFs")

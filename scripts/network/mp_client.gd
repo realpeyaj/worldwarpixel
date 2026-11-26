@@ -21,6 +21,7 @@ var _last_url: String = DEFAULT_SERVER_URL
 var _last_room: String = ""
 var _last_name: String = "Commander"
 var _reconnect_token: String = ""
+var _account_token: String = ""
 var _room_code: String = ""
 var _local_nation_id: int = 0
 var _is_host: bool = false
@@ -34,7 +35,7 @@ var last_ping_ms: int = -1
 var _ping_timer: float = 0.0
 
 
-func connect_to_room(ws_url: String, room_code: String, player_name: String, reconnect_token: String = "") -> int:
+func connect_to_room(ws_url: String, room_code: String, player_name: String, reconnect_token: String = "", account_token: String = "") -> int:
 	disconnect_from_server(false)
 	var clean_url: String = ws_url.strip_edges()
 	if clean_url.is_empty():
@@ -45,6 +46,7 @@ func connect_to_room(ws_url: String, room_code: String, player_name: String, rec
 	if _last_name.is_empty():
 		_last_name = "Commander"
 	_reconnect_token = reconnect_token
+	_account_token = account_token.strip_edges()
 	_seq = 0
 	_was_connected = false
 	_in_match = false
@@ -63,6 +65,8 @@ func _open_socket() -> int:
 	]
 	if not _reconnect_token.is_empty():
 		full_url += "&token=" + _reconnect_token.uri_encode()
+	if not _account_token.is_empty():
+		full_url += "&account_token=" + _account_token.uri_encode()
 
 	_peer = WebSocketPeer.new()
 	var err: int = _peer.connect_to_url(full_url)

@@ -27,6 +27,15 @@ signal mp_connect_requested(ws_url: String, room_code: String, player_name: Stri
 signal mp_disconnect_requested
 signal mp_start_match_requested(ai_count: int)
 signal friend_invite_requested(friend_name: String, room_code: String)
+signal account_login_requested(username: String, password: String)
+signal account_register_requested(username: String, password: String)
+signal account_logout_requested
+signal pfp_file_selected(file_path: String)
+signal friend_search_requested(query: String)
+signal friend_request_send_requested(username: String)
+signal friend_request_respond_requested(username: String, accept: bool)
+signal friend_remove_requested(username: String)
+signal friends_refresh_requested
 signal menu_visibility_changed(is_open: bool)
 signal quit_requested
 
@@ -68,6 +77,16 @@ var _tex_upgrade := preload("res://assets/sprites/icon_upgrade.png")
 var _tex_boat := preload("res://assets/sprites/icon_boat.png")
 var _tex_coin := preload("res://assets/sprites/icon_coin.png")
 var _tex_troops := preload("res://assets/sprites/icon_troops.png")
+var _tex_hud_town := preload("res://assets/sprites/hud_town.png")
+var _tex_hud_factory := preload("res://assets/sprites/hud_factory.png")
+var _tex_hud_port := preload("res://assets/sprites/hud_port.png")
+var _tex_hud_defense := preload("res://assets/sprites/hud_defense.png")
+var _tex_hud_silo := preload("res://assets/sprites/hud_silo.png")
+var _tex_hud_sam := preload("res://assets/sprites/hud_sam.png")
+var _tex_hud_warship := preload("res://assets/sprites/hud_warship.png")
+var _tex_hud_atom := preload("res://assets/sprites/hud_atom.png")
+var _tex_hud_hbomb := preload("res://assets/sprites/hud_hbomb.png")
+var _tex_hud_mirv := preload("res://assets/sprites/hud_mirv.png")
 
 var _world_state: WorldState
 var _selected_structure_id: int = 0
@@ -78,7 +97,7 @@ var _radial_world_pos: Vector2 = Vector2.ZERO
 var _political_mode: bool = true
 var _leaderboard_minimized: bool = false
 var _hotkeys_enabled: bool = true
-var _commit_ratio: float = 0.35
+var _commit_ratio: float = 0.25
 var _toast_timer: float = 0.0
 var _build_mode: String = ""
 var _missile_mode: String = ""
@@ -88,6 +107,7 @@ var _exp_dirty: bool = false
 var _lb_timer: float = 0.0
 var _exp_timer: float = 0.0
 var _last_dock_cost_key: int = -1
+var _last_dock_afford_mask: int = -1
 var _current_room_code: String = ""
 var _pending_invite_friend: String = ""
 var _pending_join_invite_code: String = ""
@@ -96,15 +116,24 @@ var _is_spectating: bool = false
 var _friends_return_to: String = "menu"
 var _icon_close_16: ImageTexture
 var _icon_play_16: ImageTexture
+var _account_logged_in: bool = false
+var _account_username: String = ""
+var _local_avatar_frames: Array = []
+var _local_avatar_delay_ms: int = 100
+var _avatar_anim_ms: float = 0.0
+var _avatar_last_step: int = -1
+var _animated_pfp_nodes: Array[Dictionary] = []
+var _dock_avatar_rect: TextureRect
+var _victory_avatar_frames: Array = []
+var _victory_avatar_delay_ms: int = 100
+var _server_friends: Array = []
+var _server_incoming: Array = []
+var _server_outgoing: Array = []
+var _avatar_cache_lookup: Callable = Callable()
 
 @onready var root_control: Control = $Root
 @onready var top_bar: PanelContainer = $Root/TopBar
 @onready var clock_label: Label = $Root/TopBar/HBox/ClockLabel
-@onready var gold_icon: TextureRect = $Root/TopBar/HBox/GoldIcon
-@onready var gold_label: Label = $Root/TopBar/HBox/GoldLabel
-@onready var troops_icon: TextureRect = $Root/TopBar/HBox/TroopsIcon
-@onready var troops_label: Label = $Root/TopBar/HBox/TroopsLabel
-@onready var world_pct_label: Label = $Root/TopBar/HBox/WorldPctLabel
 @onready var map_mode_btn: Button = $Root/TopBar/HBox/MapModeBtn
 @onready var reset_view_btn: Button = $Root/TopBar/HBox/ResetViewBtn
 @onready var hotkeys_btn: Button = $Root/TopBar/HBox/HotkeysBtn
@@ -116,23 +145,37 @@ var _icon_play_16: ImageTexture
 @onready var ai_count_option: OptionButton = $Root/SpawnBanner/VBox/Row/AiOption
 
 @onready var action_dock: PanelContainer = $Root/ActionDock
-@onready var expand_btn: Button = $Root/ActionDock/HBox/ExpandBtn
-@onready var town_btn: Button = $Root/ActionDock/HBox/TownBtn
-@onready var port_btn: Button = $Root/ActionDock/HBox/PortBtn
-@onready var factory_btn: Button = $Root/ActionDock/HBox/FactoryBtn
-@onready var defense_btn: Button = $Root/ActionDock/HBox/DefenseBtn
-@onready var silo_btn: Button = $Root/ActionDock/HBox/SiloBtn
-@onready var sam_btn: Button = $Root/ActionDock/HBox/SamBtn
-@onready var warship_btn: Button = $Root/ActionDock/HBox/WarshipBtn
-@onready var atom_dock_btn: Button = $Root/ActionDock/HBox/AtomDockBtn
-@onready var hbomb_dock_btn: Button = $Root/ActionDock/HBox/HbombDockBtn
-@onready var mirv_dock_btn: Button = $Root/ActionDock/HBox/MirvDockBtn
-@onready var commit_sep: VSeparator = $Root/ActionDock/HBox/CommitSep
-@onready var commit_box: HBoxContainer = $Root/ActionDock/HBox/CommitBox
-@onready var commit_20_btn: Button = $Root/ActionDock/HBox/CommitBox/Commit20Btn
-@onready var commit_35_btn: Button = $Root/ActionDock/HBox/CommitBox/Commit35Btn
-@onready var commit_50_btn: Button = $Root/ActionDock/HBox/CommitBox/Commit50Btn
-@onready var commit_75_btn: Button = $Root/ActionDock/HBox/CommitBox/Commit75Btn
+@onready var nation_color_swatch: ColorRect = $Root/ActionDock/HBox/IdentityBlock/NationColorSwatch
+@onready var nation_name_label: Label = $Root/ActionDock/HBox/IdentityBlock/IdentityVBox/NationNameLabel
+@onready var world_pct_label: Label = $Root/ActionDock/HBox/IdentityBlock/IdentityVBox/WorldPctLabel
+@onready var troops_icon: TextureRect = $Root/ActionDock/HBox/TroopsBlock/TopRow/TroopsIcon
+@onready var troops_rate_label: Label = $Root/ActionDock/HBox/TroopsBlock/TopRow/TroopsRateLabel
+@onready var troops_label: Label = $Root/ActionDock/HBox/TroopsBlock/ValRow/TroopsLabel
+@onready var troops_max_label: Label = $Root/ActionDock/HBox/TroopsBlock/ValRow/TroopsMaxLabel
+@onready var troop_bar: Control = $Root/ActionDock/HBox/TroopsBlock/TroopBar
+@onready var expand_btn: Button = $Root/ActionDock/HBox/AttackBlock/TopRow/ExpandBtn
+@onready var attack_pct_label: Label = $Root/ActionDock/HBox/AttackBlock/TopRow/AttackPctLabel
+@onready var commit_box: HBoxContainer = $Root/ActionDock/HBox/AttackBlock/CommitBox
+@onready var commit_10_btn: Button = $Root/ActionDock/HBox/AttackBlock/CommitBox/Commit10Btn
+@onready var commit_25_btn: Button = $Root/ActionDock/HBox/AttackBlock/CommitBox/Commit25Btn
+@onready var commit_35_btn: Button = $Root/ActionDock/HBox/AttackBlock/CommitBox/Commit35Btn
+@onready var commit_50_btn: Button = $Root/ActionDock/HBox/AttackBlock/CommitBox/Commit50Btn
+@onready var commit_75_btn: Button = $Root/ActionDock/HBox/AttackBlock/CommitBox/Commit75Btn
+@onready var attack_preview_label: Label = $Root/ActionDock/HBox/AttackBlock/AttackPreviewLabel
+@onready var gold_icon: TextureRect = $Root/ActionDock/HBox/PesosBlock/TopRow/GoldIcon
+@onready var gold_header_lbl: Label = $Root/ActionDock/HBox/PesosBlock/TopRow/GoldHeaderLbl
+@onready var gold_rate_label: Label = $Root/ActionDock/HBox/PesosBlock/TopRow/GoldRateLabel
+@onready var gold_label: Label = $Root/ActionDock/HBox/PesosBlock/GoldLabel
+@onready var town_btn: Button = $Root/ActionDock/HBox/SlotsRow/TownBtn
+@onready var factory_btn: Button = $Root/ActionDock/HBox/SlotsRow/FactoryBtn
+@onready var port_btn: Button = $Root/ActionDock/HBox/SlotsRow/PortBtn
+@onready var defense_btn: Button = $Root/ActionDock/HBox/SlotsRow/DefenseBtn
+@onready var silo_btn: Button = $Root/ActionDock/HBox/SlotsRow/SiloBtn
+@onready var sam_btn: Button = $Root/ActionDock/HBox/SlotsRow/SamBtn
+@onready var warship_btn: Button = $Root/ActionDock/HBox/SlotsRow/WarshipBtn
+@onready var atom_dock_btn: Button = $Root/ActionDock/HBox/SlotsRow/AtomDockBtn
+@onready var hbomb_dock_btn: Button = $Root/ActionDock/HBox/SlotsRow/HbombDockBtn
+@onready var mirv_dock_btn: Button = $Root/ActionDock/HBox/SlotsRow/MirvDockBtn
 
 @onready var hover_card: PanelContainer = $Root/HoverCard
 @onready var hover_title: Label = $Root/HoverCard/VBox/Title
@@ -196,6 +239,10 @@ var _icon_play_16: ImageTexture
 @onready var menu_overlay: ColorRect = $Root/MenuOverlay
 @onready var menu_card: PanelContainer = $Root/MenuOverlay/Center/MenuCard
 @onready var logo_rect: TextureRect = $Root/MenuOverlay/Center/MenuCard/VBox/LogoRect
+@onready var avatar_preview: TextureRect = $Root/MenuOverlay/Center/MenuCard/VBox/ProfileRow/AvatarPreview
+@onready var account_status_label: Label = $Root/MenuOverlay/Center/MenuCard/VBox/ProfileRow/AccountStatusLabel
+@onready var change_pfp_btn: Button = $Root/MenuOverlay/Center/MenuCard/VBox/ProfileRow/ChangePfpBtn
+@onready var account_btn: Button = $Root/MenuOverlay/Center/MenuCard/VBox/ProfileRow/AccountBtn
 @onready var menu_name_edit: LineEdit = $Root/MenuOverlay/Center/MenuCard/VBox/NameRow/MenuNameEdit
 @onready var menu_ai_option: OptionButton = $Root/MenuOverlay/Center/MenuCard/VBox/AiRow/MenuAiOption
 @onready var play_btn: Button = $Root/MenuOverlay/Center/MenuCard/VBox/PlayBtn
@@ -203,7 +250,22 @@ var _icon_play_16: ImageTexture
 @onready var friends_btn: Button = $Root/MenuOverlay/Center/MenuCard/VBox/SocialRow/FriendsBtn
 @onready var new_match_btn: Button = $Root/MenuOverlay/Center/MenuCard/VBox/NewMatchBtn
 @onready var menu_audio_btn: Button = $Root/MenuOverlay/Center/MenuCard/VBox/FooterRow/MenuAudioBtn
+@onready var patch_notes_btn: Button = $Root/MenuOverlay/Center/MenuCard/VBox/FooterRow/PatchNotesBtn
 @onready var quit_btn: Button = $Root/MenuOverlay/Center/MenuCard/VBox/FooterRow/QuitBtn
+
+@onready var patch_notes_card: PanelContainer = $Root/MenuOverlay/Center/PatchNotesCard
+@onready var patch_notes_back_btn: Button = $Root/MenuOverlay/Center/PatchNotesCard/VBox/HeaderRow/PatchNotesBackBtn
+@onready var patch_notes_text: TextEdit = $Root/MenuOverlay/Center/PatchNotesCard/VBox/PatchNotesText
+
+@onready var account_card: PanelContainer = $Root/MenuOverlay/Center/AccountCard
+@onready var account_back_btn: Button = $Root/MenuOverlay/Center/AccountCard/VBox/HeaderRow/AccountBackBtn
+@onready var account_user_edit: LineEdit = $Root/MenuOverlay/Center/AccountCard/VBox/AccountUserEdit
+@onready var account_pass_edit: LineEdit = $Root/MenuOverlay/Center/AccountCard/VBox/AccountPassEdit
+@onready var login_btn: Button = $Root/MenuOverlay/Center/AccountCard/VBox/AuthBtnRow/LoginBtn
+@onready var register_btn: Button = $Root/MenuOverlay/Center/AccountCard/VBox/AuthBtnRow/RegisterBtn
+@onready var account_card_status: Label = $Root/MenuOverlay/Center/AccountCard/VBox/AccountCardStatus
+@onready var logout_btn: Button = $Root/MenuOverlay/Center/AccountCard/VBox/LogoutBtn
+@onready var pfp_file_dialog: FileDialog = $Root/PfpFileDialog
 
 @onready var mp_lobby_card: PanelContainer = $Root/MenuOverlay/Center/MpLobbyCard
 @onready var server_value_label: Label = $Root/MenuOverlay/Center/MpLobbyCard/VBox/ServerRow/ServerValueLabel
@@ -227,6 +289,8 @@ var _icon_play_16: ImageTexture
 @onready var friends_header_icon: TextureRect = $Root/MenuOverlay/Center/FriendsCard/VBox/HeaderRow/FriendsIcon
 @onready var friend_name_edit: LineEdit = $Root/MenuOverlay/Center/FriendsCard/VBox/FriendAddRow/FriendNameEdit
 @onready var add_friend_btn: Button = $Root/MenuOverlay/Center/FriendsCard/VBox/FriendAddRow/AddFriendBtn
+@onready var search_status_label: Label = $Root/MenuOverlay/Center/FriendsCard/VBox/SearchStatusLabel
+@onready var search_results_box: VBoxContainer = $Root/MenuOverlay/Center/FriendsCard/VBox/SearchResultsBox
 @onready var friends_rows: VBoxContainer = $Root/MenuOverlay/Center/FriendsCard/VBox/FriendsScroll/FriendsRows
 @onready var invite_row: HBoxContainer = $Root/MenuOverlay/Center/FriendsCard/VBox/InviteRow
 @onready var invite_label: Label = $Root/MenuOverlay/Center/FriendsCard/VBox/InviteRow/InviteLabel
@@ -265,8 +329,8 @@ var _icon_play_16: ImageTexture
 func _ready() -> void:
 	root_control.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	root_control.theme = ThemeFactory.build_strategy_theme()
-	ThemeFactory.apply_panel_variant(top_bar, "dock_top")
-	ThemeFactory.apply_panel_variant(action_dock, "dock_bottom")
+	ThemeFactory.apply_panel_variant(top_bar, "util_strip")
+	ThemeFactory.apply_panel_variant(action_dock, "bottom_bar")
 	ThemeFactory.apply_panel_variant(ping_badge, "flat")
 	_icon_close_16 = _make_pixel_icon(_tex_close, Color.WHITE, 14)
 	_icon_play_16 = _make_pixel_icon(_tex_play, Color.WHITE, 14)
@@ -298,21 +362,36 @@ func _ready() -> void:
 	new_match_btn.visible = false
 	mp_lobby_card.visible = false
 	friends_card.visible = false
+	account_card.visible = false
+	patch_notes_card.visible = false
 	menu_card.visible = true
 	menu_overlay.visible = true
 
+	_dock_avatar_rect = TextureRect.new()
+	_dock_avatar_rect.name = "DockAvatarRect"
+	_dock_avatar_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_dock_avatar_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_dock_avatar_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_dock_avatar_rect.visible = false
+	nation_color_swatch.add_child(_dock_avatar_rect)
+	avatar_preview.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	avatar_preview.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	avatar_preview.texture = _build_tinted_icon(_tex_banner, _tex_banner_mask, Color(0.32, 0.56, 0.90), 32, 32)
+	victory_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	victory_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+
 	_apply_ui_variants_and_icons(icon_back_16, icon_friends_16, icon_mp_16, icon_audio_16)
+	account_back_btn.icon = icon_back_16
 	_populate_spawn_controls()
 	_load_profile()
 	_populate_server_regions()
 	_load_friends()
 	_init_leaderboard_pool()
 	radial_wheel.draw.connect(_on_radial_wheel_draw)
+	troop_bar.draw.connect(_on_troop_bar_draw)
 	_apply_action_dock_icons(Color(0.32, 0.56, 0.90))
 	for icon_ctrl: CanvasItem in [
-		gold_icon, troops_icon, victory_icon, conn_bar_icon,
-		expand_btn, town_btn, port_btn, factory_btn, defense_btn, silo_btn, sam_btn,
-		warship_btn, atom_dock_btn, hbomb_dock_btn, mirv_dock_btn,
+		victory_icon, conn_bar_icon,
 		st_icon, st_upgrade_btn, st_warship_btn, st_atom_btn, st_hbomb_btn, st_mirv_btn,
 		ally_btn, embargo_btn, donate_gold_btn, donate_troops_btn,
 		ping_icon, radial_attack_btn, radial_build_btn, radial_warship_btn, radial_missile_btn, radial_dip_btn, radial_info_btn,
@@ -323,23 +402,42 @@ func _ready() -> void:
 		mp_disconnect_btn, mp_friends_btn, mp_start_btn, friends_back_btn,
 		accept_invite_btn, dismiss_invite_btn, st_close_btn, dip_close_btn,
 		audio_close_btn, radial_close_btn, audio_btn,
+		gold_icon, troops_icon, expand_btn,
+		town_btn, factory_btn, port_btn, defense_btn, silo_btn, sam_btn,
+		warship_btn, atom_dock_btn, hbomb_dock_btn, mirv_dock_btn,
 	]:
 		pixel_ctrl.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	for dock_ctrl: Control in [
-		gold_label, troops_label, world_pct_label, clock_label,
-		map_mode_btn, reset_view_btn, hotkeys_btn, audio_btn, menu_btn,
-		commit_20_btn, commit_35_btn, commit_50_btn, commit_75_btn,
+		clock_label, map_mode_btn, reset_view_btn, hotkeys_btn, audio_btn, menu_btn,
+		expand_btn, commit_10_btn, commit_25_btn, commit_35_btn, commit_50_btn, commit_75_btn,
+		troops_rate_label, troops_max_label, gold_rate_label, attack_pct_label,
 	]:
-		dock_ctrl.add_theme_font_size_override("font_size", 11)
+		dock_ctrl.add_theme_font_size_override("font_size", 10)
+	nation_name_label.add_theme_font_size_override("font_size", 13)
+	($Root/ActionDock/HBox/TroopsBlock/TopRow/HeaderLbl as Label).add_theme_font_size_override("font_size", 9)
+	world_pct_label.add_theme_font_size_override("font_size", 9)
+	attack_preview_label.add_theme_font_size_override("font_size", 9)
+	gold_header_lbl.add_theme_font_size_override("font_size", 9)
+	troops_label.add_theme_font_size_override("font_size", 15)
+	gold_label.add_theme_font_size_override("font_size", 15)
+	expand_btn.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	expand_btn.vertical_icon_alignment = VERTICAL_ALIGNMENT_CENTER
+	expand_btn.text = "Explore"
 	for slot_btn: Button in [
-		expand_btn, town_btn, factory_btn, port_btn, defense_btn, silo_btn, sam_btn,
+		town_btn, factory_btn, port_btn, defense_btn, silo_btn, sam_btn,
 		warship_btn, atom_dock_btn, hbomb_dock_btn, mirv_dock_btn,
 	]:
 		slot_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		slot_btn.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
-		slot_btn.add_theme_font_size_override("font_size", 10)
-		slot_btn.add_theme_constant_override("v_separation", 1)
-		slot_btn.custom_minimum_size = Vector2(52, 38) if slot_btn == expand_btn else Vector2(46, 38)
+		slot_btn.add_theme_font_size_override("font_size", 9)
+		slot_btn.add_theme_constant_override("v_separation", 0)
+		slot_btn.custom_minimum_size = Vector2(42, 52)
+		var key_lbl := slot_btn.get_node_or_null("TopMeta/KeyLbl") as Label
+		if key_lbl != null:
+			key_lbl.add_theme_font_size_override("font_size", 8)
+		var cnt_lbl := slot_btn.get_node_or_null("TopMeta/CountLbl") as Label
+		if cnt_lbl != null:
+			cnt_lbl.add_theme_font_size_override("font_size", 8)
 
 	ping_icon.texture = _build_tinted_icon(_tex_wifi, null, Color.WHITE, 16, 16)
 	conn_bar_icon.texture = ping_icon.texture
@@ -440,7 +538,8 @@ func _ready() -> void:
 	hbomb_dock_btn.pressed.connect(func() -> void: _select_missile_mode(MissileUnit.KIND_HYDROGEN))
 	mirv_dock_btn.pressed.connect(func() -> void: _select_missile_mode(MissileUnit.KIND_MIRV))
 
-	commit_20_btn.pressed.connect(func() -> void: set_commit_ratio(0.20))
+	commit_10_btn.pressed.connect(func() -> void: set_commit_ratio(0.10))
+	commit_25_btn.pressed.connect(func() -> void: set_commit_ratio(0.25))
 	commit_35_btn.pressed.connect(func() -> void: set_commit_ratio(0.35))
 	commit_50_btn.pressed.connect(func() -> void: set_commit_ratio(0.50))
 	commit_75_btn.pressed.connect(func() -> void: set_commit_ratio(0.75))
@@ -486,13 +585,44 @@ func _ready() -> void:
 	)
 	add_friend_btn.pressed.connect(func() -> void:
 		AudioManager.play_ui_tap()
-		add_friend(friend_name_edit.text)
-		friend_name_edit.text = ""
+		_submit_friend_search(friend_name_edit.text)
 	)
 	friend_name_edit.text_submitted.connect(func(txt: String) -> void:
 		AudioManager.play_ui_tap()
-		add_friend(txt)
-		friend_name_edit.text = ""
+		_submit_friend_search(txt)
+	)
+	change_pfp_btn.pressed.connect(func() -> void:
+		AudioManager.play_ui_tap()
+		pfp_file_dialog.popup_centered_ratio(0.65)
+	)
+	pfp_file_dialog.file_selected.connect(func(path: String) -> void:
+		pfp_file_selected.emit(path)
+	)
+	account_btn.pressed.connect(func() -> void:
+		AudioManager.play_ui_tap()
+		menu_card.visible = false
+		friends_card.visible = false
+		mp_lobby_card.visible = false
+		account_card.visible = true
+	)
+	account_back_btn.pressed.connect(func() -> void:
+		AudioManager.play_ui_tap()
+		account_card.visible = false
+		menu_card.visible = true
+	)
+	login_btn.pressed.connect(func() -> void:
+		AudioManager.play_ui_tap()
+		account_card_status.text = "Signing in..."
+		account_login_requested.emit(account_user_edit.text.strip_edges(), account_pass_edit.text)
+	)
+	register_btn.pressed.connect(func() -> void:
+		AudioManager.play_ui_tap()
+		account_card_status.text = "Creating permanent account..."
+		account_register_requested.emit(account_user_edit.text.strip_edges(), account_pass_edit.text)
+	)
+	logout_btn.pressed.connect(func() -> void:
+		AudioManager.play_ui_tap()
+		account_logout_requested.emit()
 	)
 	accept_invite_btn.pressed.connect(func() -> void:
 		AudioManager.play_ui_tap()
@@ -536,6 +666,12 @@ func _ready() -> void:
 		_sync_hud_chrome_visibility()
 		new_match_requested.emit()
 	)
+	patch_notes_btn.pressed.connect(_open_patch_notes)
+	patch_notes_back_btn.pressed.connect(func() -> void:
+		AudioManager.play_ui_tap()
+		patch_notes_card.visible = false
+		menu_card.visible = true
+	)
 	quit_btn.pressed.connect(func() -> void:
 		AudioManager.play_ui_tap()
 		save_player_name(menu_name_edit.text)
@@ -556,17 +692,38 @@ func _ready() -> void:
 	_update_hotkeys_button()
 
 
+func _open_patch_notes() -> void:
+	AudioManager.play_ui_tap()
+	var notes: String = ""
+	if FileAccess.file_exists("res://PATCH_NOTES.md"):
+		notes = FileAccess.get_file_as_string("res://PATCH_NOTES.md")
+	if notes.strip_edges().is_empty():
+		var exe_notes: String = OS.get_executable_path().get_base_dir().path_join("PATCH_NOTES.md")
+		if FileAccess.file_exists(exe_notes):
+			notes = FileAccess.get_file_as_string(exe_notes)
+	if notes.strip_edges().is_empty():
+		notes = "World War Pixel\nNo local patch notes found."
+	patch_notes_text.text = notes
+	menu_card.visible = false
+	mp_lobby_card.visible = false
+	friends_card.visible = false
+	account_card.visible = false
+	patch_notes_card.visible = true
+
+
 func _apply_ui_variants_and_icons(icon_back_16: ImageTexture, icon_friends_16: ImageTexture, icon_mp_16: ImageTexture, icon_audio_16: ImageTexture) -> void:
-	for btn: Button in [play_btn, create_room_btn, mp_start_btn, add_friend_btn, accept_invite_btn, st_upgrade_btn, victory_new_match_btn, spec_new_match_btn, alliance_accept_btn]:
+	for btn: Button in [play_btn, create_room_btn, mp_start_btn, add_friend_btn, accept_invite_btn, st_upgrade_btn, victory_new_match_btn, spec_new_match_btn, alliance_accept_btn, login_btn, register_btn]:
 		ThemeFactory.apply_button_variant(btn, "primary")
-	for btn: Button in [multiplayer_btn, friends_btn, mp_connect_btn, victory_inspect_btn, spec_continue_btn, donate_gold_btn, donate_troops_btn]:
+	for btn: Button in [multiplayer_btn, friends_btn, mp_connect_btn, victory_inspect_btn, spec_continue_btn, donate_gold_btn, donate_troops_btn, account_btn, change_pfp_btn]:
 		ThemeFactory.apply_button_variant(btn, "secondary")
-	for btn: Button in [mp_disconnect_btn, friends_back_btn, menu_audio_btn, new_match_btn]:
+	for btn: Button in [mp_disconnect_btn, friends_back_btn, menu_audio_btn, new_match_btn, account_back_btn, patch_notes_btn, patch_notes_back_btn]:
 		ThemeFactory.apply_button_variant(btn, "back")
-	for btn: Button in [quit_btn, alliance_decline_btn]:
+	for btn: Button in [quit_btn, alliance_decline_btn, logout_btn]:
 		ThemeFactory.apply_button_variant(btn, "danger")
-	for btn: Button in [map_mode_btn, reset_view_btn, hotkeys_btn, audio_btn, menu_btn, lb_toggle_btn, copy_code_btn, mp_friends_btn, commit_20_btn, commit_35_btn, commit_50_btn, commit_75_btn]:
+	for btn: Button in [map_mode_btn, reset_view_btn, hotkeys_btn, audio_btn, menu_btn, lb_toggle_btn, copy_code_btn, mp_friends_btn]:
 		ThemeFactory.apply_button_variant(btn, "ghost")
+	for btn: Button in [commit_10_btn, commit_25_btn, commit_35_btn, commit_50_btn, commit_75_btn]:
+		ThemeFactory.set_commit_pill_active(btn, false)
 	for btn: Button in [st_close_btn, dip_close_btn, audio_close_btn, dismiss_invite_btn, radial_close_btn]:
 		_style_close_button(btn)
 	for btn: Button in [expand_btn, town_btn, factory_btn, port_btn, defense_btn, silo_btn, sam_btn, warship_btn, atom_dock_btn, hbomb_dock_btn, mirv_dock_btn]:
@@ -577,6 +734,7 @@ func _apply_ui_variants_and_icons(icon_back_16: ImageTexture, icon_friends_16: I
 	accept_invite_btn.icon = _icon_play_16
 	mp_disconnect_btn.icon = icon_back_16
 	friends_back_btn.icon = icon_back_16
+	patch_notes_back_btn.icon = icon_back_16
 	quit_btn.icon = _icon_close_16
 	multiplayer_btn.icon = icon_mp_16
 	friends_btn.icon = icon_friends_16
@@ -665,14 +823,205 @@ func get_selected_server_name() -> String:
 	return str(SERVER_REGIONS[idx]["name"])
 
 
+func set_avatar_cache_lookup(cb: Callable) -> void:
+	_avatar_cache_lookup = cb
+
+
+func set_account_error(msg: String) -> void:
+	account_card_status.text = msg
+	account_card_status.modulate = Color(1.0, 0.56, 0.52, 1.0)
+
+
+func set_account_state(logged_in: bool, acct_username: String, status_msg: String = "") -> void:
+	_account_logged_in = logged_in
+	_account_username = acct_username.strip_edges()
+	account_card_status.modulate = Color(0.75, 0.86, 0.96, 0.92)
+	if _account_logged_in and not _account_username.is_empty():
+		menu_name_edit.text = _account_username
+		nation_name_edit.text = _account_username
+		menu_name_edit.editable = false
+		nation_name_edit.editable = false
+		account_status_label.text = "%s · Signed In" % _account_username
+		account_btn.text = "Account"
+		account_user_edit.text = _account_username
+		account_user_edit.editable = false
+		account_pass_edit.text = ""
+		account_pass_edit.visible = false
+		login_btn.visible = false
+		register_btn.visible = false
+		logout_btn.visible = true
+		account_card_status.text = status_msg if not status_msg.is_empty() else "Signed in as %s (permanent name locked)." % _account_username
+	else:
+		menu_name_edit.editable = true
+		nation_name_edit.editable = true
+		account_status_label.text = "Guest · Sign in for permanent name"
+		account_btn.text = "Sign In"
+		account_user_edit.editable = true
+		account_pass_edit.visible = true
+		login_btn.visible = true
+		register_btn.visible = true
+		logout_btn.visible = false
+		account_card_status.text = status_msg if not status_msg.is_empty() else "Sign in or create a permanent account."
+	_refresh_friends_ui()
+
+
+func set_local_avatar(frames: Array, delay_ms: int = 100) -> void:
+	_local_avatar_frames = frames.duplicate()
+	_local_avatar_delay_ms = clampi(delay_ms, 40, 1000)
+	_avatar_last_step = -1
+	if not _local_avatar_frames.is_empty():
+		var tex: Texture2D = _local_avatar_frames[0] as Texture2D
+		avatar_preview.texture = tex
+		if _dock_avatar_rect != null:
+			_dock_avatar_rect.texture = tex
+			_dock_avatar_rect.visible = true
+	else:
+		var col := Color(0.32, 0.56, 0.90)
+		avatar_preview.texture = _build_tinted_icon(_tex_banner, _tex_banner_mask, col, 32, 32)
+		if _dock_avatar_rect != null:
+			_dock_avatar_rect.texture = null
+			_dock_avatar_rect.visible = false
+
+
+func _submit_friend_search(raw_q: String) -> void:
+	var q: String = raw_q.strip_edges()
+	if q.is_empty():
+		search_status_label.visible = false
+		search_results_box.visible = false
+		return
+	if not _account_logged_in:
+		search_status_label.text = "Sign in (Account) to search players in the database."
+		search_status_label.visible = true
+		search_results_box.visible = false
+		return
+	search_status_label.text = "Searching database for '%s'..." % q
+	search_status_label.visible = true
+	friend_search_requested.emit(q)
+
+
+func _frames_for_user_dict(u: Dictionary) -> Dictionary:
+	var b64: String = str(u.get("avatar_b64", ""))
+	if not b64.is_empty():
+		var f_cnt: int = maxi(1, int(u.get("avatar_frames", 1)))
+		var frames: Array[ImageTexture] = GifDecoder.textures_from_strip_b64(b64, f_cnt)
+		if not frames.is_empty():
+			return {"frames": frames, "delay_ms": clampi(int(u.get("avatar_delay_ms", 100)), 40, 1000)}
+	if _avatar_cache_lookup.is_valid():
+		var cached: Variant = _avatar_cache_lookup.call(str(u.get("username", "")))
+		if cached is Dictionary and not (cached as Dictionary).is_empty():
+			return cached as Dictionary
+	return {}
+
+
+func _make_avatar_thumb(frames: Array, delay_ms: int, fallback_col: Color) -> TextureRect:
+	var tr := TextureRect.new()
+	tr.custom_minimum_size = Vector2(22, 22)
+	tr.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	if not frames.is_empty():
+		tr.texture = frames[0] as Texture2D
+		if frames.size() > 1:
+			_animated_pfp_nodes.append({"node": tr, "frames": frames, "delay_ms": clampi(delay_ms, 40, 1000), "step": -1})
+	else:
+		tr.texture = _build_tinted_icon(_tex_banner, _tex_banner_mask, fallback_col, 20, 20)
+	return tr
+
+
+func update_search_results(query: String, users: Array) -> void:
+	for child in search_results_box.get_children():
+		child.queue_free()
+	if query.strip_edges().is_empty():
+		search_status_label.visible = false
+		search_results_box.visible = false
+		return
+	if users.is_empty():
+		search_status_label.text = "No player '%s' found in database." % query
+		search_status_label.visible = true
+		search_results_box.visible = false
+		return
+	search_status_label.text = "Database results (%d):" % users.size()
+	search_status_label.visible = true
+	search_results_box.visible = true
+	for uv: Variant in users:
+		if not (uv is Dictionary):
+			continue
+		var u := uv as Dictionary
+		var uname: String = str(u.get("username", ""))
+		var rel: String = str(u.get("relation", "none"))
+		var is_online: bool = bool(u.get("online", false))
+		var status_txt: String = str(u.get("last_seen_text", "Offline"))
+		var av := _frames_for_user_dict(u)
+
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 6)
+		row.add_child(_make_avatar_thumb(av.get("frames", []), int(av.get("delay_ms", 100)), Color(0.45, 0.72, 0.96)))
+
+		var nm := Label.new()
+		nm.text = "%s · %s" % [uname, status_txt]
+		nm.modulate = Color(0.68, 0.98, 0.76) if is_online else Color(0.84, 0.88, 0.94)
+		nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		nm.clip_text = true
+		row.add_child(nm)
+
+		var act_btn := Button.new()
+		ThemeFactory.apply_button_variant(act_btn, "primary" if rel == "none" or rel == "incoming" else "secondary")
+		match rel:
+			"friend":
+				act_btn.text = "Friends"
+				act_btn.disabled = true
+			"outgoing":
+				act_btn.text = "Pending"
+				act_btn.disabled = true
+			"incoming":
+				act_btn.text = "Accept"
+				var uc_acc := uname
+				act_btn.pressed.connect(func() -> void:
+					AudioManager.play_ui_tap()
+					act_btn.disabled = true
+					friend_request_respond_requested.emit(uc_acc, true)
+				)
+			_:
+				act_btn.text = "Add Friend"
+				var uc_add := uname
+				act_btn.pressed.connect(func() -> void:
+					AudioManager.play_ui_tap()
+					act_btn.disabled = true
+					act_btn.text = "Sent"
+					friend_request_send_requested.emit(uc_add)
+				)
+		row.add_child(act_btn)
+		search_results_box.add_child(row)
+
+
+func update_friends_overview(friends: Array, incoming: Array, outgoing: Array, invites: Array) -> void:
+	_server_friends = friends.duplicate()
+	_server_incoming = incoming.duplicate()
+	_server_outgoing = outgoing.duplicate()
+	for iv: Variant in invites:
+		if iv is Dictionary:
+			var idict := iv as Dictionary
+			var from_u: String = str(idict.get("from_username", ""))
+			var code: String = str(idict.get("room_code", ""))
+			if not code.is_empty():
+				show_incoming_invite(from_u, code)
+	_refresh_friends_ui()
+	_refresh_friends_badge()
+
+
 func open_friends_page(return_to: String = "menu") -> void:
 	AudioManager.play_ui_tap()
 	_friends_return_to = return_to
 	menu_card.visible = false
 	mp_lobby_card.visible = false
+	account_card.visible = false
 	friends_card.visible = true
 	menu_overlay.visible = true
+	search_status_label.visible = false
+	search_results_box.visible = false
 	_refresh_friends_ui()
+	if _account_logged_in:
+		friends_refresh_requested.emit()
 
 
 func _on_friends_back_pressed() -> void:
@@ -685,13 +1034,16 @@ func _on_friends_back_pressed() -> void:
 
 
 func _refresh_friends_badge() -> void:
-	var label_txt := "Friends (1)" if invite_row.visible else "Friends"
+	var badge_cnt: int = _server_incoming.size() + (1 if invite_row.visible else 0)
+	var label_txt := "Friends (%d)" % badge_cnt if badge_cnt > 0 else "Friends"
 	friends_btn.text = label_txt
 	mp_friends_btn.text = label_txt
 	if not _current_room_code.is_empty():
 		friends_hint_label.text = "Room Code: %s — click Invite to send to friends." % _current_room_code
+	elif _account_logged_in:
+		friends_hint_label.text = "Online friends appear first, down to longest offline."
 	else:
-		friends_hint_label.text = "Invite a friend to auto-create a %s room." % get_selected_server_name()
+		friends_hint_label.text = "Sign in to search DB players & see live online status."
 
 
 func _load_friends() -> void:
@@ -732,11 +1084,122 @@ func remove_friend(clean: String) -> void:
 
 
 func _refresh_friends_ui() -> void:
+	_animated_pfp_nodes.clear()
 	for child in friends_rows.get_children():
 		child.queue_free()
+
+	if _account_logged_in:
+		if not _server_incoming.is_empty():
+			var inc_hdr := Label.new()
+			inc_hdr.text = "INCOMING REQUESTS (%d)" % _server_incoming.size()
+			inc_hdr.modulate = Color(0.98, 0.84, 0.42, 0.95)
+			friends_rows.add_child(inc_hdr)
+			for iv: Variant in _server_incoming:
+				if not (iv is Dictionary):
+					continue
+				var inc := iv as Dictionary
+				var from_u: String = str(inc.get("username", ""))
+				var av := _frames_for_user_dict(inc)
+				var r := HBoxContainer.new()
+				r.add_theme_constant_override("separation", 6)
+				r.add_child(_make_avatar_thumb(av.get("frames", []), int(av.get("delay_ms", 100)), Color(0.95, 0.78, 0.35)))
+				var nm := Label.new()
+				nm.text = from_u
+				nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+				nm.clip_text = true
+				r.add_child(nm)
+				var acc_b := Button.new()
+				acc_b.text = "Accept"
+				ThemeFactory.apply_button_variant(acc_b, "primary")
+				var fu_cap := from_u
+				acc_b.pressed.connect(func() -> void:
+					AudioManager.play_ui_tap()
+					friend_request_respond_requested.emit(fu_cap, true)
+				)
+				r.add_child(acc_b)
+				var dec_b := Button.new()
+				_style_close_button(dec_b)
+				dec_b.tooltip_text = "Decline"
+				dec_b.pressed.connect(func() -> void:
+					AudioManager.play_ui_tap()
+					friend_request_respond_requested.emit(fu_cap, false)
+				)
+				r.add_child(dec_b)
+				friends_rows.add_child(r)
+
+		if _server_friends.is_empty():
+			var empty_srv := Label.new()
+			empty_srv.text = "No friends yet — search for players above to add!"
+			empty_srv.modulate = Color(0.64, 0.72, 0.82, 0.85)
+			friends_rows.add_child(empty_srv)
+		else:
+			for fv: Variant in _server_friends:
+				if not (fv is Dictionary):
+					continue
+				var f := fv as Dictionary
+				var f_name: String = str(f.get("username", ""))
+				var online: bool = bool(f.get("online", false))
+				var seen_txt: String = str(f.get("last_seen_text", "Offline"))
+				var av := _frames_for_user_dict(f)
+
+				var row := HBoxContainer.new()
+				row.add_theme_constant_override("separation", 6)
+
+				var dot := ColorRect.new()
+				dot.custom_minimum_size = Vector2(8, 8)
+				dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+				dot.color = Color(0.28, 0.94, 0.54) if online else Color(0.45, 0.50, 0.58)
+				row.add_child(dot)
+
+				row.add_child(_make_avatar_thumb(av.get("frames", []), int(av.get("delay_ms", 100)), Color(0.32, 0.62, 0.96) if online else Color(0.45, 0.50, 0.58)))
+
+				var nm := Label.new()
+				nm.text = f_name
+				nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+				nm.clip_text = true
+				row.add_child(nm)
+
+				var st_lbl := Label.new()
+				st_lbl.text = seen_txt
+				st_lbl.modulate = Color(0.46, 0.96, 0.62) if online else Color(0.60, 0.68, 0.78, 0.86)
+				row.add_child(st_lbl)
+
+				var inv_btn := Button.new()
+				inv_btn.text = "Invite"
+				ThemeFactory.apply_button_variant(inv_btn, "secondary")
+				var f_cap := f_name
+				inv_btn.pressed.connect(func() -> void:
+					AudioManager.play_ui_tap()
+					_on_invite_friend_pressed(f_cap)
+				)
+				row.add_child(inv_btn)
+
+				var rm_btn := Button.new()
+				_style_close_button(rm_btn)
+				rm_btn.tooltip_text = "Remove Friend"
+				rm_btn.pressed.connect(func() -> void:
+					AudioManager.play_ui_tap()
+					friend_remove_requested.emit(f_cap)
+				)
+				row.add_child(rm_btn)
+				friends_rows.add_child(row)
+
+		if not _server_outgoing.is_empty():
+			var out_names := PackedStringArray()
+			for ov: Variant in _server_outgoing:
+				if ov is Dictionary:
+					out_names.append(str((ov as Dictionary).get("username", "")))
+			if not out_names.is_empty():
+				var out_lbl := Label.new()
+				out_lbl.text = "Pending Sent: " + ", ".join(out_names)
+				out_lbl.modulate = Color(0.62, 0.70, 0.80, 0.80)
+				out_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+				friends_rows.add_child(out_lbl)
+		return
+
 	if _friends.is_empty():
 		var empty_lbl := Label.new()
-		empty_lbl.text = "No friends added yet — add a friend above to invite."
+		empty_lbl.text = "Sign in to view online friends or search players."
 		empty_lbl.modulate = Color(0.64, 0.72, 0.82, 0.85)
 		friends_rows.add_child(empty_lbl)
 		return
@@ -747,7 +1210,7 @@ func _refresh_friends_ui() -> void:
 		var dot := ColorRect.new()
 		dot.custom_minimum_size = Vector2(8, 8)
 		dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		dot.color = Color(0.32, 0.90, 0.56)
+		dot.color = Color(0.45, 0.50, 0.58)
 		row.add_child(dot)
 
 		var nm := Label.new()
@@ -831,7 +1294,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				return
 	if menu_overlay.visible or not _hotkeys_enabled:
 		return
-	if nation_name_edit.has_focus() or menu_name_edit.has_focus() or mp_server_edit.has_focus() or mp_room_edit.has_focus() or friend_name_edit.has_focus():
+	if nation_name_edit.has_focus() or menu_name_edit.has_focus() or mp_server_edit.has_focus() or mp_room_edit.has_focus() or friend_name_edit.has_focus() or account_user_edit.has_focus() or account_pass_edit.has_focus():
 		return
 	if event is InputEventKey:
 		var ke := event as InputEventKey
@@ -870,6 +1333,26 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _process(delta: float) -> void:
+	_avatar_anim_ms += delta * 1000.0
+	if _local_avatar_frames.size() > 1:
+		var step: int = int(_avatar_anim_ms / maxf(float(_local_avatar_delay_ms), 40.0)) % _local_avatar_frames.size()
+		if step != _avatar_last_step:
+			_avatar_last_step = step
+			var tex: Texture2D = _local_avatar_frames[step] as Texture2D
+			avatar_preview.texture = tex
+			if _dock_avatar_rect != null and _dock_avatar_rect.visible:
+				_dock_avatar_rect.texture = tex
+	for entry: Dictionary in _animated_pfp_nodes:
+		var node: TextureRect = entry.get("node") as TextureRect
+		var frs: Array = entry.get("frames", [])
+		if is_instance_valid(node) and frs.size() > 1:
+			var st: int = int(_avatar_anim_ms / maxf(float(entry.get("delay_ms", 100)), 40.0)) % frs.size()
+			if st != int(entry.get("step", -1)):
+				entry["step"] = st
+				node.texture = frs[st] as Texture2D
+	if victory_overlay.visible and _victory_avatar_frames.size() > 1:
+		var vst: int = int(_avatar_anim_ms / maxf(float(_victory_avatar_delay_ms), 40.0)) % _victory_avatar_frames.size()
+		victory_icon.texture = _victory_avatar_frames[vst] as Texture2D
 	if _toast_timer > 0.0:
 		_toast_timer -= delta
 		if _toast_timer <= 0.0:
@@ -898,8 +1381,13 @@ func get_spawn_config() -> Dictionary:
 
 func set_commit_ratio(ratio: float) -> void:
 	AudioManager.play_ui_tap()
-	_commit_ratio = clampf(ratio, 0.15, 0.80)
+	_commit_ratio = clampf(ratio, 0.10, 0.80)
 	_update_commit_buttons()
+	if _world_state != null:
+		var p: NationData = _world_state.get_player_nation()
+		if p != null:
+			_update_attack_preview(p)
+	troop_bar.queue_redraw()
 
 
 func get_commit_ratio() -> float:
@@ -946,6 +1434,8 @@ func open_menu() -> void:
 	new_match_btn.visible = in_match
 	mp_lobby_card.visible = false
 	friends_card.visible = false
+	account_card.visible = false
+	patch_notes_card.visible = false
 	menu_card.visible = true
 	menu_overlay.visible = true
 	_sync_hud_chrome_visibility()
@@ -1068,6 +1558,8 @@ func on_match_reset() -> void:
 	_selected_structure_id = 0
 	_selected_dip_nation_id = 0
 	_pending_alliance_from_id = 0
+	_last_dock_cost_key = -1
+	_last_dock_afford_mask = -1
 	clear_build_mode()
 	clear_missile_mode()
 	_sync_hud_chrome_visibility()
@@ -1106,41 +1598,44 @@ func _select_missile_mode(kind: String) -> void:
 func _update_action_dock_buttons() -> void:
 	var free_hand: bool = (_build_mode == "" and _missile_mode == "")
 	ThemeFactory.set_slot_active(expand_btn, free_hand, Color(0.56, 0.88, 1.0, 0.95))
-	ThemeFactory.set_slot_active(town_btn, _build_mode == StructureData.TYPE_TOWN, Color(0.46, 0.94, 0.62, 0.95))
-	ThemeFactory.set_slot_active(factory_btn, _build_mode == StructureData.TYPE_FACTORY, Color(0.98, 0.80, 0.36, 0.95))
-	ThemeFactory.set_slot_active(port_btn, _build_mode == StructureData.TYPE_PORT, Color(0.44, 0.86, 1.0, 0.95))
-	ThemeFactory.set_slot_active(defense_btn, _build_mode == StructureData.TYPE_DEFENSE_POST, Color(0.52, 0.76, 1.0, 0.95))
-	ThemeFactory.set_slot_active(silo_btn, _build_mode == StructureData.TYPE_MISSILE_SILO, Color(1.0, 0.56, 0.46, 0.95))
-	ThemeFactory.set_slot_active(sam_btn, _build_mode == StructureData.TYPE_SAM_LAUNCHER, Color(0.42, 0.96, 0.92, 0.95))
-	ThemeFactory.set_slot_active(warship_btn, _build_mode == "warship", Color(0.48, 0.86, 1.0, 0.95))
-	ThemeFactory.set_slot_active(atom_dock_btn, _missile_mode == MissileUnit.KIND_ATOM, Color(1.0, 0.82, 0.36, 0.95))
-	ThemeFactory.set_slot_active(hbomb_dock_btn, _missile_mode == MissileUnit.KIND_HYDROGEN, Color(1.0, 0.52, 0.32, 0.95))
-	ThemeFactory.set_slot_active(mirv_dock_btn, _missile_mode == MissileUnit.KIND_MIRV, Color(1.0, 0.38, 0.66, 0.95))
-	expand_btn.modulate = Color(0.76, 0.94, 1.0) if free_hand else Color.WHITE
-	town_btn.modulate = Color(0.76, 0.98, 0.82) if _build_mode == StructureData.TYPE_TOWN else Color.WHITE
-	factory_btn.modulate = Color(1.0, 0.88, 0.62) if _build_mode == StructureData.TYPE_FACTORY else Color.WHITE
-	port_btn.modulate = Color(0.72, 0.94, 1.0) if _build_mode == StructureData.TYPE_PORT else Color.WHITE
-	defense_btn.modulate = Color(0.74, 0.86, 1.0) if _build_mode == StructureData.TYPE_DEFENSE_POST else Color.WHITE
-	silo_btn.modulate = Color(1.0, 0.72, 0.66) if _build_mode == StructureData.TYPE_MISSILE_SILO else Color.WHITE
-	sam_btn.modulate = Color(0.68, 0.98, 1.0) if _build_mode == StructureData.TYPE_SAM_LAUNCHER else Color.WHITE
-	warship_btn.modulate = Color(0.66, 0.92, 1.0) if _build_mode == "warship" else Color.WHITE
-	atom_dock_btn.modulate = Color(1.0, 0.78, 0.44) if _missile_mode == MissileUnit.KIND_ATOM else Color.WHITE
-	hbomb_dock_btn.modulate = Color(1.0, 0.56, 0.36) if _missile_mode == MissileUnit.KIND_HYDROGEN else Color.WHITE
-	mirv_dock_btn.modulate = Color(1.0, 0.44, 0.66) if _missile_mode == MissileUnit.KIND_MIRV else Color.WHITE
-	commit_sep.visible = free_hand
-	commit_box.visible = free_hand
+	var slots: Array = [
+		[town_btn, _build_mode == StructureData.TYPE_TOWN, Color(0.46, 0.94, 0.62, 0.95)],
+		[factory_btn, _build_mode == StructureData.TYPE_FACTORY, Color(0.98, 0.80, 0.36, 0.95)],
+		[port_btn, _build_mode == StructureData.TYPE_PORT, Color(0.44, 0.86, 1.0, 0.95)],
+		[defense_btn, _build_mode == StructureData.TYPE_DEFENSE_POST, Color(0.52, 0.76, 1.0, 0.95)],
+		[silo_btn, _build_mode == StructureData.TYPE_MISSILE_SILO, Color(1.0, 0.56, 0.46, 0.95)],
+		[sam_btn, _build_mode == StructureData.TYPE_SAM_LAUNCHER, Color(0.42, 0.96, 0.92, 0.95)],
+		[warship_btn, _build_mode == "warship", Color(0.48, 0.86, 1.0, 0.95)],
+		[atom_dock_btn, _missile_mode == MissileUnit.KIND_ATOM, Color(1.0, 0.82, 0.36, 0.95)],
+		[hbomb_dock_btn, _missile_mode == MissileUnit.KIND_HYDROGEN, Color(1.0, 0.52, 0.32, 0.95)],
+		[mirv_dock_btn, _missile_mode == MissileUnit.KIND_MIRV, Color(1.0, 0.38, 0.66, 0.95)],
+	]
+	for entry: Array in slots:
+		var btn: Button = entry[0] as Button
+		ThemeFactory.set_photo_slot_active(btn, bool(entry[1]), entry[2] as Color)
+		btn.modulate = Color.WHITE
+	expand_btn.modulate = Color(0.82, 0.96, 1.0) if free_hand else Color.WHITE
+	_last_dock_afford_mask = -1
+	if _world_state != null and _world_state.match_phase == WorldState.PHASE_PLAYING:
+		var p: NationData = _world_state.get_player_nation()
+		if p != null:
+			_refresh_dock_slot_cost_colors(p)
+	troop_bar.queue_redraw()
 
 
 func _update_commit_buttons() -> void:
-	var active_col := Color(0.68, 0.94, 1.0)
-	ThemeFactory.set_slot_active(commit_20_btn, is_equal_approx(_commit_ratio, 0.20), active_col)
-	ThemeFactory.set_slot_active(commit_35_btn, is_equal_approx(_commit_ratio, 0.35), active_col)
-	ThemeFactory.set_slot_active(commit_50_btn, is_equal_approx(_commit_ratio, 0.50), active_col)
-	ThemeFactory.set_slot_active(commit_75_btn, is_equal_approx(_commit_ratio, 0.75), active_col)
-	commit_20_btn.modulate = active_col if is_equal_approx(_commit_ratio, 0.20) else Color.WHITE
-	commit_35_btn.modulate = active_col if is_equal_approx(_commit_ratio, 0.35) else Color.WHITE
-	commit_50_btn.modulate = active_col if is_equal_approx(_commit_ratio, 0.50) else Color.WHITE
-	commit_75_btn.modulate = active_col if is_equal_approx(_commit_ratio, 0.75) else Color.WHITE
+	var commits: Array = [
+		[commit_10_btn, 0.10],
+		[commit_25_btn, 0.25],
+		[commit_35_btn, 0.35],
+		[commit_50_btn, 0.50],
+		[commit_75_btn, 0.75],
+	]
+	for entry: Array in commits:
+		var btn: Button = entry[0] as Button
+		ThemeFactory.set_commit_pill_active(btn, is_equal_approx(_commit_ratio, float(entry[1])))
+		btn.modulate = Color.WHITE
+	attack_pct_label.text = "%d%%" % int(round(_commit_ratio * 100.0))
 
 
 func _update_hotkeys_button() -> void:
@@ -1172,14 +1667,14 @@ func _toggle_audio_popover() -> void:
 			audio_popover.offset_right = 130.0
 			audio_popover.offset_bottom = 140.0
 		else:
-			audio_popover.anchor_left = 0.5
-			audio_popover.anchor_right = 0.5
-			audio_popover.anchor_top = 1.0
-			audio_popover.anchor_bottom = 1.0
-			audio_popover.offset_left = 114.0
-			audio_popover.offset_top = -360.0
-			audio_popover.offset_right = 374.0
-			audio_popover.offset_bottom = -96.0
+			audio_popover.anchor_left = 0.0
+			audio_popover.anchor_right = 0.0
+			audio_popover.anchor_top = 0.0
+			audio_popover.anchor_bottom = 0.0
+			audio_popover.offset_left = 10.0
+			audio_popover.offset_top = 44.0
+			audio_popover.offset_right = 270.0
+			audio_popover.offset_bottom = 324.0
 		audio_popover.move_to_front()
 		AudioManager.play_panel_open()
 	else:
@@ -1204,39 +1699,89 @@ static func _make_pixel_icon(base: Texture2D, tint: Color = Color.WHITE, size_px
 
 
 func _apply_action_dock_icons(player_col: Color) -> void:
-	gold_icon.texture = _build_tinted_icon(_tex_coin, null, Color.WHITE, 15, 15)
-	troops_icon.texture = _build_tinted_icon(_tex_troops, null, Color.WHITE, 15, 15)
-	expand_btn.icon = _build_tinted_icon(_tex_attack, null, Color.WHITE, 16, 16)
-	town_btn.icon = _build_tinted_icon(_tex_town, _tex_town_mask, player_col, 16, 16)
-	factory_btn.icon = _build_tinted_icon(_tex_factory, _tex_factory_mask, player_col, 16, 16)
-	port_btn.icon = _build_tinted_icon(_tex_port, _tex_port_mask, player_col, 16, 16)
-	defense_btn.icon = _build_tinted_icon(_tex_defense, _tex_defense_mask, player_col, 16, 16)
-	silo_btn.icon = _build_tinted_icon(_tex_silo, _tex_silo_mask, player_col, 16, 16)
-	sam_btn.icon = _build_tinted_icon(_tex_sam, _tex_sam_mask, player_col, 16, 16)
-	var ship_ic: ImageTexture = _build_tinted_icon(_tex_warship, _tex_warship_mask, player_col, 20, 11)
-	warship_btn.icon = ship_ic
-	atom_dock_btn.icon = _build_tinted_icon(_tex_missile, null, Color(1.0, 0.88, 0.45), 16, 16)
-	hbomb_dock_btn.icon = _build_tinted_icon(_tex_missile, null, Color(1.0, 0.52, 0.32), 16, 16)
-	mirv_dock_btn.icon = _build_tinted_icon(_tex_missile, null, Color(1.0, 0.36, 0.68), 16, 16)
+	gold_icon.texture = _make_pixel_icon(_tex_coin, Color(0.92, 0.82, 0.44), 12)
+	troops_icon.texture = _make_pixel_icon(_tex_troops, Color(0.78, 0.82, 0.88), 12)
+	expand_btn.icon = _make_pixel_icon(_tex_attack, Color.WHITE, 13)
+	town_btn.icon = _make_pixel_icon(_tex_hud_town, Color.WHITE, 20)
+	factory_btn.icon = _make_pixel_icon(_tex_hud_factory, Color.WHITE, 20)
+	port_btn.icon = _make_pixel_icon(_tex_hud_port, Color.WHITE, 20)
+	defense_btn.icon = _make_pixel_icon(_tex_hud_defense, Color.WHITE, 20)
+	silo_btn.icon = _make_pixel_icon(_tex_hud_silo, Color.WHITE, 20)
+	sam_btn.icon = _make_pixel_icon(_tex_hud_sam, Color.WHITE, 20)
+	warship_btn.icon = _make_pixel_icon(_tex_hud_warship, Color.WHITE, 20)
+	atom_dock_btn.icon = _make_pixel_icon(_tex_hud_atom, Color.WHITE, 20)
+	hbomb_dock_btn.icon = _make_pixel_icon(_tex_hud_hbomb, Color.WHITE, 20)
+	mirv_dock_btn.icon = _make_pixel_icon(_tex_hud_mirv, Color.WHITE, 20)
+	var ship_ic: ImageTexture = _make_pixel_icon(_tex_hud_warship, Color.WHITE, 18)
 	var upg_ic: ImageTexture = _build_tinted_icon(_tex_upgrade, null, Color.WHITE, 16, 16)
 	var boat_ic: ImageTexture = _build_tinted_icon(_tex_boat, null, Color.WHITE, 16, 16)
 	st_upgrade_btn.icon = upg_ic
 	st_warship_btn.icon = ship_ic
-	st_atom_btn.icon = atom_dock_btn.icon
-	st_hbomb_btn.icon = hbomb_dock_btn.icon
-	st_mirv_btn.icon = mirv_dock_btn.icon
+	st_atom_btn.icon = _make_pixel_icon(_tex_hud_atom, Color.WHITE, 16)
+	st_hbomb_btn.icon = _make_pixel_icon(_tex_hud_hbomb, Color.WHITE, 16)
+	st_mirv_btn.icon = _make_pixel_icon(_tex_hud_mirv, Color.WHITE, 16)
 	var dip_ic: ImageTexture = _build_tinted_icon(_tex_diplomacy, null, Color.WHITE, 16, 16)
 	ally_btn.icon = dip_ic
 	embargo_btn.icon = _build_tinted_icon(_tex_port, _tex_port_mask, Color(1.0, 0.55, 0.45), 16, 16)
 	donate_gold_btn.icon = _build_tinted_icon(_tex_coin, null, Color.WHITE, 16, 16)
 	donate_troops_btn.icon = _build_tinted_icon(_tex_troops, null, Color.WHITE, 16, 16)
 	# Simplified 4-way right-click bar: Top=Attack(crossed swords), Left=Upgrade(arrow up), Right=Boat(boat), Bottom=Ally(handshake)
-	radial_attack_btn.icon = expand_btn.icon
+	radial_attack_btn.icon = _build_tinted_icon(_tex_attack, null, Color.WHITE, 16, 16)
 	radial_build_btn.icon = upg_ic
 	radial_warship_btn.icon = boat_ic
-	radial_missile_btn.icon = atom_dock_btn.icon
+	radial_missile_btn.icon = st_atom_btn.icon
 	radial_dip_btn.icon = dip_ic
 	radial_info_btn.icon = dip_ic
+
+
+func _on_troop_bar_draw() -> void:
+	var sz: Vector2 = troop_bar.size
+	if sz.x <= 4.0 or sz.y <= 4.0:
+		return
+	var fill_ratio: float = 0.0
+	if _world_state != null:
+		var p: NationData = _world_state.get_player_nation()
+		if p != null and p.max_troops > 0.0:
+			fill_ratio = clampf(p.troops / p.max_troops, 0.0, 1.0)
+	var commit_r: float = clampf(_commit_ratio, 0.0, 1.0)
+	var bar_y: float = floorf((sz.y - 7.0) * 0.5)
+	var bar_h: float = 7.0
+	var seg_cnt := 5
+	var gap := 2.0
+	var seg_w: float = floorf((sz.x - gap * float(seg_cnt - 1)) / float(seg_cnt))
+	var fill_x: float = fill_ratio * sz.x
+	var commit_x: float = roundf(commit_r * sz.x)
+	var col_green := Color(0.24, 0.85, 0.47, 1.0)
+	var col_green_hi := Color(0.45, 0.94, 0.63, 1.0)
+	var col_dark := Color(0.13, 0.15, 0.19, 1.0)
+	var col_gold_bg := Color(0.28, 0.24, 0.11, 1.0)
+	var col_border := Color(0.06, 0.07, 0.09, 1.0)
+	for i in range(seg_cnt):
+		var sx: float = float(i) * (seg_w + gap)
+		var sw: float = seg_w if i < seg_cnt - 1 else maxf(seg_w, sz.x - sx)
+		var r := Rect2(sx, bar_y, sw, bar_h)
+		troop_bar.draw_rect(r, col_dark)
+		if sx + sw > commit_x:
+			var gx0: float = maxf(sx, commit_x)
+			troop_bar.draw_rect(Rect2(gx0, bar_y, (sx + sw) - gx0, bar_h), col_gold_bg)
+		if fill_x > sx:
+			var fw: float = minf(sw, fill_x - sx)
+			troop_bar.draw_rect(Rect2(sx, bar_y, fw, bar_h), col_green)
+			troop_bar.draw_rect(Rect2(sx, bar_y, fw, 1.0), col_green_hi)
+		troop_bar.draw_rect(r, col_border, false, 1.0)
+	var dx: float = clampf(commit_x, 3.0, sz.x - 3.0)
+	var cy: float = bar_y + bar_h * 0.5
+	var gold_marker := Color(0.96, 0.82, 0.28, 1.0)
+	troop_bar.draw_rect(Rect2(dx - 0.5, bar_y - 1.0, 1.0, bar_h + 4.0), gold_marker)
+	troop_bar.draw_polygon(
+		PackedVector2Array([
+			Vector2(dx, cy - 4.0),
+			Vector2(dx + 4.0, cy),
+			Vector2(dx, cy + 4.0),
+			Vector2(dx - 4.0, cy),
+		]),
+		PackedColorArray([gold_marker, gold_marker, gold_marker, gold_marker])
+	)
 
 
 static func _build_tinted_icon(base: Texture2D, mask: Texture2D, col: Color, out_w: int = 20, out_h: int = 20) -> ImageTexture:
@@ -1283,12 +1828,62 @@ func refresh_all() -> void:
 		show_diplomacy_panel(_selected_dip_nation_id)
 
 
+func _update_attack_preview(p: NationData) -> void:
+	var sends: float = floorf(p.troops * _commit_ratio)
+	var best_def: float = 1.0
+	for sid: int in p.structure_ids:
+		var st_def: StructureData = _world_state.structures.get(sid)
+		if st_def != null and st_def.type == StructureData.TYPE_DEFENSE_POST and not st_def.is_constructing and st_def.level > 0:
+			best_def = maxf(best_def, st_def.get_defense_multiplier())
+	attack_preview_label.text = "Sends %s troops · Defense %.1fx" % [StructureData.format_compact(sends), best_def]
+
+
+func _get_dock_slot_costs(p: NationData) -> Array[float]:
+	return [
+		_world_state.get_structure_build_cost(p.id, StructureData.TYPE_TOWN),
+		_world_state.get_structure_build_cost(p.id, StructureData.TYPE_FACTORY),
+		_world_state.get_structure_build_cost(p.id, StructureData.TYPE_PORT),
+		_world_state.get_structure_build_cost(p.id, StructureData.TYPE_DEFENSE_POST),
+		_world_state.get_structure_build_cost(p.id, StructureData.TYPE_MISSILE_SILO),
+		_world_state.get_structure_build_cost(p.id, StructureData.TYPE_SAM_LAUNCHER),
+		_world_state.get_warship_build_cost(p.id),
+		MissileUnit.get_cost(MissileUnit.KIND_ATOM),
+		MissileUnit.get_cost(MissileUnit.KIND_HYDROGEN),
+		MissileUnit.get_cost(MissileUnit.KIND_MIRV),
+	]
+
+
+func _refresh_dock_slot_cost_colors(p: NationData) -> void:
+	var costs: Array[float] = _get_dock_slot_costs(p)
+	var afford_mask := 0
+	for i in range(costs.size()):
+		if p.gold >= costs[i]:
+			afford_mask |= (1 << i)
+	if afford_mask == _last_dock_afford_mask:
+		return
+	_last_dock_afford_mask = afford_mask
+	var btns: Array[Button] = [
+		town_btn, factory_btn, port_btn, defense_btn, silo_btn,
+		sam_btn, warship_btn, atom_dock_btn, hbomb_dock_btn, mirv_dock_btn,
+	]
+	var col_afford := Color(0.95, 0.87, 0.48, 1.0)
+	var col_unafford := Color(0.95, 0.37, 0.37, 1.0)
+	for i in range(btns.size()):
+		var col: Color = col_afford if ((afford_mask & (1 << i)) != 0) else col_unafford
+		btns[i].add_theme_color_override("font_color", col)
+		btns[i].add_theme_color_override("font_hover_color", col.lightened(0.12))
+		btns[i].add_theme_color_override("font_pressed_color", col)
+
+
 func refresh_player_bar() -> void:
 	if _world_state == null:
 		return
 	if _world_state.match_phase == WorldState.PHASE_SPAWN_SELECT:
-		gold_label.text = "Pesos: --"
+		gold_label.text = "--"
+		gold_rate_label.text = ""
 		troops_label.text = "--"
+		troops_max_label.text = ""
+		troops_rate_label.text = ""
 		world_pct_label.text = "Select Spawn Point"
 		return
 	var p: NationData = _world_state.get_player_nation()
@@ -1299,39 +1894,51 @@ func refresh_player_bar() -> void:
 		for nid_k: int in _world_state.nations.keys():
 			if (_world_state.nations[nid_k] as NationData).alive:
 				alive_cnt += 1
-		gold_label.text = "Pesos: SPECTATING"
-		troops_label.text = "Defeated"
-		world_pct_label.text = "Spectating · %d Nations Alive" % alive_cnt
+		gold_label.text = "SPEC"
+		gold_rate_label.text = ""
+		troops_label.text = "0"
+		troops_max_label.text = ""
+		troops_rate_label.text = ""
+		world_pct_label.text = "Spectating · %d Nations" % alive_cnt
 		return
-	gold_label.text = "Pesos: %s (+%s/s)" % [StructureData.format_pesos(p.gold), StructureData.format_pesos(p.gold_per_sec)]
-	troops_label.text = "%d/%d (+%.1f/s)" % [int(floor(p.troops)), int(round(p.max_troops)), p.effective_troops_per_sec]
+	nation_color_swatch.color = p.color
+	nation_name_label.text = p.name
 	var betray_tag := " [BETRAYAL]" if p.is_betrayer(_world_state.current_tick) else ""
-	world_pct_label.text = "%.2f%% / 80%%%s" % [p.territory_percent, betray_tag]
+	world_pct_label.text = "%.2f%% of the world%s" % [p.territory_percent, betray_tag]
+	troops_label.text = StructureData.format_compact(floor(p.troops))
+	troops_max_label.text = "/ %s" % StructureData.format_compact(round(p.max_troops))
+	troops_rate_label.text = ("+%.1f/s" % p.effective_troops_per_sec) if p.effective_troops_per_sec < 10.0 else ("+%s/s" % StructureData.format_compact(p.effective_troops_per_sec))
+	gold_label.text = StructureData.format_compact(p.gold)
+	gold_rate_label.text = ("+%.1f/s" % p.gold_per_sec) if p.gold_per_sec < 10.0 else ("+%s/s" % StructureData.format_compact(p.gold_per_sec))
+	_update_attack_preview(p)
+	troop_bar.queue_redraw()
 	var dock_key: int = p.id * 100003 + p.structure_ids.size() * 131 + _world_state.structures.size() + _world_state.count_warships(p.id) * 17
-	if dock_key == _last_dock_cost_key:
-		return
-	_last_dock_cost_key = dock_key
-	expand_btn.text = "Explore"
-	town_btn.text = "1·%s" % StructureData.format_pesos(_world_state.get_structure_build_cost(p.id, StructureData.TYPE_TOWN))
-	town_btn.tooltip_text = "[1] Town (%d owned)" % _world_state.count_structures_of_type(p.id, StructureData.TYPE_TOWN)
-	factory_btn.text = "2·%s" % StructureData.format_pesos(_world_state.get_structure_build_cost(p.id, StructureData.TYPE_FACTORY))
-	factory_btn.tooltip_text = "[2] Factory (%d owned)" % _world_state.count_structures_of_type(p.id, StructureData.TYPE_FACTORY)
-	port_btn.text = "3·%s" % StructureData.format_pesos(_world_state.get_structure_build_cost(p.id, StructureData.TYPE_PORT))
-	port_btn.tooltip_text = "[3] Port (%d owned)" % _world_state.count_structures_of_type(p.id, StructureData.TYPE_PORT)
-	defense_btn.text = "4·%s" % StructureData.format_pesos(_world_state.get_structure_build_cost(p.id, StructureData.TYPE_DEFENSE_POST))
-	defense_btn.tooltip_text = "[4] Defense Post (%d owned)" % _world_state.count_structures_of_type(p.id, StructureData.TYPE_DEFENSE_POST)
-	silo_btn.text = "5·%s" % StructureData.format_pesos(_world_state.get_structure_build_cost(p.id, StructureData.TYPE_MISSILE_SILO))
-	silo_btn.tooltip_text = "[5] Missile Silo (%d owned)" % _world_state.count_structures_of_type(p.id, StructureData.TYPE_MISSILE_SILO)
-	sam_btn.text = "6·%s" % StructureData.format_pesos(_world_state.get_structure_build_cost(p.id, StructureData.TYPE_SAM_LAUNCHER))
-	sam_btn.tooltip_text = "[6] SAM Launcher (%d owned)" % _world_state.count_structures_of_type(p.id, StructureData.TYPE_SAM_LAUNCHER)
-	warship_btn.text = "7·%s" % StructureData.format_pesos(_world_state.get_warship_build_cost(p.id))
-	warship_btn.tooltip_text = "[7] Warship (%d active)" % _world_state.count_warships(p.id)
-	atom_dock_btn.text = "8·%s" % StructureData.format_pesos(MissileUnit.get_cost(MissileUnit.KIND_ATOM))
-	atom_dock_btn.tooltip_text = "[8] Atom Bomb"
-	hbomb_dock_btn.text = "9·%s" % StructureData.format_pesos(MissileUnit.get_cost(MissileUnit.KIND_HYDROGEN))
-	hbomb_dock_btn.tooltip_text = "[9] Hydrogen Bomb"
-	mirv_dock_btn.text = "F·%s" % StructureData.format_pesos(MissileUnit.get_cost(MissileUnit.KIND_MIRV))
-	mirv_dock_btn.tooltip_text = "[F] MIRV Warhead"
+	if dock_key != _last_dock_cost_key:
+		_last_dock_cost_key = dock_key
+		_last_dock_afford_mask = -1
+		expand_btn.text = "Explore"
+		var slot_entries: Array = [
+			[town_btn, _world_state.get_structure_build_cost(p.id, StructureData.TYPE_TOWN), _world_state.count_structures_of_type(p.id, StructureData.TYPE_TOWN), "[1] Town (%d owned)"],
+			[factory_btn, _world_state.get_structure_build_cost(p.id, StructureData.TYPE_FACTORY), _world_state.count_structures_of_type(p.id, StructureData.TYPE_FACTORY), "[2] Factory (%d owned)"],
+			[port_btn, _world_state.get_structure_build_cost(p.id, StructureData.TYPE_PORT), _world_state.count_structures_of_type(p.id, StructureData.TYPE_PORT), "[3] Port (%d owned)"],
+			[defense_btn, _world_state.get_structure_build_cost(p.id, StructureData.TYPE_DEFENSE_POST), _world_state.count_structures_of_type(p.id, StructureData.TYPE_DEFENSE_POST), "[4] Defense Post (%d owned)"],
+			[silo_btn, _world_state.get_structure_build_cost(p.id, StructureData.TYPE_MISSILE_SILO), _world_state.count_structures_of_type(p.id, StructureData.TYPE_MISSILE_SILO), "[5] Missile Silo (%d owned)"],
+			[sam_btn, _world_state.get_structure_build_cost(p.id, StructureData.TYPE_SAM_LAUNCHER), _world_state.count_structures_of_type(p.id, StructureData.TYPE_SAM_LAUNCHER), "[6] SAM Launcher (%d owned)"],
+			[warship_btn, _world_state.get_warship_build_cost(p.id), _world_state.count_warships(p.id), "[7] Warship (%d active)"],
+			[atom_dock_btn, MissileUnit.get_cost(MissileUnit.KIND_ATOM), -1, "[8] Atom Bomb"],
+			[hbomb_dock_btn, MissileUnit.get_cost(MissileUnit.KIND_HYDROGEN), -1, "[9] Hydrogen Bomb"],
+			[mirv_dock_btn, MissileUnit.get_cost(MissileUnit.KIND_MIRV), -1, "[F] MIRV Warhead"],
+		]
+		for entry: Array in slot_entries:
+			var btn: Button = entry[0] as Button
+			var cost: float = float(entry[1])
+			var cnt: int = int(entry[2])
+			btn.text = StructureData.format_compact(cost)
+			btn.tooltip_text = (str(entry[3]) % cnt) if cnt >= 0 else str(entry[3])
+			var cnt_lbl := btn.get_node_or_null("TopMeta/CountLbl") as Label
+			if cnt_lbl != null and cnt >= 0:
+				cnt_lbl.text = "×%d" % cnt
+	_refresh_dock_slot_cost_colors(p)
 
 
 func show_hovered_cell(cell: Vector2i) -> void:
@@ -1721,7 +2328,19 @@ func show_victory_screen(winner_id: int, pct: float) -> void:
 	var w_name: String = winner.name if winner != null else "Nation #%d" % winner_id
 	var w_col: Color = winner.color if winner != null else Color.GOLD
 	var is_player_win: bool = (winner_id == _world_state.player_nation_id)
-	victory_icon.texture = _build_tinted_icon(_tex_banner, _tex_banner_mask, w_col, 24, 24)
+	_victory_avatar_frames.clear()
+	if is_player_win and not _local_avatar_frames.is_empty():
+		_victory_avatar_frames = _local_avatar_frames.duplicate()
+		_victory_avatar_delay_ms = _local_avatar_delay_ms
+		victory_icon.texture = _victory_avatar_frames[0] as Texture2D
+	elif _avatar_cache_lookup.is_valid():
+		var cached: Variant = _avatar_cache_lookup.call(w_name)
+		if cached is Dictionary and not (cached as Dictionary).get("frames", []).is_empty():
+			_victory_avatar_frames = ((cached as Dictionary)["frames"] as Array).duplicate()
+			_victory_avatar_delay_ms = clampi(int((cached as Dictionary).get("delay_ms", 100)), 40, 1000)
+			victory_icon.texture = _victory_avatar_frames[0] as Texture2D
+	if _victory_avatar_frames.is_empty():
+		victory_icon.texture = _build_tinted_icon(_tex_banner, _tex_banner_mask, w_col, 24, 24)
 	victory_title.text = "WORLD VICTORY" if is_player_win else "MATCH CONCLUDED"
 	victory_title.modulate = Color(1.0, 0.88, 0.42) if is_player_win else Color(0.84, 0.90, 0.98)
 	victory_sub.text = "%s unified %.1f%% of Earth!" % [w_name, pct]

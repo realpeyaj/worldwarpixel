@@ -11,6 +11,9 @@ const WARSHIP_DIAMOND_HALF_WID := 3.5
 var _tex_train: Texture2D = preload("res://assets/sprites/icon_train.png")
 var _tex_train_mask: Texture2D = preload("res://assets/sprites/icon_train_mask.png")
 var _tex_missile: Texture2D = preload("res://assets/sprites/icon_missile.png")
+var _tex_atom: Texture2D = preload("res://assets/sprites/icon_atom.png")
+var _tex_hbomb: Texture2D = preload("res://assets/sprites/icon_hbomb.png")
+var _tex_mirv: Texture2D = preload("res://assets/sprites/icon_mirv.png")
 
 var _world_state: WorldState
 var _camera: Camera2D
@@ -340,10 +343,18 @@ func _draw() -> void:
 				draw_circle(m.pos, 9.5 * ship_scale, Color(1.0, 0.72, 0.15, 0.28))
 				draw_circle(m.pos, 5.5 * ship_scale, Color(1.0, 0.84, 0.30, 0.42))
 
-			var m_sz := (Vector2(6.2, 6.2) if is_mini else Vector2(10.0, 10.0)) * ship_scale
-			draw_set_transform(m.pos, m.heading, Vector2.ONE)
-			draw_texture_rect(_tex_missile, Rect2(-m_sz * 0.5, m_sz), false, Color(1.0, 1.0, 1.0, 0.98))
-			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+			var m_tex: Texture2D = _tex_atom
+			var m_sz := Vector2(11.0, 11.0) * ship_scale
+			if m.kind == MissileUnit.KIND_HYDROGEN:
+				m_tex = _tex_hbomb
+				m_sz = Vector2(12.5, 12.5) * ship_scale
+			elif m.kind == MissileUnit.KIND_MIRV:
+				m_tex = _tex_mirv
+				m_sz = Vector2(13.0, 13.0) * ship_scale
+			elif is_mini:
+				m_tex = _tex_atom
+				m_sz = Vector2(7.0, 7.0) * ship_scale
+			draw_texture_rect(m_tex, Rect2(m.pos - m_sz * 0.5, m_sz), false, Color(1.0, 1.0, 1.0, 0.98))
 
 	# 6. Explosions & Intercept Flashes
 	for ex: Dictionary in _explosions:

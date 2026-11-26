@@ -2,7 +2,7 @@ shader_type canvas_item;
 
 uniform sampler2D owner_tex : filter_nearest, repeat_disable;
 uniform sampler2D nation_lut : filter_nearest, repeat_disable;
-uniform vec2 sim_size = vec2(1024.0, 512.0);
+uniform vec2 sim_size = vec2(2048.0, 1024.0);
 uniform float lut_width = 256.0;
 uniform float border_visibility : hint_range(0.0, 1.0) = 1.0;
 
@@ -16,25 +16,17 @@ int fetch_owner(vec2 cell) {
 }
 
 void fragment() {
-	vec2 sim_pos = UV * sim_size;
-	vec2 cell = floor(sim_pos);
+	vec2 cell = floor(UV * sim_size);
 	int oid = fetch_owner(cell);
 	if (oid <= 0) {
 		COLOR = vec4(0.0);
 	} else {
-		vec2 f = fract(sim_pos);
 		int o_l = fetch_owner(cell + vec2(-1.0, 0.0));
 		int o_r = fetch_owner(cell + vec2(1.0, 0.0));
 		int o_u = fetch_owner(cell + vec2(0.0, -1.0));
 		int o_d = fetch_owner(cell + vec2(0.0, 1.0));
 
-		float edge = 0.0;
-		if (o_l != oid && f.x < 0.72) edge = 1.0;
-		if (o_r != oid && f.x > 0.28) edge = 1.0;
-		if (o_u != oid && f.y < 0.72) edge = 1.0;
-		if (o_d != oid && f.y > 0.28) edge = 1.0;
-
-		if (edge > 0.5) {
+		if (o_l != oid || o_r != oid || o_u != oid || o_d != oid) {
 			vec4 ncol = texture(nation_lut, vec2((float(oid) + 0.5) / lut_width, 0.5));
 			vec3 border_col = mix(ncol.rgb, vec3(0.04, 0.06, 0.09), 0.52);
 			COLOR = vec4(border_col, 0.92 * border_visibility);

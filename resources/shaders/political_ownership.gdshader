@@ -2,7 +2,7 @@ shader_type canvas_item;
 
 uniform sampler2D owner_tex : filter_nearest, repeat_disable;
 uniform sampler2D nation_lut : filter_nearest, repeat_disable;
-uniform vec2 sim_size = vec2(1024.0, 512.0);
+uniform vec2 sim_size = vec2(2048.0, 1024.0);
 uniform float lut_width = 256.0;
 uniform float political_opacity : hint_range(0.0, 1.0) = 0.42;
 

@@ -24,11 +24,11 @@ var _heap_idx: PackedInt32Array = PackedInt32Array()
 var _stamp_id: int = 0
 
 
-func load_nav_grid(path: String, w: int = 1024, h: int = 512) -> bool:
+func load_nav_grid(path: String, w: int = 1024, h: int = 512, sim_w: int = 2048) -> bool:
 	nav_width = w
 	nav_height = h
 	_world_scale = 2048.0 / float(maxi(w, 1))
-	_sim_shift = 0 if w >= 1024 else 1
+	_sim_shift = 1 if sim_w >= w * 2 else 0
 	var f := FileAccess.open(path, FileAccess.READ)
 	if f == null:
 		push_error("Failed to open ocean nav grid: %s" % path)
