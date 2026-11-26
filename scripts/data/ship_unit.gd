@@ -23,6 +23,7 @@ var speed_px_per_sec: float = 10.5
 
 var gold_value: float = 15000.0
 var is_foreign_trade: bool = false
+var is_allied_trade: bool = false
 var returning: bool = false
 var captured: bool = false
 

@@ -438,8 +438,11 @@ func change_password(cur_pass: String, new_pass: String) -> void:
 	)
 
 
-func fetch_leaderboard(limit: int = 25, cb: Callable = Callable()) -> void:
-	_request_json("/api/leaderboard?limit=%d" % clampi(limit, 1, 50), HTTPClient.METHOD_GET, {}, false, func(code: int, data: Dictionary, _err_msg: String) -> void:
+func fetch_leaderboard(limit: int = 25, cb: Callable = Callable(), sort_by: String = "elo") -> void:
+	var s_clean: String = sort_by.strip_edges().to_lower()
+	if not (s_clean in ["elo", "wins", "territory"]):
+		s_clean = "elo"
+	_request_json("/api/leaderboard?limit=%d&sort=%s" % [clampi(limit, 1, 50), s_clean], HTTPClient.METHOD_GET, {}, false, func(code: int, data: Dictionary, _err_msg: String) -> void:
 		var arr: Array = data.get("leaderboard", []) as Array if (code >= 200 and code < 300 and data.get("leaderboard") is Array) else []
 		leaderboard_received.emit(arr)
 		if cb.is_valid():

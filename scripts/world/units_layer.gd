@@ -164,10 +164,17 @@ func _draw() -> void:
 			_draw_crosshair(tgt_w, 7.0 * inv_z, Color(0.48, 0.95, 1.0, 0.92), inv_z)
 
 		if is_trade:
-			var sq_sz: float = TRADE_SHIP_SIZE_PX * ship_scale
+			if ship.is_allied_trade and ship.nation_id == _world_state.player_nation_id and ship.waypoints.size() >= 2:
+				var route_pts := PackedVector2Array([pos])
+				for wi in range(ship.waypoint_index, ship.waypoints.size()):
+					route_pts.append(ship.waypoints[wi])
+				if route_pts.size() >= 2:
+					draw_polyline(route_pts, Color(0.98, 0.84, 0.36, 0.24), 0.75 * ship_scale, false)
+			var sq_sz: float = (TRADE_SHIP_SIZE_PX * (1.25 if ship.is_allied_trade else 1.0)) * ship_scale
 			var sq_rect := Rect2(pos - Vector2(sq_sz, sq_sz) * 0.5, Vector2(sq_sz, sq_sz))
 			draw_rect(sq_rect, n_col.lightened(0.08), true)
-			draw_rect(sq_rect, Color(0.04, 0.06, 0.09, 0.78), false, 0.55 * ship_scale)
+			var trade_rim: Color = Color(0.98, 0.86, 0.32, 0.96) if ship.is_allied_trade else Color(0.04, 0.06, 0.09, 0.78)
+			draw_rect(sq_rect, trade_rim, false, (0.85 if ship.is_allied_trade else 0.55) * ship_scale)
 		elif is_warship:
 			var hl: float = WARSHIP_DIAMOND_HALF_LEN * ship_scale
 			var hw: float = WARSHIP_DIAMOND_HALF_WID * ship_scale

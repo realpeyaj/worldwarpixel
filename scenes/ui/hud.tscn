@@ -85,7 +85,7 @@ theme_override_constants/separation = 6
 [node name="Prompt" type="Label" parent="Root/SpawnBanner/VBox"]
 layout_mode = 2
 horizontal_alignment = 1
-text = "Spawn Your Nation — Click Any Land on Earth (Color Assigned Randomly)"
+text = "Spawn Your Nation — Click Any Landmass on Earth"
 
 [node name="Row" type="HBoxContainer" parent="Root/SpawnBanner/VBox"]
 layout_mode = 2
@@ -1031,7 +1031,81 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-color = Color(0.03, 0.05, 0.09, 0.38)
+color = Color(0, 0, 0, 0)
+
+[node name="HomeCorners" type="Control" parent="Root/MenuOverlay"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="ProfileRow" type="HBoxContainer" parent="Root/MenuOverlay/HomeCorners"]
+layout_mode = 1
+anchors_preset = 0
+offset_left = 16.0
+offset_top = 14.0
+offset_right = 460.0
+offset_bottom = 48.0
+theme_override_constants/separation = 8
+
+[node name="AvatarPreview" type="TextureRect" parent="Root/MenuOverlay/HomeCorners/ProfileRow"]
+custom_minimum_size = Vector2(30, 30)
+layout_mode = 2
+size_flags_vertical = 4
+stretch_mode = 5
+
+[node name="AccountStatusLabel" type="Label" parent="Root/MenuOverlay/HomeCorners/ProfileRow"]
+layout_mode = 2
+size_flags_vertical = 4
+modulate = Color(0.92, 0.96, 1.0, 0.96)
+text = "Guest · Sign in"
+
+[node name="AccountBtn" type="Button" parent="Root/MenuOverlay/HomeCorners/ProfileRow"]
+layout_mode = 2
+text = "Profile"
+
+[node name="FriendsBtn" type="Button" parent="Root/MenuOverlay/HomeCorners/ProfileRow"]
+layout_mode = 2
+text = "Friends"
+
+[node name="TopRightRow" type="HBoxContainer" parent="Root/MenuOverlay/HomeCorners"]
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -260.0
+offset_top = 14.0
+offset_right = -16.0
+offset_bottom = 46.0
+grow_horizontal = 0
+alignment = 2
+theme_override_constants/separation = 8
+
+[node name="MenuRankingsBtn" type="Button" parent="Root/MenuOverlay/HomeCorners/TopRightRow"]
+layout_mode = 2
+text = "Leaderboard"
+
+[node name="MenuAudioBtn" type="Button" parent="Root/MenuOverlay/HomeCorners/TopRightRow"]
+layout_mode = 2
+text = "Settings"
+
+[node name="QuitBtn" type="Button" parent="Root/MenuOverlay/HomeCorners"]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -104.0
+offset_top = -44.0
+offset_right = -16.0
+offset_bottom = -14.0
+grow_horizontal = 0
+grow_vertical = 0
+text = "Quit"
 
 [node name="Center" type="CenterContainer" parent="Root/MenuOverlay"]
 layout_mode = 1
@@ -1040,144 +1114,108 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+mouse_filter = 2
 
 [node name="MenuCard" type="PanelContainer" parent="Root/MenuOverlay/Center"]
-custom_minimum_size = Vector2(390, 0)
+custom_minimum_size = Vector2(460, 0)
 layout_mode = 2
 
 [node name="VBox" type="VBoxContainer" parent="Root/MenuOverlay/Center/MenuCard"]
 layout_mode = 2
-theme_override_constants/separation = 10
+alignment = 1
+theme_override_constants/separation = 12
 
 [node name="LogoRect" type="TextureRect" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
 texture_filter = 1
-custom_minimum_size = Vector2(310, 84)
+custom_minimum_size = Vector2(460, 128)
 layout_mode = 2
 stretch_mode = 5
 
-[node name="Title" type="Label" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
+[node name="HeroSpacer" type="Control" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
+custom_minimum_size = Vector2(0, 6)
+layout_mode = 2
+
+[node name="PlayBtn" type="Button" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
+custom_minimum_size = Vector2(280, 44)
+layout_mode = 2
+size_flags_horizontal = 4
+text = "Singleplayer"
+
+[node name="MultiplayerBtn" type="Button" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
+custom_minimum_size = Vector2(280, 38)
+layout_mode = 2
+size_flags_horizontal = 4
+text = "Multiplayer"
+
+[node name="NewMatchBtn" type="Button" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
 visible = false
+custom_minimum_size = Vector2(220, 30)
 layout_mode = 2
-horizontal_alignment = 1
-text = "WORLD WAR PIXEL"
+size_flags_horizontal = 4
+text = "Restart New Match"
 
-[node name="Subtitle" type="Label" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
+[node name="SingleplayerCard" type="PanelContainer" parent="Root/MenuOverlay/Center"]
 visible = false
-layout_mode = 2
-horizontal_alignment = 1
-text = ""
-
-[node name="HSep1" type="HSeparator" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
+custom_minimum_size = Vector2(440, 0)
 layout_mode = 2
 
-[node name="ProfileRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
+[node name="VBox" type="VBoxContainer" parent="Root/MenuOverlay/Center/SingleplayerCard"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="HeaderRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/SingleplayerCard/VBox"]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="AvatarPreview" type="TextureRect" parent="Root/MenuOverlay/Center/MenuCard/VBox/ProfileRow"]
-custom_minimum_size = Vector2(32, 32)
+[node name="SpBackBtn" type="Button" parent="Root/MenuOverlay/Center/SingleplayerCard/VBox/HeaderRow"]
+layout_mode = 2
+text = "Back"
+
+[node name="SpIcon" type="TextureRect" parent="Root/MenuOverlay/Center/SingleplayerCard/VBox/HeaderRow"]
+texture_filter = 1
+custom_minimum_size = Vector2(18, 18)
 layout_mode = 2
 size_flags_vertical = 4
 stretch_mode = 5
 
-[node name="AccountStatusLabel" type="Label" parent="Root/MenuOverlay/Center/MenuCard/VBox/ProfileRow"]
+[node name="Title" type="Label" parent="Root/MenuOverlay/Center/SingleplayerCard/VBox/HeaderRow"]
 layout_mode = 2
 size_flags_horizontal = 3
-modulate = Color(0.78, 0.86, 0.94, 0.95)
-text = "Guest · Sign in for permanent name"
-clip_text = true
+text = "SINGLEPLAYER"
 
-[node name="ChangePfpBtn" type="Button" parent="Root/MenuOverlay/Center/MenuCard/VBox/ProfileRow"]
+[node name="HSep" type="HSeparator" parent="Root/MenuOverlay/Center/SingleplayerCard/VBox"]
 layout_mode = 2
-text = "PFP"
 
-[node name="AccountBtn" type="Button" parent="Root/MenuOverlay/Center/MenuCard/VBox/ProfileRow"]
-layout_mode = 2
-text = "Account"
-
-[node name="NameRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
+[node name="NameRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/SingleplayerCard/VBox"]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Lbl" type="Label" parent="Root/MenuOverlay/Center/MenuCard/VBox/NameRow"]
+[node name="Lbl" type="Label" parent="Root/MenuOverlay/Center/SingleplayerCard/VBox/NameRow"]
 layout_mode = 2
-text = "Name"
+text = "Nation Name"
 
-[node name="MenuNameEdit" type="LineEdit" parent="Root/MenuOverlay/Center/MenuCard/VBox/NameRow"]
+[node name="MenuNameEdit" type="LineEdit" parent="Root/MenuOverlay/Center/SingleplayerCard/VBox/NameRow"]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Terran Vanguard"
-placeholder_text = "Name"
+placeholder_text = "Nation Name"
 
-[node name="AiRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
+[node name="AiRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/SingleplayerCard/VBox"]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Lbl" type="Label" parent="Root/MenuOverlay/Center/MenuCard/VBox/AiRow"]
+[node name="Lbl" type="Label" parent="Root/MenuOverlay/Center/SingleplayerCard/VBox/AiRow"]
 layout_mode = 2
 text = "Opponents"
 
-[node name="MenuAiOption" type="OptionButton" parent="Root/MenuOverlay/Center/MenuCard/VBox/AiRow"]
+[node name="MenuAiOption" type="OptionButton" parent="Root/MenuOverlay/Center/SingleplayerCard/VBox/AiRow"]
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="ColorInfo" type="Label" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
+[node name="SpStartBtn" type="Button" parent="Root/MenuOverlay/Center/SingleplayerCard/VBox"]
+custom_minimum_size = Vector2(0, 38)
 layout_mode = 2
-modulate = Color(0.70, 0.80, 0.90, 0.90)
-horizontal_alignment = 1
-text = "Nation Color: Randomly assigned each match"
-
-[node name="HSep2" type="HSeparator" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
-layout_mode = 2
-
-[node name="PlayBtn" type="Button" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
-custom_minimum_size = Vector2(0, 34)
-layout_mode = 2
-text = "Play Match"
-
-[node name="SocialRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
-layout_mode = 2
-theme_override_constants/separation = 8
-
-[node name="MultiplayerBtn" type="Button" parent="Root/MenuOverlay/Center/MenuCard/VBox/SocialRow"]
-custom_minimum_size = Vector2(0, 30)
-layout_mode = 2
-size_flags_horizontal = 3
-text = "Multiplayer"
-
-[node name="FriendsBtn" type="Button" parent="Root/MenuOverlay/Center/MenuCard/VBox/SocialRow"]
-custom_minimum_size = Vector2(0, 30)
-layout_mode = 2
-size_flags_horizontal = 3
-text = "Friends"
-
-[node name="NewMatchBtn" type="Button" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
-visible = false
-custom_minimum_size = Vector2(0, 30)
-layout_mode = 2
-text = "Restart New Match"
-
-[node name="FooterRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/MenuCard/VBox"]
-layout_mode = 2
-theme_override_constants/separation = 8
-
-[node name="MenuAudioBtn" type="Button" parent="Root/MenuOverlay/Center/MenuCard/VBox/FooterRow"]
-custom_minimum_size = Vector2(0, 30)
-layout_mode = 2
-size_flags_horizontal = 3
-text = "Audio"
-
-[node name="PatchNotesBtn" type="Button" parent="Root/MenuOverlay/Center/MenuCard/VBox/FooterRow"]
-custom_minimum_size = Vector2(0, 30)
-layout_mode = 2
-size_flags_horizontal = 3
-text = "Notes"
-
-[node name="QuitBtn" type="Button" parent="Root/MenuOverlay/Center/MenuCard/VBox/FooterRow"]
-custom_minimum_size = Vector2(0, 30)
-layout_mode = 2
-size_flags_horizontal = 3
-text = "Quit"
+text = "Deploy To Earth"
 
 [node name="MpLobbyCard" type="PanelContainer" parent="Root/MenuOverlay/Center"]
 visible = false
@@ -1403,7 +1441,7 @@ autowrap_mode = 2
 
 [node name="AccountCard" type="PanelContainer" parent="Root/MenuOverlay/Center"]
 visible = false
-custom_minimum_size = Vector2(390, 0)
+custom_minimum_size = Vector2(460, 0)
 layout_mode = 2
 
 [node name="VBox" type="VBoxContainer" parent="Root/MenuOverlay/Center/AccountCard"]
@@ -1422,7 +1460,37 @@ text = "Back"
 layout_mode = 2
 size_flags_horizontal = 3
 horizontal_alignment = 1
-text = "PLAYER ACCOUNT"
+text = "PROFILE & ACCOUNT"
+
+[node name="ProfileHero" type="HBoxContainer" parent="Root/MenuOverlay/Center/AccountCard/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="ProfileAvatar" type="TextureRect" parent="Root/MenuOverlay/Center/AccountCard/VBox/ProfileHero"]
+custom_minimum_size = Vector2(48, 48)
+layout_mode = 2
+size_flags_vertical = 4
+stretch_mode = 5
+
+[node name="MetaVBox" type="VBoxContainer" parent="Root/MenuOverlay/Center/AccountCard/VBox/ProfileHero"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+theme_override_constants/separation = 2
+
+[node name="ProfileNameLabel" type="Label" parent="Root/MenuOverlay/Center/AccountCard/VBox/ProfileHero/MetaVBox"]
+layout_mode = 2
+text = "Guest Commander"
+
+[node name="ProfileRankLabel" type="Label" parent="Root/MenuOverlay/Center/AccountCard/VBox/ProfileHero/MetaVBox"]
+layout_mode = 2
+modulate = Color(0.76, 0.86, 0.96, 0.9)
+text = "Sign in to track ELO, Rank & Match History"
+
+[node name="ChangePfpBtn" type="Button" parent="Root/MenuOverlay/Center/AccountCard/VBox/ProfileHero"]
+layout_mode = 2
+size_flags_vertical = 4
+text = "Change PFP"
 
 [node name="HSep" type="HSeparator" parent="Root/MenuOverlay/Center/AccountCard/VBox"]
 layout_mode = 2
@@ -1487,38 +1555,6 @@ autowrap_mode = 2
 visible = false
 layout_mode = 2
 text = "Sign Out"
-
-[node name="PatchNotesCard" type="PanelContainer" parent="Root/MenuOverlay/Center"]
-visible = false
-custom_minimum_size = Vector2(460, 0)
-layout_mode = 2
-
-[node name="VBox" type="VBoxContainer" parent="Root/MenuOverlay/Center/PatchNotesCard"]
-layout_mode = 2
-theme_override_constants/separation = 8
-
-[node name="HeaderRow" type="HBoxContainer" parent="Root/MenuOverlay/Center/PatchNotesCard/VBox"]
-layout_mode = 2
-theme_override_constants/separation = 8
-
-[node name="PatchNotesBackBtn" type="Button" parent="Root/MenuOverlay/Center/PatchNotesCard/VBox/HeaderRow"]
-layout_mode = 2
-text = "Back"
-
-[node name="Title" type="Label" parent="Root/MenuOverlay/Center/PatchNotesCard/VBox/HeaderRow"]
-layout_mode = 2
-size_flags_horizontal = 3
-horizontal_alignment = 1
-text = "PATCH NOTES"
-
-[node name="HSep" type="HSeparator" parent="Root/MenuOverlay/Center/PatchNotesCard/VBox"]
-layout_mode = 2
-
-[node name="PatchNotesText" type="TextEdit" parent="Root/MenuOverlay/Center/PatchNotesCard/VBox"]
-custom_minimum_size = Vector2(0, 260)
-layout_mode = 2
-editable = false
-wrap_mode = 1
 
 [node name="AudioPopover" type="PanelContainer" parent="Root"]
 visible = false

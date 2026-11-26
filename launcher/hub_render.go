@@ -1238,7 +1238,7 @@ func renderAccountSignedIn(c *canvasBuf, st hubRenderState, hits []hitItem, text
 	if st.Profile.GamesPlayed > 0 || st.Profile.Elo > 0 || st.Profile.RankTitle != "" {
 		rank := st.Profile.RankTitle
 		if rank == "" {
-			rank = "Recruit"
+			rank = "Silver III"
 		}
 		elo := st.Profile.Elo
 		if elo <= 0 {
@@ -1433,7 +1433,7 @@ func renderAccountSignedIn(c *canvasBuf, st hubRenderState, hits []hitItem, text
 			c.fillRoundedRect(rowR, 2, colHeaderBar)
 			rTitle := u.RankTitle
 			if rTitle == "" {
-				rTitle = "Recruit"
+				rTitle = "Silver III"
 			}
 			eloVal := u.Elo
 			if eloVal <= 0 {

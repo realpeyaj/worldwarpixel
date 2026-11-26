@@ -26,19 +26,41 @@ jobs:
         with:
           python-version: '3.13'
 
+      - name: Cache Godot Export Templates
+        id: cache-templates
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}\godot_templates_cache
+          key: godot-export-templates-4.7.2
+
       - name: Install Godot 4.7.2 + Export Templates & LLVM-MinGW
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
           winget install --id GodotEngine.GodotEngine --version 4.7.2 --accept-source-agreements --accept-package-agreements --silent
           winget install --id MartinStorsjo.LLVM-MinGW.UCRT --accept-source-agreements --accept-package-agreements --silent
-          $tplUrl = "https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_export_templates.tpz"
-          $tplZip = "$env:TEMP\godot_templates.zip"
-          Invoke-WebRequest -Uri $tplUrl -OutFile $tplZip
+          $cacheDir = "${{ runner.temp }}\godot_templates_cache"
+          $tplZip = Join-Path $cacheDir "Godot_v4.7.2-stable_export_templates.tpz"
+          if (-not (Test-Path $tplZip)) {
+            New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null
+            $tplUrl = "https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_export_templates.tpz"
+            Invoke-WebRequest -Uri $tplUrl -OutFile $tplZip -UseBasicParsing
+          }
           $dest = "$env:APPDATA\Godot\export_templates\4.7.2.stable"
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
-          Expand-Archive -Path $tplZip -DestinationPath "$env:TEMP\godot_tpl_ext" -Force
-          Copy-Item -Recurse -Force "$env:TEMP\godot_tpl_ext\templates\*" $dest
+          python -c "import zipfile, pathlib, sys
+          dest = pathlib.Path(sys.argv[2])
+          with zipfile.ZipFile(sys.argv[1]) as z:
+              for info in z.infolist():
+                  if info.is_dir() or not info.filename.startswith('templates/'):
+                      continue
+                  rel = info.filename[len('templates/'):]
+                  out = dest / rel
+                  out.parent.mkdir(parents=True, exist_ok=True)
+                  with z.open(info) as src, open(out, 'wb') as dst:
+                      dst.write(src.read())
+          " $tplZip $dest
 
       - name: Run Go Server & Launcher Tests
         shell: powershell

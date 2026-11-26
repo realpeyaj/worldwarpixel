@@ -19,6 +19,7 @@ import (
 	_ "image/jpeg"
 	"image/png"
 	"io"
+	"math"
 	"net/http"
 	"sort"
 	"strings"
@@ -65,8 +66,10 @@ type UserProfileDTO struct {
 	AvatarB64        string  `json:"avatar_b64,omitempty"`
 	GamesPlayed      int     `json:"games_played"`
 	Wins             int     `json:"wins"`
+	WinRate          float64 `json:"win_rate"`
 	Elo              int     `json:"elo"`
 	RankTitle        string  `json:"rank_title"`
+	RankTier         string  `json:"rank_tier"`
 	BestTerritoryPct float64 `json:"best_territory_pct"`
 	CurrentRoom      string  `json:"current_room,omitempty"`
 }
@@ -218,18 +221,69 @@ func formatLastSeen(lastSeen time.Time, online bool) string {
 	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
 }
 
+func computeRankTier(elo int) string {
+	switch {
+	case elo >= 1900:
+		return "Sovereign"
+	case elo >= 1700:
+		return "Grandmaster"
+	case elo >= 1500:
+		return "Diamond"
+	case elo >= 1300:
+		return "Platinum"
+	case elo >= 1150:
+		return "Gold"
+	case elo >= 1000:
+		return "Silver"
+	case elo >= 900:
+		return "Bronze"
+	default:
+		return "Iron"
+	}
+}
+
 func computeRankTitle(elo int) string {
 	switch {
-	case elo >= 1650:
-		return "Marshal"
-	case elo >= 1400:
-		return "General"
+	case elo >= 1900:
+		return "Sovereign"
+	case elo >= 1700:
+		return "Grandmaster"
+	case elo >= 1630:
+		return "Diamond I"
+	case elo >= 1565:
+		return "Diamond II"
+	case elo >= 1500:
+		return "Diamond III"
+	case elo >= 1430:
+		return "Platinum I"
+	case elo >= 1365:
+		return "Platinum II"
+	case elo >= 1300:
+		return "Platinum III"
+	case elo >= 1250:
+		return "Gold I"
 	case elo >= 1200:
-		return "Commander"
+		return "Gold II"
+	case elo >= 1150:
+		return "Gold III"
+	case elo >= 1100:
+		return "Silver I"
 	case elo >= 1050:
-		return "Captain"
+		return "Silver II"
+	case elo >= 1000:
+		return "Silver III"
+	case elo >= 965:
+		return "Bronze I"
+	case elo >= 930:
+		return "Bronze II"
+	case elo >= 900:
+		return "Bronze III"
+	case elo >= 850:
+		return "Iron I"
+	case elo >= 800:
+		return "Iron II"
 	default:
-		return "Recruit"
+		return "Iron III"
 	}
 }
 
@@ -247,6 +301,10 @@ func toProfileDTO(rec *AccountRecord, includeAvatarBytes bool, relation string) 
 	if elo <= 0 {
 		elo = 1000
 	}
+	winRate := 0.0
+	if rec.GamesPlayed > 0 {
+		winRate = float64(rec.Wins) * 100.0 / float64(rec.GamesPlayed)
+	}
 	dto := UserProfileDTO{
 		Username:         rec.Username,
 		Online:           online,
@@ -258,8 +316,10 @@ func toProfileDTO(rec *AccountRecord, includeAvatarBytes bool, relation string) 
 		AvatarDelayMs:    delay,
 		GamesPlayed:      rec.GamesPlayed,
 		Wins:             rec.Wins,
+		WinRate:          winRate,
 		Elo:              elo,
 		RankTitle:        computeRankTitle(elo),
+		RankTier:         computeRankTier(elo),
 		BestTerritoryPct: rec.BestTerritoryPct,
 	}
 	if includeAvatarBytes && len(rec.AvatarPNG) > 0 {
@@ -1061,11 +1121,36 @@ func (a *AccountService) GetFriendsOverview(ctx context.Context, selfUsername st
 	return friends, incoming, outgoing, invites, nil
 }
 
-// RecordMatchResult updates games_played, wins, ELO, and best_territory_pct for authenticated participants.
+// RecordMatchResult updates games_played, wins, opponent-adjusted ELO (+territory bonus), and best_territory_pct.
 func (a *AccountService) RecordMatchResult(ctx context.Context, players []MatchParticipantResult, winnerNationID, winnerTeamID int) {
 	if a == nil || len(players) == 0 {
 		return
 	}
+	getElo := func(lower string) int {
+		if a.dbPool() {
+			var e int
+			if err := a.store.Pool().QueryRow(ctx, `SELECT elo FROM accounts WHERE username_lower = $1`, lower).Scan(&e); err == nil && e > 0 {
+				return e
+			}
+			return 1000
+		}
+		a.mu.RLock()
+		rec := a.accounts[lower]
+		a.mu.RUnlock()
+		if rec != nil && rec.Elo > 0 {
+			return rec.Elo
+		}
+		return 1000
+	}
+
+	eloByLower := make(map[string]int, len(players))
+	for _, p := range players {
+		lower := normalizeKey(p.AccountUser)
+		if lower != "" {
+			eloByLower[lower] = getElo(lower)
+		}
+	}
+
 	for _, p := range players {
 		lower := normalizeKey(p.AccountUser)
 		if lower == "" {
@@ -1073,33 +1158,60 @@ func (a *AccountService) RecordMatchResult(ctx context.Context, players []MatchP
 		}
 		won := (winnerNationID > 0 && p.NationID == winnerNationID) || (winnerTeamID > 0 && p.TeamID == winnerTeamID)
 		winInc := 0
-		eloDelta := -15
+		actual := 0.0
 		if won {
 			winInc = 1
-			eloDelta = 25
+			actual = 1.0
 		}
+		myElo := eloByLower[lower]
+		oppSum, oppCnt := 0, 0
+		for _, other := range players {
+			oLower := normalizeKey(other.AccountUser)
+			if oLower == "" || oLower == lower {
+				continue
+			}
+			oppSum += eloByLower[oLower]
+			oppCnt++
+		}
+		avgOpp := 1000.0
+		if oppCnt > 0 {
+			avgOpp = float64(oppSum) / float64(oppCnt)
+		}
+		expected := 1.0 / (1.0 + math.Pow(10.0, (avgOpp-float64(myElo))/400.0))
+		terrPct := p.TerritoryPct
+		if terrPct < 0 {
+			terrPct = 0
+		} else if terrPct > 96.0 {
+			terrPct = 96.0
+		}
+		terrBonus := int(math.Round(terrPct / 12.0))
+		eloDelta := int(math.Round(36.0*(actual-expected))) + terrBonus
+		if won && eloDelta < 18 {
+			eloDelta = 18
+		}
+		winIncVal := winInc
 		if a.dbPool() {
 			_, _ = a.store.Pool().Exec(ctx, `
 				UPDATE accounts
 				SET games_played = games_played + 1,
 				    wins = wins + $2,
-				    elo = GREATEST(800, elo + $3),
+				    elo = GREATEST(600, elo + $3),
 				    best_territory_pct = GREATEST(best_territory_pct, $4)
 				WHERE username_lower = $1`,
-				lower, winInc, eloDelta, p.TerritoryPct,
+				lower, winIncVal, eloDelta, p.TerritoryPct,
 			)
 			continue
 		}
 		a.mu.Lock()
 		if rec, ok := a.accounts[lower]; ok {
 			rec.GamesPlayed++
-			rec.Wins += winInc
+			rec.Wins += winIncVal
 			if rec.Elo <= 0 {
 				rec.Elo = 1000
 			}
 			rec.Elo += eloDelta
-			if rec.Elo < 800 {
-				rec.Elo = 800
+			if rec.Elo < 600 {
+				rec.Elo = 600
 			}
 			if p.TerritoryPct > rec.BestTerritoryPct {
 				rec.BestTerritoryPct = p.TerritoryPct
@@ -1143,17 +1255,28 @@ func (a *AccountService) ChangePassword(ctx context.Context, token, currentPass,
 
 // GetLeaderboard returns top registered commanders ranked by ELO, wins, and peak territory.
 func (a *AccountService) GetLeaderboard(ctx context.Context, limit int) ([]UserProfileDTO, error) {
+	return a.GetLeaderboardSorted(ctx, limit, "elo")
+}
+
+// GetLeaderboardSorted returns top registered commanders ordered by "elo", "wins", or "territory".
+func (a *AccountService) GetLeaderboardSorted(ctx context.Context, limit int, sortBy string) ([]UserProfileDTO, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 25
 	}
+	orderCol := "elo DESC, wins DESC, best_territory_pct DESC, username ASC"
+	switch strings.ToLower(strings.TrimSpace(sortBy)) {
+	case "wins":
+		orderCol = "wins DESC, elo DESC, best_territory_pct DESC, username ASC"
+	case "territory", "land":
+		orderCol = "best_territory_pct DESC, elo DESC, wins DESC, username ASC"
+	}
 	if a.dbPool() {
-		rows, err := a.store.Pool().Query(ctx, `
-			SELECT username, avatar_frames, avatar_delay_ms, avatar_hash,
+		q := `SELECT username, avatar_frames, avatar_delay_ms, avatar_hash,
 			       games_played, wins, elo, best_territory_pct, last_seen_at
 			FROM accounts
-			ORDER BY elo DESC, wins DESC, best_territory_pct DESC, username ASC
-			LIMIT $1`, limit,
-		)
+			ORDER BY ` + orderCol + `
+			LIMIT $1`
+		rows, err := a.store.Pool().Query(ctx, q, limit)
 		if err != nil {
 			return nil, err
 		}
@@ -1173,6 +1296,7 @@ func (a *AccountService) GetLeaderboard(ctx context.Context, limit int) ([]UserP
 		recs = append(recs, r)
 	}
 	a.mu.RUnlock()
+	mode := strings.ToLower(strings.TrimSpace(sortBy))
 	sort.Slice(recs, func(i, j int) bool {
 		ei, ej := recs[i].Elo, recs[j].Elo
 		if ei <= 0 {
@@ -1180,6 +1304,16 @@ func (a *AccountService) GetLeaderboard(ctx context.Context, limit int) ([]UserP
 		}
 		if ej <= 0 {
 			ej = 1000
+		}
+		switch mode {
+		case "wins":
+			if recs[i].Wins != recs[j].Wins {
+				return recs[i].Wins > recs[j].Wins
+			}
+		case "territory", "land":
+			if recs[i].BestTerritoryPct != recs[j].BestTerritoryPct {
+				return recs[i].BestTerritoryPct > recs[j].BestTerritoryPct
+			}
 		}
 		if ei != ej {
 			return ei > ej
@@ -1305,7 +1439,8 @@ func RegisterAccountRoutes(mux *http.ServeMux, svc *AccountService) {
 				limit = parsed
 			}
 		}
-		list, err := svc.GetLeaderboard(r.Context(), limit)
+		sortBy := r.URL.Query().Get("sort")
+		list, err := svc.GetLeaderboardSorted(r.Context(), limit, sortBy)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "Failed to load leaderboard"})
 			return

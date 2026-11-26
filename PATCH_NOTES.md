@@ -1,5 +1,11 @@
 # World War Pixel — Patch Notes
 
+## v1.3.0 — Map-Only Home Hub, Dedicated Pages, 8-Tier Rankings, Allied Trade & Naval Raiding
+- **Clean Map-Only Home Screen & Dedicated Pages**: Removed home boxes and in-game notes so the live Earth map shines directly behind the floating title and **Singleplayer / Multiplayer** hero buttons, with corner **Profile**, **Leaderboard**, **Settings**, and **Quit** controls plus full dedicated pages for Singleplayer (up to **23 AI opponents**), Multiplayer, Settings, Leaderboard, and Profile Management.
+- **No Auto-Spread Spawn & Explore Rebalance**: Nations now spawn as a compact, clean circular territory and expand strictly on your manual commands (or AI decisions); neutral land exploration now consumes more troops (`1.85×`) for deeper strategic pacing.
+- **Allied Trade Routes, Naval Raiding & FFA/Team Aid**: Allied Port trade routes now earn **+40% bonus Pesos** with highlighted sea lanes, Warships capture **65% trade value** on raids (`25%` instant loot + `40%` cargo), and players can send **Gold** (`50K / 100K / 250K`) and **Troop Aid** (`15% / 25% / 50%`) to both FFA pact allies and Team Mode teammates.
+- **8-Tier Competitive Ranking System**: Upgraded ELO ladder (`Iron III → Bronze → Silver → Gold → Platinum → Diamond → Grandmaster → Sovereign`) with opponent-adjusted ratings, Win%, Peak Land, and sortable leaderboards (`Top ELO`, `Most Wins`, `Peak Land`).
+
 ## v1.2.0 — Placement Previews, Global Rankings, Modifiers, Replays & Combat Balance
 - **Actual In-Game Missiles & Exact Blast Previews**: Rendered rotating SAM interceptors, tactical Atom missiles, heavy H-Bombs, MIRV carrier buses, and re-entry sub-warheads along ballistic arcs while previewing exact destroyed crater zones (and MIRV spreads) before launch.
 - **Factory & Defense Placement Previews**: Hovering a Factory now previews dotted road connections (`+N links`), and hovering a Defense Post shows its exact fortification ring.

@@ -441,8 +441,15 @@ func TestQuickPlayTeamsPingsAndProfileStats(t *testing.T) {
 
 	_, me1 := getJSONTest(t, srv.URL+"/api/auth/me", tok1)
 	u1 := me1["user"].(map[string]any)
-	if int(u1["wins"].(float64)) != 1 || int(u1["elo"].(float64)) != 1025 || u1["rank_title"] != "Recruit" {
-		t.Fatalf("expected updated match stats (wins=1, elo=1025), got %v", u1)
+	// Expected Elo: 1000 -> +18 (K=36 * 0.5) + round(81.4/12)=7 => 1025, Silver III (Silver tier, win_rate=100)
+	if int(u1["wins"].(float64)) != 1 || int(u1["elo"].(float64)) != 1025 || u1["rank_title"] != "Silver III" || u1["rank_tier"] != "Silver" {
+		t.Fatalf("expected updated match stats (wins=1, elo=1025, Silver III), got %v", u1)
+	}
+
+	_, lbWins := getJSONTest(t, srv.URL+"/api/leaderboard?sort=wins", "")
+	_, lbTerr := getJSONTest(t, srv.URL+"/api/leaderboard?sort=territory", "")
+	if len(lbWins["leaderboard"].([]any)) == 0 || len(lbTerr["leaderboard"].([]any)) == 0 {
+		t.Fatalf("expected non-empty sorted leaderboards")
 	}
 }
 

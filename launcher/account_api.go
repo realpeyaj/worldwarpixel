@@ -35,8 +35,10 @@ type apiUserProfile struct {
 	AvatarB64        string  `json:"avatar_b64,omitempty"`
 	GamesPlayed      int     `json:"games_played"`
 	Wins             int     `json:"wins"`
+	WinRate          float64 `json:"win_rate"`
 	Elo              int     `json:"elo"`
 	RankTitle        string  `json:"rank_title"`
+	RankTier         string  `json:"rank_tier"`
 	BestTerritoryPct float64 `json:"best_territory_pct"`
 	CurrentRoom      string  `json:"current_room,omitempty"`
 }

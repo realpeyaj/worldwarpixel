@@ -36,7 +36,7 @@ signal mp_room_options_changed(is_public: bool, team_mode: bool)
 signal mp_room_modifiers_changed(options: Dictionary)
 signal mp_spectate_requested(room_code: String)
 signal chat_send_requested(channel: String, text: String)
-signal leaderboard_open_requested
+signal leaderboard_open_requested(sort_by: String)
 signal watch_replay_requested(match_id: String)
 signal replay_speed_changed(mult: float)
 signal exit_replay_requested
@@ -186,6 +186,25 @@ var _sec_conf_edit: LineEdit
 var _sec_status_lbl: Label
 var _sec_eye_btn: Button
 var _replay_controls_row: HBoxContainer
+var _settings_card: PanelContainer
+var _sp_diff_opt_init := false
+var _rankings_sort: String = "elo"
+var _rankings_tab_wins: Button
+var _rankings_tab_land: Button
+var _rankings_me_lbl: Label
+var _gold_aid_amounts: Array[float] = [50000.0, 100000.0, 250000.0]
+var _gold_aid_idx: int = 1
+var _troop_aid_ratios: Array[float] = [0.15, 0.25, 0.50]
+var _troop_aid_idx: int = 1
+var _set_mute_check: CheckButton
+var _set_master_sl: HSlider
+var _set_music_sl: HSlider
+var _set_sfx_sl: HSlider
+var _set_amb_sl: HSlider
+var _set_disp_opt: OptionButton
+var _set_scale_opt: OptionButton
+var _set_hotkeys_check: CheckButton
+var _syncing_settings := false
 
 @onready var root_control: Control = $Root
 @onready var top_bar: PanelContainer = $Root/TopBar
@@ -293,28 +312,34 @@ var _replay_controls_row: HBoxContainer
 @onready var world_min_btn: Button = $Root/WorldControlMinBtn
 
 @onready var menu_overlay: ColorRect = $Root/MenuOverlay
+@onready var home_corners: Control = $Root/MenuOverlay/HomeCorners
+@onready var avatar_preview: TextureRect = $Root/MenuOverlay/HomeCorners/ProfileRow/AvatarPreview
+@onready var account_status_label: Label = $Root/MenuOverlay/HomeCorners/ProfileRow/AccountStatusLabel
+@onready var account_btn: Button = $Root/MenuOverlay/HomeCorners/ProfileRow/AccountBtn
+@onready var friends_btn: Button = $Root/MenuOverlay/HomeCorners/ProfileRow/FriendsBtn
+@onready var menu_rankings_btn: Button = $Root/MenuOverlay/HomeCorners/TopRightRow/MenuRankingsBtn
+@onready var menu_audio_btn: Button = $Root/MenuOverlay/HomeCorners/TopRightRow/MenuAudioBtn
+@onready var quit_btn: Button = $Root/MenuOverlay/HomeCorners/QuitBtn
+
 @onready var menu_card: PanelContainer = $Root/MenuOverlay/Center/MenuCard
 @onready var logo_rect: TextureRect = $Root/MenuOverlay/Center/MenuCard/VBox/LogoRect
-@onready var avatar_preview: TextureRect = $Root/MenuOverlay/Center/MenuCard/VBox/ProfileRow/AvatarPreview
-@onready var account_status_label: Label = $Root/MenuOverlay/Center/MenuCard/VBox/ProfileRow/AccountStatusLabel
-@onready var change_pfp_btn: Button = $Root/MenuOverlay/Center/MenuCard/VBox/ProfileRow/ChangePfpBtn
-@onready var account_btn: Button = $Root/MenuOverlay/Center/MenuCard/VBox/ProfileRow/AccountBtn
-@onready var menu_name_edit: LineEdit = $Root/MenuOverlay/Center/MenuCard/VBox/NameRow/MenuNameEdit
-@onready var menu_ai_option: OptionButton = $Root/MenuOverlay/Center/MenuCard/VBox/AiRow/MenuAiOption
 @onready var play_btn: Button = $Root/MenuOverlay/Center/MenuCard/VBox/PlayBtn
-@onready var multiplayer_btn: Button = $Root/MenuOverlay/Center/MenuCard/VBox/SocialRow/MultiplayerBtn
-@onready var friends_btn: Button = $Root/MenuOverlay/Center/MenuCard/VBox/SocialRow/FriendsBtn
+@onready var multiplayer_btn: Button = $Root/MenuOverlay/Center/MenuCard/VBox/MultiplayerBtn
 @onready var new_match_btn: Button = $Root/MenuOverlay/Center/MenuCard/VBox/NewMatchBtn
-@onready var menu_audio_btn: Button = $Root/MenuOverlay/Center/MenuCard/VBox/FooterRow/MenuAudioBtn
-@onready var patch_notes_btn: Button = $Root/MenuOverlay/Center/MenuCard/VBox/FooterRow/PatchNotesBtn
-@onready var quit_btn: Button = $Root/MenuOverlay/Center/MenuCard/VBox/FooterRow/QuitBtn
 
-@onready var patch_notes_card: PanelContainer = $Root/MenuOverlay/Center/PatchNotesCard
-@onready var patch_notes_back_btn: Button = $Root/MenuOverlay/Center/PatchNotesCard/VBox/HeaderRow/PatchNotesBackBtn
-@onready var patch_notes_text: TextEdit = $Root/MenuOverlay/Center/PatchNotesCard/VBox/PatchNotesText
+@onready var sp_card: PanelContainer = $Root/MenuOverlay/Center/SingleplayerCard
+@onready var sp_back_btn: Button = $Root/MenuOverlay/Center/SingleplayerCard/VBox/HeaderRow/SpBackBtn
+@onready var sp_icon: TextureRect = $Root/MenuOverlay/Center/SingleplayerCard/VBox/HeaderRow/SpIcon
+@onready var menu_name_edit: LineEdit = $Root/MenuOverlay/Center/SingleplayerCard/VBox/NameRow/MenuNameEdit
+@onready var menu_ai_option: OptionButton = $Root/MenuOverlay/Center/SingleplayerCard/VBox/AiRow/MenuAiOption
+@onready var sp_start_btn: Button = $Root/MenuOverlay/Center/SingleplayerCard/VBox/SpStartBtn
 
 @onready var account_card: PanelContainer = $Root/MenuOverlay/Center/AccountCard
 @onready var account_back_btn: Button = $Root/MenuOverlay/Center/AccountCard/VBox/HeaderRow/AccountBackBtn
+@onready var profile_avatar: TextureRect = $Root/MenuOverlay/Center/AccountCard/VBox/ProfileHero/ProfileAvatar
+@onready var profile_name_label: Label = $Root/MenuOverlay/Center/AccountCard/VBox/ProfileHero/MetaVBox/ProfileNameLabel
+@onready var profile_rank_label: Label = $Root/MenuOverlay/Center/AccountCard/VBox/ProfileHero/MetaVBox/ProfileRankLabel
+@onready var change_pfp_btn: Button = $Root/MenuOverlay/Center/AccountCard/VBox/ProfileHero/ChangePfpBtn
 @onready var account_user_edit: LineEdit = $Root/MenuOverlay/Center/AccountCard/VBox/AccountUserEdit
 @onready var pass_row: HBoxContainer = $Root/MenuOverlay/Center/AccountCard/VBox/PassRow
 @onready var account_pass_edit: LineEdit = $Root/MenuOverlay/Center/AccountCard/VBox/PassRow/AccountPassEdit
@@ -393,6 +418,7 @@ func _ready() -> void:
 	ThemeFactory.apply_panel_variant(top_bar, "util_strip")
 	ThemeFactory.apply_panel_variant(action_dock, "bottom_bar")
 	ThemeFactory.apply_panel_variant(ping_badge, "flat")
+	ThemeFactory.apply_panel_variant(menu_card, "flat")
 	_icon_close_16 = _make_pixel_icon(_tex_close, Color.WHITE, 14)
 	_icon_play_16 = _make_pixel_icon(_tex_play, Color.WHITE, 14)
 	var icon_back_16: ImageTexture = _make_pixel_icon(_tex_back, Color.WHITE, 14)
@@ -402,6 +428,8 @@ func _ready() -> void:
 
 	logo_rect.texture = _tex_logo
 	logo_rect.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	sp_icon.texture = _icon_play_16
+	sp_icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	friends_header_icon.texture = icon_friends_16
 	friends_header_icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 
@@ -421,12 +449,14 @@ func _ready() -> void:
 	spawn_banner.visible = false
 	world_min_btn.visible = false
 	new_match_btn.visible = false
+	sp_card.visible = false
 	mp_lobby_card.visible = false
 	friends_card.visible = false
 	account_card.visible = false
-	patch_notes_card.visible = false
+	home_corners.visible = true
 	menu_card.visible = true
 	menu_overlay.visible = true
+	menu_overlay.color = Color(0, 0, 0, 0)
 
 	_dock_avatar_rect = TextureRect.new()
 	_dock_avatar_rect.name = "DockAvatarRect"
@@ -435,14 +465,19 @@ func _ready() -> void:
 	_dock_avatar_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	_dock_avatar_rect.visible = false
 	nation_color_swatch.add_child(_dock_avatar_rect)
+	var def_av := _build_tinted_icon(_tex_banner, _tex_banner_mask, Color(0.32, 0.56, 0.90), 32, 32)
 	avatar_preview.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	avatar_preview.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	avatar_preview.texture = _build_tinted_icon(_tex_banner, _tex_banner_mask, Color(0.32, 0.56, 0.90), 32, 32)
+	avatar_preview.texture = def_av
+	profile_avatar.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	profile_avatar.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	profile_avatar.texture = def_av
 	victory_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	victory_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 
 	_apply_ui_variants_and_icons(icon_back_16, icon_friends_16, icon_mp_16, icon_audio_16)
 	account_back_btn.icon = icon_back_16
+	sp_back_btn.icon = icon_back_16
 	_populate_spawn_controls()
 	_setup_extra_hud_panels()
 	_load_profile()
@@ -534,7 +569,17 @@ func _ready() -> void:
 	hotkeys_btn.pressed.connect(toggle_hotkeys)
 	menu_btn.pressed.connect(open_menu)
 	audio_btn.pressed.connect(_toggle_audio_popover)
-	menu_audio_btn.pressed.connect(_toggle_audio_popover)
+	menu_audio_btn.pressed.connect(func() -> void:
+		AudioManager.play_ui_tap()
+		_sync_settings_controls()
+		_show_menu_page("settings")
+	)
+	menu_rankings_btn.pressed.connect(func() -> void:
+		AudioManager.play_ui_tap()
+		_show_menu_page("rankings")
+		leaderboard_open_requested.emit(_rankings_sort)
+		_render_rankings_rows()
+	)
 	lb_toggle_btn.pressed.connect(_on_lb_toggle_pressed)
 	world_min_btn.pressed.connect(_on_lb_toggle_pressed)
 
@@ -569,12 +614,14 @@ func _ready() -> void:
 	donate_gold_btn.pressed.connect(func() -> void:
 		if _selected_dip_nation_id > 0:
 			AudioManager.play_ui_tap()
-			donate_gold_requested.emit(_selected_dip_nation_id, 100000.0)
+			var amt: float = _gold_aid_amounts[clampi(_gold_aid_idx, 0, _gold_aid_amounts.size() - 1)]
+			donate_gold_requested.emit(_selected_dip_nation_id, amt)
 	)
 	donate_troops_btn.pressed.connect(func() -> void:
 		if _selected_dip_nation_id > 0:
 			AudioManager.play_ui_tap()
-			donate_troops_requested.emit(_selected_dip_nation_id, 0.25)
+			var rat: float = _troop_aid_ratios[clampi(_troop_aid_idx, 0, _troop_aid_ratios.size() - 1)]
+			donate_troops_requested.emit(_selected_dip_nation_id, rat)
 	)
 
 	alliance_accept_btn.pressed.connect(func() -> void: _respond_to_pending_alliance(true))
@@ -607,13 +654,24 @@ func _ready() -> void:
 	commit_50_btn.pressed.connect(func() -> void: set_commit_ratio(0.50))
 	commit_75_btn.pressed.connect(func() -> void: set_commit_ratio(0.75))
 
-	play_btn.pressed.connect(_on_play_pressed)
+	play_btn.pressed.connect(func() -> void:
+		var in_match: bool = _world_state != null and _world_state.match_phase != WorldState.PHASE_SPAWN_SELECT
+		if in_match:
+			_on_play_pressed()
+		else:
+			AudioManager.play_ui_tap()
+			_show_menu_page("singleplayer")
+	)
+	sp_start_btn.pressed.connect(_on_play_pressed)
+	sp_back_btn.pressed.connect(func() -> void:
+		AudioManager.play_ui_tap()
+		save_player_name(menu_name_edit.text)
+		_show_menu_page("home")
+	)
 	multiplayer_btn.pressed.connect(func() -> void:
 		AudioManager.play_ui_tap()
 		save_player_name(menu_name_edit.text)
-		menu_card.visible = false
-		friends_card.visible = false
-		mp_lobby_card.visible = true
+		_show_menu_page("mp_lobby")
 		mp_rooms_refresh_requested.emit()
 	)
 	friends_btn.pressed.connect(func() -> void:
@@ -664,15 +722,11 @@ func _ready() -> void:
 	)
 	account_btn.pressed.connect(func() -> void:
 		AudioManager.play_ui_tap()
-		menu_card.visible = false
-		friends_card.visible = false
-		mp_lobby_card.visible = false
-		account_card.visible = true
+		_show_menu_page("account")
 	)
 	account_back_btn.pressed.connect(func() -> void:
 		AudioManager.play_ui_tap()
-		account_card.visible = false
-		menu_card.visible = true
+		_show_menu_page("home")
 	)
 	login_btn.pressed.connect(func() -> void:
 		AudioManager.play_ui_tap()
@@ -712,8 +766,7 @@ func _ready() -> void:
 		invite_row.visible = false
 		_refresh_friends_badge()
 		if not _pending_join_invite_code.is_empty():
-			friends_card.visible = false
-			mp_lobby_card.visible = true
+			_show_menu_page("mp_lobby")
 			mp_room_edit.text = _pending_join_invite_code
 			var cfg: Dictionary = get_spawn_config()
 			save_player_name(str(cfg.get("name", "")))
@@ -734,9 +787,7 @@ func _ready() -> void:
 		AudioManager.play_ui_tap()
 		mp_disconnect_requested.emit()
 		on_mp_disconnected("Returned to main menu.")
-		mp_lobby_card.visible = false
-		friends_card.visible = false
-		menu_card.visible = true
+		_show_menu_page("home")
 	)
 	mp_start_btn.pressed.connect(func() -> void:
 		AudioManager.play_ui_tap()
@@ -749,12 +800,6 @@ func _ready() -> void:
 		_sync_hud_chrome_visibility()
 		new_match_requested.emit()
 	)
-	patch_notes_btn.pressed.connect(_open_patch_notes)
-	patch_notes_back_btn.pressed.connect(func() -> void:
-		AudioManager.play_ui_tap()
-		patch_notes_card.visible = false
-		menu_card.visible = true
-	)
 	quit_btn.pressed.connect(func() -> void:
 		AudioManager.play_ui_tap()
 		save_player_name(menu_name_edit.text)
@@ -765,41 +810,95 @@ func _ready() -> void:
 		AudioManager.set_muted(t)
 		audio_btn.modulate = Color(1.0, 0.48, 0.48) if t else Color.WHITE
 		audio_btn.tooltip_text = "Audio: Muted" if t else "Audio Settings"
+		if not _syncing_settings and _set_mute_check != null:
+			_syncing_settings = true
+			_set_mute_check.button_pressed = t
+			_syncing_settings = false
 	)
-	master_slider.value_changed.connect(func(v: float) -> void: AudioManager.set_bus_volume("Master", v))
-	music_slider.value_changed.connect(func(v: float) -> void: AudioManager.set_bus_volume("Music", v))
-	sfx_slider.value_changed.connect(func(v: float) -> void: AudioManager.set_bus_volume("SFX", v))
-	ambience_slider.value_changed.connect(func(v: float) -> void: AudioManager.set_bus_volume("Ambience", v))
+	master_slider.value_changed.connect(func(v: float) -> void:
+		AudioManager.set_bus_volume("Master", v)
+		if not _syncing_settings and _set_master_sl != null:
+			_syncing_settings = true
+			_set_master_sl.value = v
+			_syncing_settings = false
+	)
+	music_slider.value_changed.connect(func(v: float) -> void:
+		AudioManager.set_bus_volume("Music", v)
+		if not _syncing_settings and _set_music_sl != null:
+			_syncing_settings = true
+			_set_music_sl.value = v
+			_syncing_settings = false
+	)
+	sfx_slider.value_changed.connect(func(v: float) -> void:
+		AudioManager.set_bus_volume("SFX", v)
+		if not _syncing_settings and _set_sfx_sl != null:
+			_syncing_settings = true
+			_set_sfx_sl.value = v
+			_syncing_settings = false
+	)
+	ambience_slider.value_changed.connect(func(v: float) -> void:
+		AudioManager.set_bus_volume("Ambience", v)
+		if not _syncing_settings and _set_amb_sl != null:
+			_syncing_settings = true
+			_set_amb_sl.value = v
+			_syncing_settings = false
+	)
 	_update_action_dock_buttons()
 	_update_commit_buttons()
 	_update_hotkeys_button()
 
 
-func _open_patch_notes() -> void:
-	AudioManager.play_ui_tap()
-	var notes: String = ""
-	if FileAccess.file_exists("res://PATCH_NOTES.md"):
-		notes = FileAccess.get_file_as_string("res://PATCH_NOTES.md")
-	if notes.strip_edges().is_empty():
-		var exe_notes: String = OS.get_executable_path().get_base_dir().path_join("PATCH_NOTES.md")
-		if FileAccess.file_exists(exe_notes):
-			notes = FileAccess.get_file_as_string(exe_notes)
-	if notes.strip_edges().is_empty():
-		notes = "World War Pixel\nNo local patch notes found."
-	patch_notes_text.text = notes
-	menu_card.visible = false
-	mp_lobby_card.visible = false
-	friends_card.visible = false
-	account_card.visible = false
-	patch_notes_card.visible = true
+func _show_menu_page(page: String) -> void:
+	var is_home: bool = (page == "home")
+	menu_overlay.color = Color(0, 0, 0, 0) if is_home else Color(0.03, 0.05, 0.09, 0.56)
+	home_corners.visible = is_home
+	menu_card.visible = is_home
+	sp_card.visible = (page == "singleplayer")
+	mp_lobby_card.visible = (page == "mp_lobby")
+	friends_card.visible = (page == "friends")
+	account_card.visible = (page == "account")
+	if _rankings_card != null:
+		_rankings_card.visible = (page == "rankings")
+	if _settings_card != null:
+		_settings_card.visible = (page == "settings")
+
+
+func _make_trophy_icon() -> ImageTexture:
+	var img := Image.create(16, 16, false, Image.FORMAT_RGBA8)
+	var gold := Color(0.98, 0.84, 0.34, 1.0)
+	for y in range(2, 14):
+		for x in range(2, 14):
+			var cup: bool = (y >= 2 and y <= 7 and x >= 4 and x <= 11)
+			var handles: bool = (y >= 3 and y <= 5 and (x == 3 or x == 12))
+			var stem: bool = (y >= 8 and y <= 11 and x >= 7 and x <= 8)
+			var base: bool = (y >= 12 and y <= 13 and x >= 5 and x <= 10)
+			if cup or handles or stem or base:
+				img.set_pixel(x, y, gold)
+	return ImageTexture.create_from_image(img)
+
+
+func _make_gear_icon() -> ImageTexture:
+	var img := Image.create(16, 16, false, Image.FORMAT_RGBA8)
+	var col := Color(0.86, 0.92, 0.98, 1.0)
+	for y in range(16):
+		var dy := float(y) - 7.5
+		for x in range(16):
+			var dx := float(x) - 7.5
+			var d := sqrt(dx * dx + dy * dy)
+			var ang := atan2(dy, dx)
+			var tooth := cos(ang * 6.0) > 0.45 and d >= 5.0 and d <= 7.2
+			var ring := d >= 3.2 and d <= 5.4
+			if tooth or ring:
+				img.set_pixel(x, y, col)
+	return ImageTexture.create_from_image(img)
 
 
 func _apply_ui_variants_and_icons(icon_back_16: ImageTexture, icon_friends_16: ImageTexture, icon_mp_16: ImageTexture, icon_audio_16: ImageTexture) -> void:
-	for btn: Button in [play_btn, create_room_btn, mp_start_btn, add_friend_btn, accept_invite_btn, st_upgrade_btn, victory_new_match_btn, spec_new_match_btn, alliance_accept_btn, login_btn, register_btn]:
+	for btn: Button in [play_btn, sp_start_btn, create_room_btn, mp_start_btn, add_friend_btn, accept_invite_btn, st_upgrade_btn, victory_new_match_btn, spec_new_match_btn, alliance_accept_btn, login_btn, register_btn]:
 		ThemeFactory.apply_button_variant(btn, "primary")
-	for btn: Button in [multiplayer_btn, friends_btn, mp_connect_btn, victory_inspect_btn, spec_continue_btn, donate_gold_btn, donate_troops_btn, account_btn, change_pfp_btn]:
+	for btn: Button in [multiplayer_btn, mp_connect_btn, victory_inspect_btn, spec_continue_btn, donate_gold_btn, donate_troops_btn, change_pfp_btn]:
 		ThemeFactory.apply_button_variant(btn, "secondary")
-	for btn: Button in [mp_disconnect_btn, friends_back_btn, menu_audio_btn, new_match_btn, account_back_btn, patch_notes_btn, patch_notes_back_btn]:
+	for btn: Button in [sp_back_btn, mp_disconnect_btn, friends_back_btn, new_match_btn, account_back_btn, friends_btn, account_btn, menu_rankings_btn, menu_audio_btn]:
 		ThemeFactory.apply_button_variant(btn, "back")
 	for btn: Button in [quit_btn, alliance_decline_btn, logout_btn]:
 		ThemeFactory.apply_button_variant(btn, "danger")
@@ -816,16 +915,18 @@ func _apply_ui_variants_and_icons(icon_back_16: ImageTexture, icon_friends_16: I
 		ThemeFactory.apply_button_variant(btn, "dock_slot")
 
 	play_btn.icon = _icon_play_16
+	sp_start_btn.icon = _icon_play_16
 	mp_start_btn.icon = _icon_play_16
 	accept_invite_btn.icon = _icon_play_16
+	sp_back_btn.icon = icon_back_16
 	mp_disconnect_btn.icon = icon_back_16
 	friends_back_btn.icon = icon_back_16
-	patch_notes_back_btn.icon = icon_back_16
 	quit_btn.icon = _icon_close_16
 	multiplayer_btn.icon = icon_mp_16
 	friends_btn.icon = icon_friends_16
 	mp_friends_btn.icon = icon_friends_16
-	menu_audio_btn.icon = icon_audio_16
+	menu_rankings_btn.icon = _make_trophy_icon()
+	menu_audio_btn.icon = _make_gear_icon()
 	audio_btn.icon = icon_audio_16
 
 
@@ -844,7 +945,7 @@ func _style_close_button(btn: Button) -> void:
 func _populate_spawn_controls() -> void:
 	ai_count_option.clear()
 	menu_ai_option.clear()
-	for cnt in [0, 4, 6, 8, 10]:
+	for cnt in [0, 4, 6, 8, 12, 16, 20, 23]:
 		var label := "%d AI Nations" % cnt
 		ai_count_option.add_item(label, cnt)
 		menu_ai_option.add_item(label, cnt)
@@ -934,12 +1035,16 @@ func set_account_state(logged_in: bool, acct_username: String, status_msg: Strin
 		var gp: int = int(_account_stats.get("games_played", 0))
 		var wins_cnt: int = int(_account_stats.get("wins", 0))
 		var elo_val: int = int(_account_stats.get("elo", 1000))
-		var r_title: String = str(_account_stats.get("rank_title", "Recruit"))
-		if gp > 0:
-			account_status_label.text = "%s · %s (%d ELO · %dW-%dL)" % [_account_username, r_title, elo_val, wins_cnt, maxi(0, gp - wins_cnt)]
-		else:
-			account_status_label.text = "%s · %s (%d ELO)" % [_account_username, r_title, elo_val]
-		account_btn.text = "Account"
+		var r_title: String = str(_account_stats.get("rank_title", "Silver III"))
+		if r_title.is_empty():
+			r_title = "Silver III"
+		var wr: float = (float(wins_cnt) * 100.0 / float(gp)) if gp > 0 else 0.0
+		account_status_label.text = "%s · %s (%d ELO)" % [_account_username, r_title, elo_val]
+		profile_name_label.text = "@%s" % _account_username
+		profile_rank_label.text = "%s · %d ELO · %dW-%dL (%.0f%%)" % [r_title, elo_val, wins_cnt, maxi(0, gp - wins_cnt), wr]
+		if _rankings_me_lbl != null:
+			_rankings_me_lbl.text = "Your Rank: @%s · %s · %d ELO · %dW-%dL (%.0f%%)" % [_account_username, r_title, elo_val, wins_cnt, maxi(0, gp - wins_cnt), wr]
+		account_btn.text = "Profile"
 		account_user_edit.text = _account_username
 		account_user_edit.editable = false
 		account_pass_edit.text = ""
@@ -958,7 +1063,11 @@ func set_account_state(logged_in: bool, acct_username: String, status_msg: Strin
 	else:
 		menu_name_edit.editable = true
 		nation_name_edit.editable = true
-		account_status_label.text = "Guest · Sign in for permanent name"
+		account_status_label.text = "Guest"
+		profile_name_label.text = "Guest Commander"
+		profile_rank_label.text = "Sign in to track ELO, Rank & Match History"
+		if _rankings_me_lbl != null:
+			_rankings_me_lbl.text = "Your Rank: Guest · Sign in to climb Silver → Sovereign"
 		account_btn.text = "Sign In"
 		account_user_edit.editable = true
 		pass_row.visible = true
@@ -1009,12 +1118,15 @@ func set_local_avatar(frames: Array, delay_ms: int = 100) -> void:
 	if not _local_avatar_frames.is_empty():
 		var tex: Texture2D = _local_avatar_frames[0] as Texture2D
 		avatar_preview.texture = tex
+		profile_avatar.texture = tex
 		if _dock_avatar_rect != null:
 			_dock_avatar_rect.texture = tex
 			_dock_avatar_rect.visible = true
 	else:
 		var col := Color(0.32, 0.56, 0.90)
-		avatar_preview.texture = _build_tinted_icon(_tex_banner, _tex_banner_mask, col, 32, 32)
+		var def_tex := _build_tinted_icon(_tex_banner, _tex_banner_mask, col, 32, 32)
+		avatar_preview.texture = def_tex
+		profile_avatar.texture = def_tex
 		if _dock_avatar_rect != null:
 			_dock_avatar_rect.texture = null
 			_dock_avatar_rect.visible = false
@@ -1149,10 +1261,7 @@ func update_friends_overview(friends: Array, incoming: Array, outgoing: Array, i
 func open_friends_page(return_to: String = "menu") -> void:
 	AudioManager.play_ui_tap()
 	_friends_return_to = return_to
-	menu_card.visible = false
-	mp_lobby_card.visible = false
-	account_card.visible = false
-	friends_card.visible = true
+	_show_menu_page("friends")
 	menu_overlay.visible = true
 	search_status_label.visible = false
 	search_results_box.visible = false
@@ -1163,11 +1272,7 @@ func open_friends_page(return_to: String = "menu") -> void:
 
 func _on_friends_back_pressed() -> void:
 	AudioManager.play_ui_tap()
-	friends_card.visible = false
-	if _friends_return_to == "mp_lobby":
-		mp_lobby_card.visible = true
-	else:
-		menu_card.visible = true
+	_show_menu_page("mp_lobby" if _friends_return_to == "mp_lobby" else "home")
 
 
 func _refresh_friends_badge() -> void:
@@ -1383,8 +1488,7 @@ func _refresh_friends_ui() -> void:
 func _on_invite_friend_pressed(friend_name: String) -> void:
 	if _current_room_code.is_empty():
 		_pending_invite_friend = friend_name
-		friends_card.visible = false
-		mp_lobby_card.visible = true
+		_show_menu_page("mp_lobby")
 		mp_room_edit.text = ""
 		mp_status_label.text = "Creating Room on %s to invite %s..." % [get_selected_server_name(), friend_name]
 		var cfg: Dictionary = get_spawn_config()
@@ -1511,6 +1615,7 @@ func _process(delta: float) -> void:
 			_avatar_last_step = step
 			var tex: Texture2D = _local_avatar_frames[step] as Texture2D
 			avatar_preview.texture = tex
+			profile_avatar.texture = tex
 			if _dock_avatar_rect != null and _dock_avatar_rect.visible:
 				_dock_avatar_rect.texture = tex
 	for entry: Dictionary in _animated_pfp_nodes:
@@ -1625,15 +1730,9 @@ func open_menu() -> void:
 	AudioManager.play_panel_open()
 	audio_popover.visible = false
 	var in_match: bool = _world_state != null and _world_state.match_phase != WorldState.PHASE_SPAWN_SELECT
-	play_btn.text = "Resume Match" if in_match else "Play Match"
+	play_btn.text = "Resume Match" if in_match else "Singleplayer"
 	new_match_btn.visible = in_match
-	mp_lobby_card.visible = false
-	friends_card.visible = false
-	account_card.visible = false
-	patch_notes_card.visible = false
-	if _rankings_card != null:
-		_rankings_card.visible = false
-	menu_card.visible = true
+	_show_menu_page("home")
 	menu_overlay.visible = true
 	_sync_hud_chrome_visibility()
 
@@ -1673,13 +1772,7 @@ func update_mp_lobby(room_code: String, phase: String, players: Array, ai_count:
 
 
 func open_mp_lobby_with_code(code: String) -> void:
-	menu_card.visible = false
-	friends_card.visible = false
-	account_card.visible = false
-	patch_notes_card.visible = false
-	if _rankings_card != null:
-		_rankings_card.visible = false
-	mp_lobby_card.visible = true
+	_show_menu_page("mp_lobby")
 	menu_overlay.visible = true
 	mp_room_edit.text = code.strip_edges().to_upper()
 	_sync_hud_chrome_visibility()
@@ -1767,10 +1860,8 @@ func update_public_rooms(rooms: Array) -> void:
 
 
 func on_mp_spawn_phase(seconds_left: float) -> void:
+	_show_menu_page("home")
 	menu_overlay.visible = false
-	mp_lobby_card.visible = false
-	friends_card.visible = false
-	menu_card.visible = true
 	audio_popover.visible = false
 	_sync_hud_chrome_visibility()
 	world_pct_label.text = "MP Spawn Selection (%.0fs)" % maxf(seconds_left, 0.0)
@@ -1906,6 +1997,26 @@ func update_rankings_data(leaderboard: Array, my_matches: Array) -> void:
 		_render_rankings_rows()
 
 
+func _tier_color(tier: String) -> Color:
+	match tier:
+		"Sovereign":
+			return Color(1.0, 0.38, 0.44)
+		"Grandmaster":
+			return Color(0.96, 0.46, 0.92)
+		"Diamond":
+			return Color(0.42, 0.88, 1.0)
+		"Platinum":
+			return Color(0.32, 0.94, 0.78)
+		"Gold":
+			return Color(0.98, 0.84, 0.34)
+		"Silver":
+			return Color(0.78, 0.85, 0.94)
+		"Bronze":
+			return Color(0.84, 0.56, 0.34)
+		_:
+			return Color(0.58, 0.62, 0.68)
+
+
 func _render_rankings_rows() -> void:
 	if _rankings_rows == null:
 		return
@@ -1967,13 +2078,26 @@ func _render_rankings_rows() -> void:
 		pos_l.custom_minimum_size = Vector2(30, 0)
 		pos_l.modulate = Color(0.96, 0.82, 0.34) if rank_i <= 3 else Color(0.76, 0.82, 0.90)
 		row.add_child(pos_l)
+		var tier_s: String = str(u.get("rank_tier", "Silver"))
+		var r_title: String = str(u.get("rank_title", "Silver III"))
+		if r_title.is_empty():
+			r_title = "Silver III"
+		var tier_l := Label.new()
+		tier_l.text = "[%s]" % r_title
+		tier_l.custom_minimum_size = Vector2(98, 0)
+		tier_l.modulate = _tier_color(tier_s)
+		row.add_child(tier_l)
 		var nm_l := Label.new()
-		nm_l.text = "%s · %s" % [str(u.get("username", "Commander")), str(u.get("rank_title", "Recruit"))]
+		nm_l.text = str(u.get("username", "Commander"))
 		nm_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		nm_l.clip_text = true
 		row.add_child(nm_l)
+		var gp: int = int(u.get("games_played", 0))
+		var wins_i: int = int(u.get("wins", 0))
+		var wr: float = (float(wins_i) * 100.0 / float(gp)) if gp > 0 else 0.0
+		var best_pct: float = float(u.get("best_territory_pct", 0.0))
 		var elo_l := Label.new()
-		elo_l.text = "%d ELO · %dW/%dG" % [int(u.get("elo", 1000)), int(u.get("wins", 0)), int(u.get("games_played", 0))]
+		elo_l.text = "%d ELO · %dW/%dG (%.0f%%) · %.1f%%" % [int(u.get("elo", 1000)), wins_i, gp, wr, best_pct]
 		elo_l.modulate = Color(0.66, 0.92, 0.78)
 		row.add_child(elo_l)
 		_rankings_rows.add_child(row)
@@ -2095,8 +2219,8 @@ func _update_hotkeys_button() -> void:
 func _on_play_pressed() -> void:
 	AudioManager.play_ui_tap()
 	save_player_name(menu_name_edit.text)
+	_show_menu_page("home")
 	menu_overlay.visible = false
-	friends_card.visible = false
 	audio_popover.visible = false
 	_sync_hud_chrome_visibility()
 	play_match_requested.emit()
@@ -2659,6 +2783,7 @@ func refresh_leaderboard() -> void:
 	lb_claimed_lbl.text = "World Claimed: %.1f%% · Victory: 80.0%%" % _world_state.get_claimed_percent()
 	var ranked: Array[NationData] = _world_state.get_leaderboard()
 	var shown := 0
+	var local_id: int = _world_state.player_nation_id
 	for n: NationData in ranked:
 		if not n.alive and n.owned_cell_count == 0:
 			continue
@@ -2668,10 +2793,12 @@ func refresh_leaderboard() -> void:
 		slot["nid"] = n.id
 		(slot["row"] as HBoxContainer).visible = true
 		(slot["dot"] as ColorRect).color = n.color
-		var ally_tag := " [ALLY]" if (not n.is_player and _world_state.are_allied(_world_state.player_nation_id, n.id)) else ""
-		(slot["name"] as Label).text = n.name + (" (You)" if n.is_player else ally_tag)
+		var is_local: bool = (n.id == local_id)
+		var team_tag: String = (" [T%d]" % n.team_id) if n.team_id > 0 else ""
+		var ally_tag: String = " [ALLY]" if ((not is_local) and _world_state.are_allied(local_id, n.id)) else ""
+		(slot["name"] as Label).text = n.name + team_tag + (" (You)" if is_local else ally_tag)
 		(slot["pct"] as Label).text = "%.2f%%" % n.territory_percent
-		(slot["dip_btn"] as Button).visible = (not n.is_player and n.alive)
+		(slot["dip_btn"] as Button).visible = ((not is_local) and n.alive)
 		shown += 1
 
 	for i in range(shown, _lb_pool.size()):
@@ -2726,18 +2853,24 @@ func show_diplomacy_panel(target_nid: int) -> void:
 	dip_dot.color = other.color
 	dip_title.text = other.name
 	var p_id: int = _world_state.player_nation_id
+	var p_n: NationData = _world_state.get_nation(p_id)
+	var same_team: bool = (p_n != null and p_n.team_id > 0 and p_n.team_id == other.team_id)
 	var allied: bool = _world_state.are_allied(p_id, target_nid)
 	var embargoed: bool = _world_state.is_embargoed(p_id, target_nid)
-	var rel_str := "Allied" if allied else ("Embargoed" if embargoed else "Neutral")
+	var rel_str := ("Allied (Team %d)" % other.team_id) if same_team else ("Allied (FFA)" if allied else ("Embargoed" if embargoed else "Neutral"))
 	if other.is_betrayer(_world_state.current_tick):
 		rel_str += " · BETRAYER"
 	dip_status_lbl.text = "Relation: %s\nLand: %.2f%% · Troops: %d · Pesos: %s" % [
 		rel_str, other.territory_percent, int(round(other.troops)), StructureData.format_pesos(other.gold)
 	]
-	ally_btn.text = "Break Alliance" if allied else "Propose Alliance"
-	ThemeFactory.apply_button_variant(ally_btn, "danger" if allied else "primary")
+	ally_btn.text = ("Team %d Pact" % other.team_id) if same_team else ("Break Alliance" if allied else "Propose Alliance")
+	ally_btn.disabled = same_team
+	ThemeFactory.apply_button_variant(ally_btn, "secondary" if same_team else ("danger" if allied else "primary"))
 	embargo_btn.text = "Lift Embargo" if embargoed else "Trade Embargo"
-	donate_gold_btn.text = "Send %s Pesos" % StructureData.format_pesos(100000.0)
+	var g_amt: float = _gold_aid_amounts[clampi(_gold_aid_idx, 0, _gold_aid_amounts.size() - 1)]
+	var t_rat: float = _troop_aid_ratios[clampi(_troop_aid_idx, 0, _troop_aid_ratios.size() - 1)]
+	donate_gold_btn.text = "Send %s ₱" % StructureData.format_pesos(g_amt)
+	donate_troops_btn.text = "Send %d%% Troops" % int(round(t_rat * 100.0))
 	donate_gold_btn.disabled = not allied
 	donate_troops_btn.disabled = not allied
 
@@ -2951,9 +3084,9 @@ func _setup_extra_hud_panels() -> void:
 		v_vbox.add_child(_victory_chart)
 		v_vbox.move_child(_victory_chart, maxi(0, v_vbox.get_child_count() - 2))
 
-	# 5. Singleplayer Match Modifiers + Global Rankings/Replays button on MenuCard
-	var m_vbox := menu_card.get_node_or_null("VBox") as VBoxContainer
-	if m_vbox != null:
+	# 5. Singleplayer Page Modifiers (inside Dedicated SingleplayerCard)
+	var sp_vbox := sp_card.get_node_or_null("VBox") as VBoxContainer
+	if sp_vbox != null:
 		var sp_mod := HBoxContainer.new()
 		sp_mod.add_theme_constant_override("separation", 6)
 		_sp_speed_opt = OptionButton.new()
@@ -2974,26 +3107,21 @@ func _setup_extra_hud_panels() -> void:
 		sp_mod.add_child(_sp_diff_opt)
 		sp_mod.add_child(_sp_preset_opt)
 		sp_mod.add_child(_sp_nonukes_check)
-		m_vbox.add_child(sp_mod)
-		m_vbox.move_child(sp_mod, play_btn.get_index())
+		sp_vbox.add_child(sp_mod)
+		sp_vbox.move_child(sp_mod, sp_start_btn.get_index())
 
-		var social_row := m_vbox.get_node_or_null("SocialRow") as HBoxContainer
-		if social_row != null:
-			var rank_btn := Button.new()
-			rank_btn.text = "Rankings"
-			ThemeFactory.apply_button_variant(rank_btn, "secondary")
-			rank_btn.pressed.connect(func() -> void:
-				AudioManager.play_ui_tap()
-				menu_card.visible = false
-				if _rankings_card != null:
-					_rankings_card.visible = true
-				leaderboard_open_requested.emit()
-				_render_rankings_rows()
-			)
-			social_row.add_child(rank_btn)
-
-	# 6. Host Modifiers row inside MpLobbyCard
+	# 6. Host Modifiers row inside MpLobbyCard + Dedicated MP Header Icon
 	if mp_vbox != null:
+		var mp_hdr := mp_vbox.get_node_or_null("HeaderRow") as HBoxContainer
+		if mp_hdr != null:
+			var mp_ic := TextureRect.new()
+			mp_ic.texture = _make_pixel_icon(_tex_multiplayer, Color.WHITE, 16)
+			mp_ic.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+			mp_ic.custom_minimum_size = Vector2(18, 18)
+			mp_ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			mp_ic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			mp_hdr.add_child(mp_ic)
+			mp_hdr.move_child(mp_ic, 1)
 		var mod_row := HBoxContainer.new()
 		mod_row.add_theme_constant_override("separation", 6)
 		_mp_speed_opt = OptionButton.new()
@@ -3032,29 +3160,36 @@ func _setup_extra_hud_panels() -> void:
 		mod_row.add_child(_mp_nonukes_check)
 		mp_vbox.add_child(mod_row)
 
-	# 7. Global Leaderboard & Match History/Replays Modal Card
+	# 7. Dedicated Global Leaderboard & Match History/Replays Page + Dedicated Settings Page
 	var center_node := menu_overlay.get_node_or_null("Center") as CenterContainer
 	if center_node != null:
 		_rankings_card = PanelContainer.new()
 		_rankings_card.visible = false
-		_rankings_card.custom_minimum_size = Vector2(520, 400)
+		_rankings_card.custom_minimum_size = Vector2(580, 420)
 		ThemeFactory.apply_panel_variant(_rankings_card, "card")
 		var rvbox := VBoxContainer.new()
 		rvbox.add_theme_constant_override("separation", 8)
 		_rankings_card.add_child(rvbox)
 
 		var rhdr := HBoxContainer.new()
+		rhdr.add_theme_constant_override("separation", 8)
 		var rback := Button.new()
 		rback.text = "Back"
+		rback.icon = _make_pixel_icon(_tex_back, Color.WHITE, 14)
 		ThemeFactory.apply_button_variant(rback, "back")
 		rback.pressed.connect(func() -> void:
 			AudioManager.play_ui_tap()
-			_rankings_card.visible = false
-			menu_card.visible = true
+			_show_menu_page("home")
 		)
 		rhdr.add_child(rback)
+		var trophy_ic := TextureRect.new()
+		trophy_ic.texture = _make_trophy_icon()
+		trophy_ic.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		trophy_ic.custom_minimum_size = Vector2(18, 18)
+		trophy_ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		rhdr.add_child(trophy_ic)
 		var rtitle := Label.new()
-		rtitle.text = "GLOBAL RANKINGS & REPLAYS"
+		rtitle.text = "GLOBAL LEADERBOARD"
 		rtitle.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		rtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		rhdr.add_child(rtitle)
@@ -3063,36 +3198,52 @@ func _setup_extra_hud_panels() -> void:
 		ThemeFactory.apply_button_variant(rref, "secondary")
 		rref.pressed.connect(func() -> void:
 			AudioManager.play_ui_tap()
-			leaderboard_open_requested.emit()
+			leaderboard_open_requested.emit(_rankings_sort)
 		)
 		rhdr.add_child(rref)
 		rvbox.add_child(rhdr)
 
+		_rankings_me_lbl = Label.new()
+		_rankings_me_lbl.text = "Your Rank: Guest · Sign in to climb Silver → Sovereign"
+		_rankings_me_lbl.modulate = Color(0.96, 0.84, 0.42, 0.96)
+		rvbox.add_child(_rankings_me_lbl)
+
 		var rtabs := HBoxContainer.new()
 		rtabs.add_theme_constant_override("separation", 6)
 		_rankings_tab_lb = Button.new()
-		_rankings_tab_lb.text = "Top Commanders"
+		_rankings_tab_lb.text = "Top ELO"
 		_rankings_tab_lb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		ThemeFactory.apply_button_variant(_rankings_tab_lb, "primary")
+		_rankings_tab_wins = Button.new()
+		_rankings_tab_wins.text = "Most Wins"
+		_rankings_tab_wins.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_rankings_tab_land = Button.new()
+		_rankings_tab_land.text = "Peak Land"
+		_rankings_tab_land.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		_rankings_tab_hist = Button.new()
-		_rankings_tab_hist.text = "Match History & Replays"
+		_rankings_tab_hist.text = "Match History"
 		_rankings_tab_hist.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var select_lb_tab := func(mode_s: String, sort_s: String) -> void:
+			AudioManager.play_ui_tap()
+			_rankings_mode = mode_s
+			_rankings_sort = sort_s
+			ThemeFactory.apply_button_variant(_rankings_tab_lb, "primary" if (mode_s == "leaderboard" and sort_s == "elo") else "secondary")
+			ThemeFactory.apply_button_variant(_rankings_tab_wins, "primary" if (mode_s == "leaderboard" and sort_s == "wins") else "secondary")
+			ThemeFactory.apply_button_variant(_rankings_tab_land, "primary" if (mode_s == "leaderboard" and sort_s == "territory") else "secondary")
+			ThemeFactory.apply_button_variant(_rankings_tab_hist, "primary" if mode_s == "history" else "secondary")
+			if mode_s == "leaderboard":
+				leaderboard_open_requested.emit(_rankings_sort)
+			_render_rankings_rows()
+		ThemeFactory.apply_button_variant(_rankings_tab_lb, "primary")
+		ThemeFactory.apply_button_variant(_rankings_tab_wins, "secondary")
+		ThemeFactory.apply_button_variant(_rankings_tab_land, "secondary")
 		ThemeFactory.apply_button_variant(_rankings_tab_hist, "secondary")
-		_rankings_tab_lb.pressed.connect(func() -> void:
-			AudioManager.play_ui_tap()
-			_rankings_mode = "leaderboard"
-			ThemeFactory.apply_button_variant(_rankings_tab_lb, "primary")
-			ThemeFactory.apply_button_variant(_rankings_tab_hist, "secondary")
-			_render_rankings_rows()
-		)
-		_rankings_tab_hist.pressed.connect(func() -> void:
-			AudioManager.play_ui_tap()
-			_rankings_mode = "history"
-			ThemeFactory.apply_button_variant(_rankings_tab_lb, "secondary")
-			ThemeFactory.apply_button_variant(_rankings_tab_hist, "primary")
-			_render_rankings_rows()
-		)
+		_rankings_tab_lb.pressed.connect(func() -> void: select_lb_tab.call("leaderboard", "elo"))
+		_rankings_tab_wins.pressed.connect(func() -> void: select_lb_tab.call("leaderboard", "wins"))
+		_rankings_tab_land.pressed.connect(func() -> void: select_lb_tab.call("leaderboard", "territory"))
+		_rankings_tab_hist.pressed.connect(func() -> void: select_lb_tab.call("history", _rankings_sort))
 		rtabs.add_child(_rankings_tab_lb)
+		rtabs.add_child(_rankings_tab_wins)
+		rtabs.add_child(_rankings_tab_land)
 		rtabs.add_child(_rankings_tab_hist)
 		rvbox.add_child(rtabs)
 
@@ -3105,9 +3256,164 @@ func _setup_extra_hud_panels() -> void:
 		rvbox.add_child(rscroll)
 		center_node.add_child(_rankings_card)
 
-	# 8. In-Game Change Password Security section inside AccountCard
+		# Dedicated Settings Page Card
+		_settings_card = PanelContainer.new()
+		_settings_card.visible = false
+		_settings_card.custom_minimum_size = Vector2(460, 0)
+		ThemeFactory.apply_panel_variant(_settings_card, "card")
+		var svbox := VBoxContainer.new()
+		svbox.add_theme_constant_override("separation", 8)
+		_settings_card.add_child(svbox)
+
+		var shdr := HBoxContainer.new()
+		shdr.add_theme_constant_override("separation", 8)
+		var sback := Button.new()
+		sback.text = "Back"
+		sback.icon = _make_pixel_icon(_tex_back, Color.WHITE, 14)
+		ThemeFactory.apply_button_variant(sback, "back")
+		sback.pressed.connect(func() -> void:
+			AudioManager.play_ui_tap()
+			_show_menu_page("home")
+		)
+		shdr.add_child(sback)
+		var gear_ic := TextureRect.new()
+		gear_ic.texture = _make_gear_icon()
+		gear_ic.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		gear_ic.custom_minimum_size = Vector2(18, 18)
+		gear_ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		shdr.add_child(gear_ic)
+		var stitle_l := Label.new()
+		stitle_l.text = "SETTINGS & CONTROLS"
+		stitle_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		stitle_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		shdr.add_child(stitle_l)
+		svbox.add_child(shdr)
+		svbox.add_child(HSeparator.new())
+
+		_set_mute_check = CheckButton.new()
+		_set_mute_check.text = "Mute All Audio"
+		_set_mute_check.toggled.connect(func(v: bool) -> void:
+			if not _syncing_settings:
+				mute_check.button_pressed = v
+		)
+		svbox.add_child(_set_mute_check)
+
+		for sl_pair: Array in [
+			["Master Volume", master_slider, "_set_master_sl"],
+			["Music Volume", music_slider, "_set_music_sl"],
+			["SFX / UI Volume", sfx_slider, "_set_sfx_sl"],
+			["Ocean Ambience", ambience_slider, "_set_amb_sl"],
+		]:
+			var srow := HBoxContainer.new()
+			srow.add_theme_constant_override("separation", 8)
+			var slbl := Label.new()
+			slbl.text = str(sl_pair[0])
+			slbl.custom_minimum_size = Vector2(140, 0)
+			var sldr := HSlider.new()
+			sldr.max_value = 1.0
+			sldr.step = 0.05
+			sldr.value = (sl_pair[1] as HSlider).value
+			sldr.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			var target_sl := sl_pair[1] as HSlider
+			sldr.value_changed.connect(func(v: float) -> void:
+				if not _syncing_settings:
+					target_sl.value = v
+			)
+			set(str(sl_pair[2]), sldr)
+			srow.add_child(slbl)
+			srow.add_child(sldr)
+			svbox.add_child(srow)
+
+		svbox.add_child(HSeparator.new())
+		var sd_row := HBoxContainer.new()
+		sd_row.add_theme_constant_override("separation", 8)
+		var sdlbl := Label.new()
+		sdlbl.text = "Display Mode"
+		sdlbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_set_disp_opt = OptionButton.new()
+		_set_disp_opt.add_item("Windowed", 0)
+		_set_disp_opt.add_item("Borderless", 1)
+		_set_disp_opt.add_item("Fullscreen", 2)
+		_set_disp_opt.item_selected.connect(func(idx: int) -> void:
+			AudioManager.play_ui_tap()
+			if _display_mode_option != null:
+				_display_mode_option.select(idx)
+			_apply_display_mode(idx, true)
+		)
+		sd_row.add_child(sdlbl)
+		sd_row.add_child(_set_disp_opt)
+		svbox.add_child(sd_row)
+
+		var ss_row := HBoxContainer.new()
+		ss_row.add_theme_constant_override("separation", 8)
+		var sslbl := Label.new()
+		sslbl.text = "UI Scale"
+		sslbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_set_scale_opt = OptionButton.new()
+		_set_scale_opt.add_item("90%", 0)
+		_set_scale_opt.add_item("100%", 1)
+		_set_scale_opt.add_item("115%", 2)
+		_set_scale_opt.select(1)
+		_set_scale_opt.item_selected.connect(func(idx: int) -> void:
+			AudioManager.play_ui_tap()
+			if _ui_scale_option != null:
+				_ui_scale_option.select(idx)
+			_apply_ui_scale(idx, true)
+		)
+		ss_row.add_child(sslbl)
+		ss_row.add_child(_set_scale_opt)
+		svbox.add_child(ss_row)
+
+		_set_hotkeys_check = CheckButton.new()
+		_set_hotkeys_check.text = "Enable Combat Hotkeys (1-9, F, Space, Alt+Click)"
+		_set_hotkeys_check.button_pressed = _hotkeys_enabled
+		_set_hotkeys_check.toggled.connect(func(v: bool) -> void:
+			if _hotkeys_enabled != v:
+				toggle_hotkeys()
+		)
+		svbox.add_child(_set_hotkeys_check)
+
+		var ctrl_lbl := Label.new()
+		ctrl_lbl.text = "Controls: Left-Click Explore/Build · Right-Click Wheel · Shift Multi-Build\nSpace Capital · Ctrl+1..4 / Alt+1..4 Bookmarks · Alt+Click Ping · Enter Chat"
+		ctrl_lbl.modulate = Color(0.68, 0.78, 0.90, 0.90)
+		ctrl_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		ctrl_lbl.add_theme_font_size_override("font_size", 11)
+		svbox.add_child(ctrl_lbl)
+		center_node.add_child(_settings_card)
+
+	# 8. In-Game Change Password Security + Profile Quick Links inside AccountCard
 	var acct_vbox := account_card.get_node_or_null("VBox") as VBoxContainer
 	if acct_vbox != null:
+		var qnav_row := HBoxContainer.new()
+		qnav_row.add_theme_constant_override("separation", 8)
+		var p_fr_btn := Button.new()
+		p_fr_btn.text = "Friends Roster"
+		p_fr_btn.icon = _make_pixel_icon(_tex_friends, Color.WHITE, 14)
+		p_fr_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		ThemeFactory.apply_button_variant(p_fr_btn, "secondary")
+		p_fr_btn.pressed.connect(func() -> void: open_friends_page("account"))
+		var p_hist_btn := Button.new()
+		p_hist_btn.text = "Match History & Replays"
+		p_hist_btn.icon = _make_trophy_icon()
+		p_hist_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		ThemeFactory.apply_button_variant(p_hist_btn, "secondary")
+		p_hist_btn.pressed.connect(func() -> void:
+			AudioManager.play_ui_tap()
+			_rankings_mode = "history"
+			_show_menu_page("rankings")
+			if _rankings_tab_lb != null:
+				ThemeFactory.apply_button_variant(_rankings_tab_lb, "secondary")
+				ThemeFactory.apply_button_variant(_rankings_tab_wins, "secondary")
+				ThemeFactory.apply_button_variant(_rankings_tab_land, "secondary")
+				ThemeFactory.apply_button_variant(_rankings_tab_hist, "primary")
+			leaderboard_open_requested.emit(_rankings_sort)
+			_render_rankings_rows()
+		)
+		qnav_row.add_child(p_fr_btn)
+		qnav_row.add_child(p_hist_btn)
+		acct_vbox.add_child(qnav_row)
+		acct_vbox.move_child(qnav_row, mini(3, acct_vbox.get_child_count() - 1))
+
 		_sec_box = VBoxContainer.new()
 		_sec_box.visible = false
 		_sec_box.add_theme_constant_override("separation", 6)
@@ -3165,6 +3471,38 @@ func _setup_extra_hud_panels() -> void:
 		_sec_box.add_child(sec_btn)
 		_sec_box.add_child(_sec_status_lbl)
 		acct_vbox.add_child(_sec_box)
+
+	# 8b. Diplomacy Aid Amount Preset Row inside DiplomacyPanel
+	var dip_vbox := diplomacy_panel.get_node_or_null("VBox") as VBoxContainer
+	if dip_vbox != null:
+		var aid_row := HBoxContainer.new()
+		aid_row.add_theme_constant_override("separation", 6)
+		var g_cycle := Button.new()
+		g_cycle.text = "₱ Tier: 100K"
+		g_cycle.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		ThemeFactory.apply_button_variant(g_cycle, "ghost")
+		g_cycle.pressed.connect(func() -> void:
+			AudioManager.play_ui_tap()
+			_gold_aid_idx = (_gold_aid_idx + 1) % _gold_aid_amounts.size()
+			var gv: float = _gold_aid_amounts[_gold_aid_idx]
+			g_cycle.text = "₱ Tier: %s" % StructureData.format_pesos(gv)
+			if _selected_dip_nation_id > 0:
+				show_diplomacy_panel(_selected_dip_nation_id)
+		)
+		var t_cycle := Button.new()
+		t_cycle.text = "Army Tier: 25%"
+		t_cycle.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		ThemeFactory.apply_button_variant(t_cycle, "ghost")
+		t_cycle.pressed.connect(func() -> void:
+			AudioManager.play_ui_tap()
+			_troop_aid_idx = (_troop_aid_idx + 1) % _troop_aid_ratios.size()
+			t_cycle.text = "Army Tier: %d%%" % int(round(_troop_aid_ratios[_troop_aid_idx] * 100.0))
+			if _selected_dip_nation_id > 0:
+				show_diplomacy_panel(_selected_dip_nation_id)
+		)
+		aid_row.add_child(g_cycle)
+		aid_row.add_child(t_cycle)
+		dip_vbox.add_child(aid_row)
 
 	# 9. In-Game Multiplayer Chat & Quick Comms Panel
 	_chat_panel = PanelContainer.new()
@@ -3243,6 +3581,27 @@ func _setup_extra_hud_panels() -> void:
 			_replay_controls_row.add_child(sb)
 		sp_hbox.add_child(_replay_controls_row)
 		sp_hbox.move_child(_replay_controls_row, maxi(1, sp_hbox.get_child_count() - 2))
+
+
+func _sync_settings_controls() -> void:
+	_syncing_settings = true
+	if _set_mute_check != null:
+		_set_mute_check.button_pressed = mute_check.button_pressed
+	if _set_master_sl != null:
+		_set_master_sl.value = master_slider.value
+	if _set_music_sl != null:
+		_set_music_sl.value = music_slider.value
+	if _set_sfx_sl != null:
+		_set_sfx_sl.value = sfx_slider.value
+	if _set_amb_sl != null:
+		_set_amb_sl.value = ambience_slider.value
+	if _set_disp_opt != null and _display_mode_option != null:
+		_set_disp_opt.select(_display_mode_option.selected)
+	if _set_scale_opt != null and _ui_scale_option != null:
+		_set_scale_opt.select(_ui_scale_option.selected)
+	if _set_hotkeys_check != null:
+		_set_hotkeys_check.button_pressed = _hotkeys_enabled
+	_syncing_settings = false
 
 
 func _toggle_chat_channel() -> void:

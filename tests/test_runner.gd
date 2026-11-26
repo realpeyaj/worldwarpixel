@@ -396,7 +396,7 @@ func _run_all_tests() -> void:
 	for idx in range(ws_war.sim_width * ws_war.sim_height):
 		if ws_war.owner_grid[idx] == rival.id:
 			rival_orig_cells.append(idx)
-	p_war.troops = 500.0
+	p_war.troops = 1200.0
 	var wild_click := Vector2i(us_spot.x + 12, us_spot.y - 4)
 	for dy_w in range(-8, 9):
 		var cy_w: int = us_spot.y + dy_w
@@ -662,7 +662,16 @@ func _run_all_tests() -> void:
 		var has_banner := l4 != null and l4.get("_tex_banner") != null and l4.get("_tex_banner_mask") != null
 		var ui_ok := false
 		if hud != null:
-			var menu_init: bool = hud.menu_overlay.visible and not hud.spawn_banner.visible and not hud.top_bar.visible and not hud.action_dock.visible and not hud.leaderboard_panel.visible and not hud.ping_badge.visible
+			var menu_init: bool = (
+				hud.menu_overlay.visible
+				and is_equal_approx(hud.menu_overlay.color.a, 0.0)
+				and hud.home_corners.visible
+				and hud.sp_card != null and not hud.sp_card.visible
+				and hud.get("_settings_card") != null and not (hud.get("_settings_card") as Control).visible
+				and inst.get_node_or_null("HUD/Root/MenuOverlay/Center/PatchNotesCard") == null
+				and inst.get_node_or_null("HUD/Root/MenuOverlay/Center/MenuCard/VBox/ColorInfo") == null
+				and not hud.spawn_banner.visible and not hud.top_bar.visible and not hud.action_dock.visible and not hud.leaderboard_panel.visible and not hud.ping_badge.visible
+			)
 			var cam_pan_init: bool = wm != null and wm.camera.auto_pan_enabled
 			var cam_p0: Vector2 = wm.camera._target_pos if wm != null else Vector2.ZERO
 			if wm != null:
@@ -723,8 +732,11 @@ func _run_all_tests() -> void:
 				and hud.mp_disconnect_btn.icon != null
 				and hud.quit_btn.icon != null
 				and hud.st_close_btn.icon != null
-				and not (inst.get_node("HUD/Root/MenuOverlay/Center/MenuCard/VBox/Subtitle") as Control).visible
-				and (inst.get_node("HUD/Root/MenuOverlay/Center/MenuCard/VBox/NameRow/Lbl") as Label).text == "Name"
+				and hud.menu_rankings_btn.icon != null
+				and hud.menu_audio_btn.icon != null
+				and hud.sp_back_btn.icon != null
+				and (inst.get_node("HUD/Root/MenuOverlay/Center/SingleplayerCard/VBox/NameRow/Lbl") as Label).text == "Nation Name"
+				and is_equal_approx(WorldState.NEUTRAL_EXPLORE_TROOP_COST_MULT, 1.85)
 				and GameHUD.SERVER_REGIONS.size() == 1
 				and hud.get_selected_server_name() == "Manila, PH"
 				and not hud.mp_server_edit.visible
@@ -868,7 +880,10 @@ func _run_openfront_feature_tests(us_spot: Vector2i, normandy: Vector2i, england
 		"Player and AI nations start with 1.5K troops (1500.0)")
 
 	# OpenFront 1:1 25% contested attack retreat malus
-	ws._claim_organic_dot(p.id, Vector2i(us_spot.x + 12, us_spot.y), 180, 0)
+	for bx in range(us_spot.x + 1, rival.capital_cell.x):
+		var b_idx: int = us_spot.y * ws.sim_width + bx
+		if ws.is_land_cell(bx, us_spot.y) and ws.owner_grid[b_idx] == 0:
+			ws._set_cell_owner(b_idx, p.id)
 	p.troops = 280.0
 	var ret_ord_res: Dictionary = ws.apply_command({"type": "expand_to", "nation_id": p.id, "x": rival.capital_cell.x, "y": rival.capital_cell.y, "commit_ratio": 0.50})
 	var ret_eid: int = int(ret_ord_res.get("expansion_id", 0))
@@ -1462,16 +1477,22 @@ func _run_openfront_feature_tests(us_spot: Vector2i, normandy: Vector2i, england
 			]
 		)
 
-	# Homeland Counter-Attack & AI-vs-AI Warfare checks (also verifies initial spawn starts at 14 cells and grows)
+	# Homeland Counter-Attack & AI-vs-AI Warfare checks (also verifies clean circle spawn with NO auto-spread until player expands)
 	var ws_cnt := WorldState.new()
 	ws_cnt.load_world()
 	ws_cnt.apply_command({"type": "spawn_player", "x": us_spot.x, "y": us_spot.y, "name": "Homeland", "ai_count": 0, "seed": 888})
 	var def_p: NationData = ws_cnt.get_player_nation()
 	var spawn_seed_cells: int = def_p.owned_cell_count
+	var no_autospread_ok: bool = ws_cnt.expansions.is_empty() and spawn_seed_cells >= 25 and spawn_seed_cells <= 64
+	for _t in range(12):
+		ws_cnt.step_tick(ws_cnt.current_tick + 1)
+	var stays_circle_ok: bool = (def_p.owned_cell_count == spawn_seed_cells)
+	ws_cnt.apply_command({"type": "expand_to", "nation_id": def_p.id, "x": us_spot.x + 8, "y": us_spot.y, "commit_ratio": 0.25})
 	for _t in range(24):
 		ws_cnt.step_tick(ws_cnt.current_tick + 1)
-	var spawn_grown_ok: bool = (spawn_seed_cells <= 64 and def_p.owned_cell_count >= 200)
-	var inv_n := ws_cnt._create_nation("InvaderAI", Color.RED, false, Vector2i(us_spot.x + 16, us_spot.y), 240)
+	var spawn_grown_ok: bool = no_autospread_ok and stays_circle_ok and def_p.owned_cell_count >= 120
+	var inv_n := ws_cnt._create_nation("InvaderAI", Color.RED, false, Vector2i(us_spot.x + 26, us_spot.y), 240)
+	ws_cnt._claim_organic_dot(def_p.id, Vector2i(us_spot.x + 18, us_spot.y), 120, 0)
 	def_p.troops = 500.0
 	inv_n.troops = 140.0
 	var counter_ev := {"fired": false, "repelled": false}
@@ -1529,6 +1550,7 @@ func _run_openfront_feature_tests(us_spot: Vector2i, normandy: Vector2i, england
 		sfx_ev["atk"] = int(sfx_ev["atk"]) + cells
 		sfx_ev["last_attacker"] = a_id
 	)
+	ws_sfx.apply_command({"type": "expand_to", "nation_id": sfx_p.id, "x": us_spot.x + 8, "y": us_spot.y, "commit_ratio": 0.40})
 	for _t in range(18):
 		ws_sfx.step_tick(ws_sfx.current_tick + 1)
 	var player_conq_ok: bool = int(sfx_ev["conq"]) > 0 and int(sfx_ev["atk"]) == 0
@@ -1545,7 +1567,13 @@ func _run_openfront_feature_tests(us_spot: Vector2i, normandy: Vector2i, england
 		ws_sfx.step_tick(ws_sfx.current_tick + 1)
 	var ai_silent_ok: bool = int(sfx_ev["conq"]) == 0 and int(sfx_ev["atk"]) == 0
 	ws_sfx.expansions.clear()
-	var near_inv := ws_sfx._create_nation("BorderFoe", Color.RED, false, Vector2i(us_spot.x + 16, us_spot.y), 180)
+	var foe_x: int = us_spot.x + 16
+	for dx in range(5, 60):
+		var cx: int = us_spot.x + dx
+		if ws_sfx.is_land_cell(cx, us_spot.y) and ws_sfx.owner_grid[us_spot.y * ws_sfx.sim_width + cx] == 0:
+			foe_x = cx
+			break
+	var near_inv := ws_sfx._create_nation("BorderFoe", Color.RED, false, Vector2i(foe_x, us_spot.y), 180)
 	near_inv.troops = 450.0
 	sfx_p.troops = 40.0
 	ws_sfx.apply_command({"type": "expand_to", "nation_id": near_inv.id, "x": sfx_p.capital_cell.x, "y": sfx_p.capital_cell.y, "commit_ratio": 0.6})
@@ -1764,3 +1792,52 @@ func _run_phase2_account_and_pfp_tests() -> void:
 		if st_wav == null or not st_wav.stereo or st_wav.mix_rate != 44100:
 			new_sfx_ok = false
 	_check(new_sfx_ok, "Updated MP3 missile launch & resounded SAM launch/intercept load as 44.1kHz stereo WAVs")
+
+	# 7. v1.3.0 Checks: 20+ AI opponents, Allied Trade +40% & Naval Raiding bounty, FFA & Team Aid, HUD Pages
+	var ws_many := WorldState.new()
+	ws_many.load_world()
+	ws_many.apply_command({"type": "spawn_player", "x": n1_pos.x, "y": n1_pos.y, "name": "ManyCmd", "ai_count": 20, "seed": 313})
+	_check(ws_many.nations.size() >= 21 and ws_many.expansions.is_empty(),
+		"Singleplayer supports 20+ AI opponents (%d total nations) starting cleanly without auto-spread" % ws_many.nations.size())
+
+	var ws_trade := WorldState.new()
+	ws_trade.load_world()
+	ws_trade.apply_command({
+		"type": "start_mp_match", "seed": 515, "local_nation_id": 1, "ai_count": 0,
+		"players": [
+			{"nation_id": 1, "name": "AlliedA", "team_id": 1, "x": n1_pos.x, "y": n1_pos.y},
+			{"nation_id": 2, "name": "AlliedB", "team_id": 1, "x": n2_pos.x, "y": n2_pos.y},
+			{"nation_id": 3, "name": "RaiderC", "team_id": 2, "x": n3_pos.x, "y": n3_pos.y},
+		],
+	})
+	var tr_a: NationData = ws_trade.get_nation(1)
+	var tr_b: NationData = ws_trade.get_nation(2)
+	var tr_c: NationData = ws_trade.get_nation(3)
+	var team_aid_g: Dictionary = ws_trade.apply_command({"type": "donate_gold", "nation_id": 1, "target_nation_id": 2, "amount": 50000.0})
+	var team_aid_t: Dictionary = ws_trade.apply_command({"type": "donate_troops", "nation_id": 1, "target_nation_id": 2, "ratio": 0.25})
+	var team_brk: Dictionary = ws_trade.apply_command({"type": "break_alliance", "nation_id": 1, "target_nation_id": 2})
+	var r_ship := ShipUnit.new()
+	r_ship.id = ws_trade._next_ship_id
+	ws_trade._next_ship_id += 1
+	r_ship.kind = ShipUnit.KIND_TRADE
+	r_ship.nation_id = tr_a.id
+	r_ship.gold_value = 40000.0
+	r_ship.position = Vector2(512.0, 512.0)
+	r_ship.waypoints = PackedVector2Array([Vector2(512.0, 512.0), Vector2(540.0, 512.0)])
+	r_ship.waypoint_index = 1
+	ws_trade.ships[r_ship.id] = r_ship
+	var w_raid := ShipUnit.new()
+	w_raid.id = ws_trade._next_ship_id
+	ws_trade._next_ship_id += 1
+	w_raid.kind = ShipUnit.KIND_WARSHIP
+	w_raid.nation_id = tr_c.id
+	w_raid.position = Vector2(518.0, 512.0)
+	w_raid.patrol_center = w_raid.position
+	w_raid.waypoints = PackedVector2Array([w_raid.position, Vector2(528.0, 512.0)])
+	w_raid.waypoint_index = 1
+	ws_trade.ships[w_raid.id] = w_raid
+	var c_gold_pre: float = tr_c.gold
+	ws_trade._step_ships()
+	var raid_loot_ok: bool = tr_c.gold >= c_gold_pre + 25000.0 # 65% of 40000 = 26000 when no friendly port
+	_check(bool(team_aid_g.get("ok", false)) and bool(team_aid_t.get("ok", false)) and not bool(team_brk.get("ok", true)) and raid_loot_ok,
+		"Team/FFA Gold & Troop aid verified, permanent team pact protected, and Warship naval raid plunders 65%% trade value")

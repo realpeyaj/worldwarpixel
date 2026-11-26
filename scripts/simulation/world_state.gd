@@ -80,6 +80,7 @@ const TERRAIN_COST := {
 
 const VICTORY_THRESHOLD_PERCENT := 80.0
 const FALLOUT_TROOP_COST_MULT := 2.4
+const NEUTRAL_EXPLORE_TROOP_COST_MULT := 1.85
 const MAX_ACTIVE_EXPANSIONS_PER_NATION := 3
 const MAX_ACTIVE_TRADE_SHIPS := 150
 const MIN_STRUCTURE_SPACING_CELLS := 8
@@ -94,6 +95,8 @@ const NATION_COLOR_PALETTE: Array[String] = [
 	"#a855f7", "#06b6d4", "#f97316", "#ec4899",
 	"#84cc16", "#14b8a6", "#f43f5e", "#6366f1",
 	"#d97706", "#10b981", "#e879f9", "#0ea5e9",
+	"#fb7185", "#facc15", "#34d399", "#818cf8",
+	"#fb923c", "#2dd4bf", "#c084fc", "#f87171",
 ]
 
 var sim_width: int = 2048
@@ -432,24 +435,24 @@ func _shuffled_palette() -> Array[String]:
 
 func _spawn_ai_nations(ai_count: int, spawned_pts: Array[Vector2i], palette: Array[String], palette_offset: int) -> void:
 	var ai_idx := 0
-	for cand: Vector2i in ai_spawn_candidates:
-		if ai_idx >= ai_count:
-			break
-		if not is_land_cell(cand.x, cand.y) or get_owner_at(cand.x, cand.y) != 0:
-			continue
-		var too_close := false
-		for pt: Vector2i in spawned_pts:
-			if cand.distance_squared_to(pt) < 14400.0:
-				too_close = true
-				break
-		if too_close:
-			continue
-		var col := Color.from_string(palette[(ai_idx + palette_offset) % palette.size()], Color.ORANGE)
-		var nm: String = AIController.AI_NAMES[ai_idx % AIController.AI_NAMES.size()]
-		var ai_n := _create_nation(nm, col, false, cand, 56)
-		_start_land_expansion(ai_n.id, cand, 48.0, 0)
-		spawned_pts.append(cand)
-		ai_idx += 1
+	for min_dist_sq: float in [14400.0, 4900.0, 2500.0, 900.0]:
+		for cand: Vector2i in ai_spawn_candidates:
+			if ai_idx >= ai_count:
+				return
+			if not is_land_cell(cand.x, cand.y) or get_owner_at(cand.x, cand.y) != 0:
+				continue
+			var too_close := false
+			for pt: Vector2i in spawned_pts:
+				if cand.distance_squared_to(pt) < min_dist_sq:
+					too_close = true
+					break
+			if too_close:
+				continue
+			var col := Color.from_string(palette[(ai_idx + palette_offset) % palette.size()], Color.ORANGE)
+			var nm: String = AIController.AI_NAMES[ai_idx % AIController.AI_NAMES.size()]
+			_create_nation(nm, col, false, cand, 49)
+			spawned_pts.append(cand)
+			ai_idx += 1
 
 
 func _apply_match_options(opts: Dictionary) -> void:
@@ -481,11 +484,10 @@ func _cmd_spawn_player(cmd: Dictionary) -> Dictionary:
 
 	var palette: Array[String] = _shuffled_palette()
 	var p_color := Color.from_string(palette[0], Color("#3b82f6"))
-	var ai_count: int = clampi(int(cmd.get("ai_count", 6)), 0, 10)
+	var ai_count: int = clampi(int(cmd.get("ai_count", 6)), 0, 23)
 
-	var p_nation := _create_nation(p_name, p_color, true, Vector2i(sx, sy), 56)
+	var p_nation := _create_nation(p_name, p_color, true, Vector2i(sx, sy), 49)
 	player_nation_id = p_nation.id
-	_start_land_expansion(p_nation.id, Vector2i(sx, sy), 58.0, 0)
 
 	var spawned_pts: Array[Vector2i] = [Vector2i(sx, sy)]
 	_spawn_ai_nations(ai_count, spawned_pts, palette, 1)
@@ -536,13 +538,12 @@ func _cmd_start_mp_match(cmd: Dictionary) -> Dictionary:
 						sy = cand.y
 						break
 		var col := Color.from_string(palette[i % palette.size()], Color("#3b82f6"))
-		var mp_n := _create_nation(nm, col, true, Vector2i(sx, sy), 56, nid)
+		var mp_n := _create_nation(nm, col, true, Vector2i(sx, sy), 49, nid)
 		mp_n.team_id = clampi(int(pd.get("team_id", 0)), 0, 4)
-		_start_land_expansion(mp_n.id, Vector2i(sx, sy), 58.0, 0)
 		spawned_pts.append(Vector2i(sx, sy))
 
 	player_nation_id = int(cmd.get("local_nation_id", 1))
-	var ai_count: int = clampi(int(cmd.get("ai_count", 4)), 0, 10)
+	var ai_count: int = clampi(int(cmd.get("ai_count", 4)), 0, 23)
 	_spawn_ai_nations(ai_count, spawned_pts, palette, sorted_players.size())
 
 	match_phase = PHASE_PLAYING
@@ -581,9 +582,35 @@ func _create_nation(n_name: String, col: Color, is_player: bool, center: Vector2
 	_nation_coasts[nid] = {}
 	_nation_landmasses[nid] = {}
 
-	_claim_organic_dot(nid, center, start_cells)
+	if start_cells == 49:
+		_claim_spawn_circle(nid, center, 4.0)
+	else:
+		_claim_organic_dot(nid, center, start_cells)
 	nation_spawned.emit(nid)
 	return n
+
+
+func _claim_spawn_circle(nid: int, center: Vector2i, radius_cells: float = 4.0) -> int:
+	if not is_land_cell(center.x, center.y):
+		return 0
+	var r_i: int = int(ceil(radius_cells))
+	var r2: float = radius_cells * radius_cells
+	var claimed := 0
+	for dy in range(-r_i, r_i + 1):
+		var cy: int = center.y + dy
+		if cy < 0 or cy >= sim_height:
+			continue
+		for dx in range(-r_i, r_i + 1):
+			if float(dx * dx + dy * dy) > r2:
+				continue
+			var cx: int = center.x + dx
+			if cx < 0 or cx >= sim_width:
+				continue
+			var idx: int = cy * sim_width + cx
+			if terrain_grid[idx] >= T_PLAINS and owner_grid[idx] == 0:
+				_set_cell_owner(idx, nid)
+				claimed += 1
+	return claimed
 
 
 static func _can_order_claim_owner(order_target_owner: int, cell_owner: int, attacker_nid: int) -> bool:
@@ -1713,6 +1740,7 @@ func _step_port_trade_spawning() -> void:
 
 		var dist_px: float = _compute_route_length(route)
 		var is_foreign: bool = (target_port.nation_id != port.nation_id)
+		var is_allied_tr: bool = is_foreign and are_allied(port.nation_id, target_port.nation_id)
 
 		var ship := ShipUnit.new()
 		ship.id = _next_ship_id
@@ -1726,9 +1754,13 @@ func _step_port_trade_spawning() -> void:
 		ship.waypoint_index = 1
 		ship.speed_px_per_sec = port.get_ship_speed()
 		ship.is_foreign_trade = is_foreign
+		ship.is_allied_trade = is_allied_tr
 		ship.returning = false
 		ship.captured = false
-		ship.gold_value = StructureData.get_distance_trade_payout(dist_px, port.level, port.factory_boost)
+		var trade_gold: float = StructureData.get_distance_trade_payout(dist_px, port.level, port.factory_boost)
+		if is_allied_tr:
+			trade_gold = round(trade_gold * 1.40)
+		ship.gold_value = trade_gold
 		ships[ship.id] = ship
 		port.active_ship_ids.append(ship.id)
 		global_trade += 1
@@ -1753,7 +1785,7 @@ func _pick_trade_partner_port(source_port: StructureData) -> StructureData:
 			continue
 		var w: float = 1.0 / pow(maxf(d, 48.0), 0.35)
 		if candidate.nation_id != source_port.nation_id:
-			w *= 2.4 if are_allied(source_port.nation_id, candidate.nation_id) else 1.5
+			w *= 3.4 if are_allied(source_port.nation_id, candidate.nation_id) else 1.5
 		cands.append(candidate)
 		weights.append(w)
 		total_w += w
@@ -2004,12 +2036,17 @@ func _step_warship_ai(ship: ShipUnit) -> void:
 		if dist <= 22.0:
 			var captor: NationData = nations.get(ship.nation_id, null)
 			var redir: Dictionary = _find_nearest_port_route_for_ship(best_tgt.position, ship.nation_id)
+			var raw_val: float = maxf(10000.0, best_tgt.gold_value)
+			var instant_loot: float = maxf(2500.0, round(raw_val * 0.25))
 			best_tgt.nation_id = ship.nation_id
 			best_tgt.captured = true
 			best_tgt.returning = false
 			best_tgt.is_foreign_trade = false
-			best_tgt.gold_value = maxf(100.0, round(best_tgt.gold_value / 90.0))
+			best_tgt.is_allied_trade = false
 			if not redir.is_empty():
+				best_tgt.gold_value = maxf(4000.0, round(raw_val * 0.40))
+				if captor != null and captor.alive:
+					captor.gold += instant_loot
 				var cap_port: StructureData = redir["port"]
 				var cap_route: PackedVector2Array = redir["route"]
 				best_tgt.dest_port_id = cap_port.id
@@ -2017,13 +2054,15 @@ func _step_warship_ai(ship: ShipUnit) -> void:
 					best_tgt.position = cap_route[0]
 				best_tgt.waypoints = cap_route
 				best_tgt.waypoint_index = 1 if cap_route.size() > 1 and _is_water_segment_clear(best_tgt.position, cap_route[1]) else 0
-				trade_ship_captured.emit(ship.nation_id, best_tgt.position, best_tgt.gold_value)
+				trade_ship_captured.emit(ship.nation_id, best_tgt.position, instant_loot + best_tgt.gold_value)
 			else:
+				var full_loot: float = maxf(5000.0, round(raw_val * 0.65))
+				best_tgt.gold_value = full_loot
 				best_tgt.active = false
 				if captor != null and captor.alive:
-					captor.gold += best_tgt.gold_value
-					trade_ship_captured.emit(captor.id, best_tgt.position, best_tgt.gold_value)
-					trade_completed.emit(captor.id, best_tgt.position, best_tgt.gold_value)
+					captor.gold += full_loot
+					trade_ship_captured.emit(captor.id, best_tgt.position, full_loot)
+					trade_completed.emit(captor.id, best_tgt.position, full_loot)
 			ship.add_xp(1)
 		elif (not ship.manual_moving) and best_tgt.position.distance_to(patrol_ctr) <= ship.patrol_radius and sea_pathfinder.is_world_pos_navigable(best_tgt.position) and _is_water_segment_clear(ship.position, best_tgt.position):
 			ship.waypoints = PackedVector2Array([ship.position, best_tgt.position])
@@ -2168,7 +2207,9 @@ func _step_expansions() -> void:
 				continue
 
 			var cost: float = float(TERRAIN_COST.get(t, 1.0)) * 0.25
-			if prev_owner != 0:
+			if prev_owner == 0:
+				cost *= NEUTRAL_EXPLORE_TROOP_COST_MULT
+			else:
 				var enemy: NationData = nations.get(prev_owner, null)
 				var def_mult: float = 1.65
 				if enemy != null:
@@ -3702,6 +3743,8 @@ func _cmd_break_alliance(cmd: Dictionary) -> Dictionary:
 	var target: NationData = nations.get(tgt_id, null)
 	if nation == null or target == null or not are_allied(nid, tgt_id):
 		return _reject("No active alliance with this nation.")
+	if nation.team_id > 0 and nation.team_id == target.team_id:
+		return _reject("Cannot break permanent Team %d pact." % nation.team_id)
 	nation.alliances.erase(tgt_id)
 	target.alliances.erase(nid)
 	nation.embargoes[tgt_id] = true
@@ -3737,13 +3780,13 @@ func _cmd_donate_gold(cmd: Dictionary) -> Dictionary:
 	var nation: NationData = nations.get(nid, null)
 	var target: NationData = nations.get(tgt_id, null)
 	if nation == null or target == null or not are_allied(nid, tgt_id):
-		return _reject("Peso donations require an active Alliance.")
+		return _reject("Peso aid requires an active Alliance (FFA pact or shared Team).")
 	if amount < 1000.0 or nation.gold < amount:
-		return _reject("Need %s Pesos to send donation." % StructureData.format_pesos(maxf(amount, 1000.0)))
+		return _reject("Need %s Pesos to send aid." % StructureData.format_pesos(maxf(amount, 1000.0)))
 	nation.gold -= amount
 	target.gold += amount
 	diplomacy_changed.emit()
-	diplomacy_event.emit("Sent %s Pesos to ally %s." % [StructureData.format_pesos(amount), target.name], false)
+	diplomacy_event.emit("%s sent %s Pesos aid to %s." % [nation.name, StructureData.format_pesos(amount), target.name], false)
 	return {"ok": true, "amount": amount}
 
 
@@ -3754,14 +3797,14 @@ func _cmd_donate_troops(cmd: Dictionary) -> Dictionary:
 	var nation: NationData = nations.get(nid, null)
 	var target: NationData = nations.get(tgt_id, null)
 	if nation == null or target == null or not are_allied(nid, tgt_id):
-		return _reject("Troop donations require an active Alliance.")
+		return _reject("Troop aid requires an active Alliance (FFA pact or shared Team).")
 	var send_amt: float = floor(nation.troops * ratio)
 	if send_amt < 15.0:
 		return _reject("Need at least 15 troops available to reinforce ally.")
 	nation.troops -= send_amt
 	target.troops = minf(target.max_troops, target.troops + send_amt)
 	diplomacy_changed.emit()
-	diplomacy_event.emit("Sent %d troops to reinforce ally %s." % [int(round(send_amt)), target.name], false)
+	diplomacy_event.emit("%s sent %d troop aid to %s." % [nation.name, int(round(send_amt)), target.name], false)
 	return {"ok": true, "troops_sent": send_amt}
 
 

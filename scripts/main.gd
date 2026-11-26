@@ -84,8 +84,8 @@ func _ready() -> void:
 		if mp_client.is_socket_active():
 			mp_client.send_chat_message(ch, txt)
 	)
-	hud.leaderboard_open_requested.connect(func() -> void:
-		account_client.fetch_leaderboard(25, func(_ok: bool, _list: Array) -> void: pass)
+	hud.leaderboard_open_requested.connect(func(sort_by: String = "elo") -> void:
+		account_client.fetch_leaderboard(25, func(_ok: bool, _list: Array) -> void: pass, sort_by)
 		if account_client.is_logged_in:
 			account_client.fetch_my_matches(20, func(_ok: bool, _m: Array) -> void: pass)
 	)
@@ -895,7 +895,7 @@ func _on_donate_troops_requested(target_nid: int, ratio: float) -> void:
 func _on_trade_ship_captured(captor_nid: int, _pos: Vector2, gold_amount: float) -> void:
 	if captor_nid == world_state.player_nation_id:
 		AudioManager.play_trade_gold()
-		hud.show_toast("Warship captured trade ship (+%s Pesos queued)!" % StructureData.format_pesos(gold_amount), false)
+		hud.show_toast("Warship raided enemy trade ship (+%s Pesos loot)!" % StructureData.format_pesos(gold_amount), false)
 
 
 func _on_missile_launched(_mid: int, kind: String) -> void:

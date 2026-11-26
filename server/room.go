@@ -486,8 +486,8 @@ func (r *Room) HandleClientMessage(slot *PlayerSlot, raw []byte) {
 		if aiVal, ok := asInt(env["ai_count"]); ok {
 			if aiVal < 0 {
 				aiVal = 0
-			} else if aiVal > 10 {
-				aiVal = 10
+			} else if aiVal > 23 {
+				aiVal = 23
 			}
 			r.AICount = aiVal
 		}
