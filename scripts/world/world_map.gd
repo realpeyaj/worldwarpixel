@@ -42,6 +42,7 @@ var _selected_ship_id: int = 0
 var _hover_cell: Vector2i = Vector2i(-1, -1)
 var _staged_missile_cell: Vector2i = Vector2i(-1, -1)
 var _staged_missile_ms: int = 0
+var _owner_sync_accum: float = 0.033
 
 
 func _ready() -> void:
@@ -98,10 +99,15 @@ func bind_world_state(world_state: WorldState) -> void:
 	layer6_selection.setup(_world_state, camera)
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if _world_state != null and _world_state.owner_dirty:
-		_world_state.owner_dirty = false
-		sync_owner_texture()
+		_owner_sync_accum += delta
+		if _owner_sync_accum >= 0.033:
+			_owner_sync_accum = 0.0
+			_world_state.owner_dirty = false
+			sync_owner_texture()
+	else:
+		_owner_sync_accum = 0.033
 
 
 func _unhandled_input(event: InputEvent) -> void:

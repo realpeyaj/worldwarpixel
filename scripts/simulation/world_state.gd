@@ -281,7 +281,9 @@ func _precompute_coast_and_landmasses() -> void:
 	coastal_grid.fill(0)
 	landmass_grid.resize(n_cells)
 	landmass_grid.fill(0)
+	_landmass_coasts.clear()
 
+	var all_coasts := PackedInt32Array()
 	var lm_id: int = 0
 	var queue := PackedInt32Array()
 	for start_idx in range(n_cells):
@@ -308,6 +310,7 @@ func _precompute_coast_and_landmasses() -> void:
 			touches_ocean = true
 		if touches_ocean:
 			coastal_grid[start_idx] = 1
+			all_coasts.append(start_idx)
 
 		if landmass_grid[start_idx] != 0:
 			continue
@@ -343,6 +346,16 @@ func _precompute_coast_and_landmasses() -> void:
 				if terrain_grid[ni] >= T_PLAINS and landmass_grid[ni] == 0:
 					landmass_grid[ni] = lm_id
 					queue.append(ni)
+
+	var tmp_coasts: Dictionary = {}
+	for k in range(1, lm_id + 1):
+		tmp_coasts[k] = []
+	for idx: int in all_coasts:
+		var lm_c: int = landmass_grid[idx]
+		if lm_c > 0:
+			(tmp_coasts[lm_c] as Array).append(idx)
+	for k in range(1, lm_id + 1):
+		_landmass_coasts[k] = PackedInt32Array(tmp_coasts[k])
 
 
 func world_to_sim(world_pos: Vector2) -> Vector2i:
@@ -998,11 +1011,15 @@ func should_use_sea_crossing(nid: int, target_cell: Vector2i) -> bool:
 		return false
 
 	var borders: Dictionary = _nation_borders.get(nid, {})
+	var b_keys: Array = borders.keys()
+	var b_stride: int = maxi(1, int(b_keys.size() / 1200))
 	var best_bx := -1
 	var best_by := -1
 	var best_d2 := 1e12
-	for idx_var in borders.keys():
-		var b_idx: int = int(idx_var)
+	var bi := 0
+	while bi < b_keys.size():
+		var b_idx: int = int(b_keys[bi])
+		bi += b_stride
 		if owner_grid[b_idx] != nid or landmass_grid[b_idx] != target_lm:
 			continue
 		var bx: int = b_idx % sim_width
@@ -1156,9 +1173,13 @@ func _seed_expansion_arc(order: ExpansionOrder, nid: int, target: Vector2i, targ
 	var borders: Dictionary = _nation_borders.get(nid, {})
 	if borders.is_empty():
 		return
+	var b_keys: Array = borders.keys()
+	var b_stride: int = maxi(1, int(b_keys.size() / 1200))
 	var ranked: Array = []
-	for idx_var in borders.keys():
-		var b_idx: int = int(idx_var)
+	var bi := 0
+	while bi < b_keys.size():
+		var b_idx: int = int(b_keys[bi])
+		bi += b_stride
 		if owner_grid[b_idx] != nid or landmass_grid[b_idx] != target_lm:
 			continue
 		var bx: int = b_idx % sim_width
@@ -1189,9 +1210,13 @@ func _start_land_expansion(nid: int, target: Vector2i, troops: float, forced_tar
 	if borders.is_empty():
 		return null
 
+	var b_keys: Array = borders.keys()
+	var b_stride: int = maxi(1, int(b_keys.size() / 1200))
 	var ranked: Array = []
-	for idx_var in borders.keys():
-		var b_idx: int = int(idx_var)
+	var bi := 0
+	while bi < b_keys.size():
+		var b_idx: int = int(b_keys[bi])
+		bi += b_stride
 		if owner_grid[b_idx] != nid or landmass_grid[b_idx] != target_lm:
 			continue
 		var bx: int = b_idx % sim_width
@@ -1375,10 +1400,10 @@ func _find_coastal_landing_on_landmass(target: Vector2i, target_lm: int, preferr
 		var dy: int = yy - target.y
 		var d2: float = float(dx * dx + dy * dy)
 		if preferred_owner >= 0 and owner_grid[idx] == preferred_owner:
-			if d2 < best_pref_d2:
+			if d2 < best_pref_d2 and sea_pathfinder.find_nearest_nav_cell(Vector2i(xx, yy), 2).x >= 0:
 				best_pref_d2 = d2
 				best_pref = Vector2i(xx, yy)
-		if d2 < best_any_d2:
+		if d2 < best_any_d2 and sea_pathfinder.find_nearest_nav_cell(Vector2i(xx, yy), 2).x >= 0:
 			best_any_d2 = d2
 			best_any = Vector2i(xx, yy)
 	return best_pref if best_pref.x >= 0 else best_any
@@ -1707,7 +1732,7 @@ func _step_port_trade_spawning() -> void:
 
 	var spawned_this_tick := 0
 	for sid: int in structures.keys():
-		if global_trade >= MAX_ACTIVE_TRADE_SHIPS or spawned_this_tick >= 2:
+		if global_trade >= MAX_ACTIVE_TRADE_SHIPS or spawned_this_tick >= 1:
 			break
 		var port: StructureData = structures[sid]
 		if port.type != StructureData.TYPE_PORT or port.level <= 0:
@@ -2010,6 +2035,7 @@ func _step_warship_ai(ship: ShipUnit) -> void:
 		and current_tick - ship.last_manual_order_tick >= 48
 		and ship.hp <= ship.max_hp * 0.75
 		and (best_tgt == null or best_tgt.kind == ShipUnit.KIND_TRADE)
+		and ((current_tick + ship.id) % 12 == 0)
 	):
 		var rep_route: Dictionary = _find_nearest_port_route_for_ship(ship.position, ship.nation_id)
 		if not rep_route.is_empty():
@@ -2119,17 +2145,21 @@ func _assign_warship_patrol_wp(ship: ShipUnit) -> void:
 func _is_water_segment_clear(a: Vector2, b: Vector2) -> bool:
 	var dist: float = a.distance_to(b)
 	var steps: int = maxi(4, int(ceil(dist / 0.5)))
+	var inv_s: float = 1.0 / maxf(sim_scale, 0.25)
 	for i in range(1, steps + 1):
 		var pt: Vector2 = a.lerp(b, float(i) / float(steps))
 		if not sea_pathfinder.is_world_pos_navigable(pt):
 			return false
-		var sim_pt := world_to_sim(pt)
-		if get_terrain_at(sim_pt.x, sim_pt.y) != T_OCEAN:
+		var sx: int = clampi(int(floor(pt.x * inv_s)), 0, sim_width - 1)
+		var sy: int = clampi(int(floor(pt.y * inv_s)), 0, sim_height - 1)
+		if terrain_grid[sy * sim_width + sx] != T_OCEAN:
 			return false
-		for pad: Vector2 in [Vector2(0.15, 0.0), Vector2(-0.15, 0.0), Vector2(0.0, 0.15), Vector2(0.0, -0.15)]:
-			var p_sim := world_to_sim(pt + pad)
-			if get_terrain_at(p_sim.x, p_sim.y) != T_OCEAN:
-				return false
+		var px_p: int = clampi(int(floor((pt.x + 0.15) * inv_s)), 0, sim_width - 1)
+		var px_m: int = clampi(int(floor((pt.x - 0.15) * inv_s)), 0, sim_width - 1)
+		var py_p: int = clampi(int(floor((pt.y + 0.15) * inv_s)), 0, sim_height - 1)
+		var py_m: int = clampi(int(floor((pt.y - 0.15) * inv_s)), 0, sim_height - 1)
+		if terrain_grid[sy * sim_width + px_p] != T_OCEAN or terrain_grid[sy * sim_width + px_m] != T_OCEAN or terrain_grid[py_p * sim_width + sx] != T_OCEAN or terrain_grid[py_m * sim_width + sx] != T_OCEAN:
+			return false
 	return true
 
 

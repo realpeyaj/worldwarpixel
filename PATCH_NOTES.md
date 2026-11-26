@@ -1,5 +1,10 @@
 # World War Pixel — Patch Notes
 
+## v1.3.1 — Freeze & Stutter Performance Fix
+- **Hierarchical Ocean Pathfinding & Route Cache**: Replaced slow flat-grid pathfinding with native C++ `AStarGrid2D` coarse routing + local fine stitching and bidirectional route caching, eliminating multi-second mid-game freezes during Port trade spawning and sea invasions.
+- **Precomputed Coastlines & Late-Game Border Caps**: Precomputed continent coastline lookup tables at startup and capped late-game border sampling so large 24-nation matches stay smooth without periodic lag spikes.
+- **UI & Map Sync Throttling**: Coalesced rapid HUD/diplomacy updates, cached tinted structure icons, throttled map texture uploads to 30 Hz, and skipped redundant idle threat overlay redraws.
+
 ## v1.3.0 — Map-Only Home Hub, Dedicated Pages, 8-Tier Rankings, Allied Trade & Naval Raiding
 - **Clean Map-Only Home Screen & Dedicated Pages**: Removed home boxes and in-game notes so the live Earth map shines directly behind the floating title and **Singleplayer / Multiplayer** hero buttons, with corner **Profile**, **Leaderboard**, **Settings**, and **Quit** controls plus full dedicated pages for Singleplayer (up to **23 AI opponents**), Multiplayer, Settings, Leaderboard, and Profile Management.
 - **No Auto-Spread Spawn & Explore Rebalance**: Nations now spawn as a compact, clean circular territory and expand strictly on your manual commands (or AI decisions); neutral land exploration now consumes more troops (`1.85×`) for deeper strategic pacing.

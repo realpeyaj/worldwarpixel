@@ -10,9 +10,15 @@ const DIR_COSTS := [1.0, 1.0, 1.0, 1.0, 1.41421356, 1.41421356, 1.41421356, 1.41
 
 var nav_width: int = 1024
 var nav_height: int = 512
+var _coarse_w: int = 256
+var _coarse_h: int = 128
 var _world_scale: float = 2.0
 var _sim_shift: int = 0
 var nav_grid: PackedByteArray = PackedByteArray()
+var _coarse_astar: AStarGrid2D = null
+var _fine_astar: AStarGrid2D = null
+var _coarse_rep_x: PackedInt32Array = PackedInt32Array()
+var _coarse_rep_y: PackedInt32Array = PackedInt32Array()
 var _route_cache: Dictionary = {}
 var _trade_route_cache: Dictionary = {}
 var _g_cost: PackedFloat32Array = PackedFloat32Array()
@@ -27,6 +33,8 @@ var _stamp_id: int = 0
 func load_nav_grid(path: String, w: int = 1024, h: int = 512, sim_w: int = 2048) -> bool:
 	nav_width = w
 	nav_height = h
+	_coarse_w = maxi(1, w >> 2)
+	_coarse_h = maxi(1, h >> 2)
 	_world_scale = 2048.0 / float(maxi(w, 1))
 	_sim_shift = 1 if sim_w >= w * 2 else 0
 	var f := FileAccess.open(path, FileAccess.READ)
@@ -38,7 +46,97 @@ func load_nav_grid(path: String, w: int = 1024, h: int = 512, sim_w: int = 2048)
 	_route_cache.clear()
 	_trade_route_cache.clear()
 	_ensure_scratch_buffers(w * h)
-	return nav_grid.size() == w * h
+	if nav_grid.size() != w * h:
+		return false
+	_build_astar_grids()
+	return true
+
+
+func _build_astar_grids() -> void:
+	_coarse_astar = AStarGrid2D.new()
+	_coarse_astar.region = Rect2i(0, 0, _coarse_w, _coarse_h)
+	_coarse_astar.cell_size = Vector2(_world_scale * 4.0, _world_scale * 4.0)
+	_coarse_astar.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES
+	_coarse_astar.default_compute_heuristic = AStarGrid2D.HEURISTIC_OCTILE
+	_coarse_astar.default_estimate_heuristic = AStarGrid2D.HEURISTIC_OCTILE
+	_coarse_astar.jumping_enabled = false
+	_coarse_astar.update()
+	_coarse_rep_x.resize(_coarse_w * _coarse_h)
+	_coarse_rep_x.fill(-1)
+	_coarse_rep_y.resize(_coarse_w * _coarse_h)
+	_coarse_rep_y.fill(-1)
+	for cy in range(_coarse_h):
+		var y_base: int = cy * 4
+		var c_row: int = cy * _coarse_w
+		for cx in range(_coarse_w):
+			var x_base: int = cx * 4
+			var has_water := false
+			var has_coastal := false
+			var bx := -1
+			var by := -1
+			var best_s := -999
+			for dy in range(4):
+				var py: int = y_base + dy
+				if py >= nav_height:
+					continue
+				var row_off: int = py * nav_width + x_base
+				for dx in range(4):
+					var px: int = x_base + dx
+					if px >= nav_width:
+						continue
+					var v: int = nav_grid[row_off + dx]
+					if v > 0:
+						has_water = true
+						var sc: int = v * 10 - absi(dx - 1) - absi(dy - 1)
+						if sc > best_s:
+							best_s = sc
+							bx = px
+							by = py
+					if v < 2:
+						has_coastal = true
+			if not has_water:
+				_coarse_astar.set_point_solid(Vector2i(cx, cy), true)
+			else:
+				_coarse_rep_x[c_row + cx] = bx
+				_coarse_rep_y[c_row + cx] = by
+				if has_coastal:
+					_coarse_astar.set_point_weight_scale(Vector2i(cx, cy), 1.85)
+
+	_fine_astar = null
+	_ensure_fine_astar()
+
+
+func _ensure_fine_astar() -> AStarGrid2D:
+	if _fine_astar != null:
+		return _fine_astar
+	_fine_astar = AStarGrid2D.new()
+	_fine_astar.region = Rect2i(0, 0, nav_width, nav_height)
+	_fine_astar.cell_size = Vector2(_world_scale, _world_scale)
+	_fine_astar.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES
+	_fine_astar.default_compute_heuristic = AStarGrid2D.HEURISTIC_OCTILE
+	_fine_astar.default_estimate_heuristic = AStarGrid2D.HEURISTIC_OCTILE
+	_fine_astar.jumping_enabled = false
+	_fine_astar.update()
+	for y in range(nav_height):
+		var row_off: int = y * nav_width
+		var x := 0
+		while x < nav_width:
+			var v: int = nav_grid[row_off + x]
+			if v == 0:
+				var x0: int = x
+				x += 1
+				while x < nav_width and nav_grid[row_off + x] == 0:
+					x += 1
+				_fine_astar.fill_solid_region(Rect2i(x0, y, x - x0, 1), true)
+			elif v == 1:
+				var x0: int = x
+				x += 1
+				while x < nav_width and nav_grid[row_off + x] == 1:
+					x += 1
+				_fine_astar.fill_weight_scale_region(Rect2i(x0, y, x - x0, 1), 1.85)
+			else:
+				x += 1
+	return _fine_astar
 
 
 func _ensure_scratch_buffers(total_cells: int) -> void:
@@ -102,7 +200,143 @@ func find_path(start_nav: Vector2i, end_nav: Vector2i) -> PackedVector2Array:
 	var cache_key: int = (start_idx << 20) | end_idx
 	if _route_cache.has(cache_key):
 		return _route_cache[cache_key]
+	var rev_key: int = (end_idx << 20) | start_idx
+	if _route_cache.has(rev_key):
+		var rev_src: PackedVector2Array = _route_cache[rev_key]
+		var rev_out := PackedVector2Array()
+		rev_out.resize(rev_src.size())
+		for i in range(rev_src.size()):
+			rev_out[i] = rev_src[rev_src.size() - 1 - i]
+		_cache_route(cache_key, rev_out)
+		return rev_out
 
+	if absi(start_nav.x - end_nav.x) <= 48 and absi(start_nav.y - end_nav.y) <= 48:
+		if _nav_line_clear(start_nav, end_nav):
+			var direct := PackedVector2Array([nav_to_world(start_nav), nav_to_world(end_nav)])
+			_cache_route(cache_key, direct)
+			return direct
+		var near_cells: Array[Vector2i] = _run_local_fine_astar(start_nav, end_nav, 18)
+		if not near_cells.is_empty():
+			var near_out := _collapse_cells_to_world(near_cells)
+			_cache_route(cache_key, near_out)
+			return near_out
+
+	var c_start := Vector2i(clampi(start_nav.x >> 2, 0, _coarse_w - 1), clampi(start_nav.y >> 2, 0, _coarse_h - 1))
+	var c_end := Vector2i(clampi(end_nav.x >> 2, 0, _coarse_w - 1), clampi(end_nav.y >> 2, 0, _coarse_h - 1))
+	var temp_blocked: Array[Vector2i] = []
+	for _retry in range(2):
+		var c_path: Array[Vector2i] = _coarse_astar.get_id_path(c_start, c_end)
+		if c_path.is_empty():
+			break
+
+		var anchors: Array[Vector2i] = [start_nav]
+		var anchor_coarse: Array[Vector2i] = [c_start]
+		for i in range(1, c_path.size() - 1):
+			var cp: Vector2i = c_path[i]
+			var c_idx: int = cp.y * _coarse_w + cp.x
+			var rx: int = _coarse_rep_x[c_idx]
+			var ry: int = _coarse_rep_y[c_idx]
+			if rx >= 0 and ry >= 0:
+				var pt := Vector2i(rx, ry)
+				if pt != anchors[anchors.size() - 1] and pt != end_nav:
+					anchors.append(pt)
+					anchor_coarse.append(cp)
+		if end_nav != anchors[anchors.size() - 1]:
+			anchors.append(end_nav)
+			anchor_coarse.append(c_end)
+
+		var out := PackedVector2Array([nav_to_world(anchors[0])])
+		var stitch_ok := true
+		var fail_a := Vector2i(-1, -1)
+		var fail_b := Vector2i(-1, -1)
+		for i in range(anchors.size() - 1):
+			var a: Vector2i = anchors[i]
+			var b: Vector2i = anchors[i + 1]
+			if _nav_line_clear(a, b):
+				out.append(nav_to_world(b))
+			else:
+				var seg_cells: Array[Vector2i] = _run_local_fine_astar(a, b, 14)
+				if seg_cells.is_empty():
+					stitch_ok = false
+					fail_a = anchor_coarse[i]
+					fail_b = anchor_coarse[i + 1]
+					break
+				var seg_w: PackedVector2Array = _collapse_cells_to_world(seg_cells)
+				for si in range(1, seg_w.size()):
+					out.append(seg_w[si])
+
+		if stitch_ok and out.size() >= 2:
+			for bc: Vector2i in temp_blocked:
+				_coarse_astar.set_point_solid(bc, false)
+			_cache_route(cache_key, out)
+			return out
+
+		var blocked_any := false
+		for bc: Vector2i in [fail_a, fail_b]:
+			if bc.x >= 0 and bc != c_start and bc != c_end and not _coarse_astar.is_point_solid(bc):
+				_coarse_astar.set_point_solid(bc, true)
+				temp_blocked.append(bc)
+				blocked_any = true
+		if not blocked_any:
+			break
+
+	for bc: Vector2i in temp_blocked:
+		_coarse_astar.set_point_solid(bc, false)
+
+	var fine_cells: Array[Vector2i] = _ensure_fine_astar().get_id_path(start_nav, end_nav)
+	var fallback := _collapse_cells_to_world(fine_cells) if not fine_cells.is_empty() else PackedVector2Array()
+	_cache_route(cache_key, fallback)
+	return fallback
+
+
+func _cache_route(key: int, route: PackedVector2Array) -> void:
+	if _route_cache.size() > 4096:
+		_route_cache.clear()
+	_route_cache[key] = route
+
+
+func _nav_line_clear(a: Vector2i, b: Vector2i) -> bool:
+	var dx: int = b.x - a.x
+	var dy: int = b.y - a.y
+	var steps: int = maxi(absi(dx), absi(dy))
+	if steps == 0:
+		return is_navigable(a.x, a.y)
+	var px: int = a.x
+	var py: int = a.y
+	for s in range(1, steps + 1):
+		var nx: int = a.x + int(round(float(dx * s) / float(steps)))
+		var ny: int = a.y + int(round(float(dy * s) / float(steps)))
+		if not is_navigable(nx, ny):
+			return false
+		if nx != px and ny != py:
+			if not is_navigable(px, ny) or not is_navigable(nx, py):
+				return false
+		px = nx
+		py = ny
+
+	var wa: Vector2 = nav_to_world(a)
+	var wb: Vector2 = nav_to_world(b)
+	var w_vec: Vector2 = wb - wa
+	var w_dist: float = w_vec.length()
+	if w_dist > 0.5:
+		var perp := Vector2(-w_vec.y, w_vec.x) / w_dist * 0.5
+		var w_steps: int = maxi(2, int(ceil(w_dist)))
+		for s in range(1, w_steps):
+			var pt: Vector2 = wa.lerp(wb, float(s) / float(w_steps))
+			if not is_world_pos_navigable(pt):
+				return false
+			if not is_world_pos_navigable(pt + perp) or not is_world_pos_navigable(pt - perp):
+				return false
+	return true
+
+
+func _run_local_fine_astar(a: Vector2i, b: Vector2i, pad: int) -> Array[Vector2i]:
+	var x0: int = maxi(0, mini(a.x, b.x) - pad)
+	var y0: int = maxi(0, mini(a.y, b.y) - pad)
+	var x1: int = mini(nav_width - 1, maxi(a.x, b.x) + pad)
+	var y1: int = mini(nav_height - 1, maxi(a.y, b.y) + pad)
+	var start_idx: int = a.y * nav_width + a.x
+	var end_idx: int = b.y * nav_width + b.x
 	var total_cells: int = nav_width * nav_height
 	_ensure_scratch_buffers(total_cells)
 	_stamp_id += 1
@@ -117,7 +351,7 @@ func find_path(start_nav: Vector2i, end_nav: Vector2i) -> PackedVector2Array:
 	_seen_stamp[start_idx] = sid
 	_g_cost[start_idx] = 0.0
 	_parent[start_idx] = -1
-	_heap_f.append(_octile(start_nav.x, start_nav.y, end_nav.x, end_nav.y))
+	_heap_f.append(_octile(a.x, a.y, b.x, b.y))
 	_heap_idx.append(start_idx)
 
 	var found := false
@@ -148,9 +382,10 @@ func find_path(start_nav: Vector2i, end_nav: Vector2i) -> PackedVector2Array:
 			var d: Vector2i = DIRS[d_i]
 			var nx: int = cx + d.x
 			var ny: int = cy + d.y
+			if nx < x0 or nx > x1 or ny < y0 or ny > y1:
+				continue
 			if not is_navigable(nx, ny):
 				continue
-			# Strict corner-cut guard: never slice diagonally past any land cell corner
 			if d.x != 0 and d.y != 0:
 				if not is_navigable(cx + d.x, cy) or not is_navigable(cx, cy + d.y):
 					continue
@@ -163,13 +398,13 @@ func find_path(start_nav: Vector2i, end_nav: Vector2i) -> PackedVector2Array:
 				_seen_stamp[n_idx] = sid
 				_g_cost[n_idx] = new_g
 				_parent[n_idx] = curr
-				var f: float = new_g + _octile(nx, ny, end_nav.x, end_nav.y) * 1.16
+				var f: float = new_g + _octile(nx, ny, b.x, b.y) * 1.16
 				_heap_idx.append(n_idx)
 				_heap_f.append(f)
 				_sift_up(_heap_f, _heap_idx, _heap_idx.size() - 1)
 
 	if not found:
-		return PackedVector2Array()
+		return []
 
 	var raw_cells: Array[Vector2i] = []
 	var trace: int = end_idx
@@ -179,7 +414,10 @@ func find_path(start_nav: Vector2i, end_nav: Vector2i) -> PackedVector2Array:
 			break
 		trace = _parent[trace]
 	raw_cells.reverse()
+	return raw_cells
 
+
+func _collapse_cells_to_world(raw_cells: Array[Vector2i]) -> PackedVector2Array:
 	# Collapse strictly collinear steps so every segment stays strictly over navigable water
 	var out := PackedVector2Array()
 	if raw_cells.is_empty():
@@ -192,10 +430,6 @@ func find_path(start_nav: Vector2i, end_nav: Vector2i) -> PackedVector2Array:
 			out.append(nav_to_world(raw_cells[i]))
 	if raw_cells.size() > 1:
 		out.append(nav_to_world(raw_cells[raw_cells.size() - 1]))
-
-	if _route_cache.size() > 1024:
-		_route_cache.clear()
-	_route_cache[cache_key] = out
 	return out
 
 
@@ -218,7 +452,7 @@ func find_trade_path(start_nav: Vector2i, end_nav: Vector2i, lane_id: int = 0) -
 
 	var direct_dist: float = Vector2(end_nav - start_nav).length()
 	if direct_dist < 10.0:
-		if _trade_route_cache.size() > 1024:
+		if _trade_route_cache.size() > 4096:
 			_trade_route_cache.clear()
 		_trade_route_cache[cache_key] = base_route
 		return base_route
@@ -291,14 +525,14 @@ func find_trade_path(start_nav: Vector2i, end_nav: Vector2i, lane_id: int = 0) -
 			final_route = base_route
 			break
 
-	if _trade_route_cache.size() > 1024:
+	if _trade_route_cache.size() > 4096:
 		_trade_route_cache.clear()
 	_trade_route_cache[cache_key] = final_route
 	return final_route
 
 
 func _segment_navigable(a: Vector2, b: Vector2) -> bool:
-	var steps: int = maxi(2, int(ceil(a.distance_to(b) / 0.5)))
+	var steps: int = maxi(2, int(ceil(a.distance_to(b))))
 	for i in range(steps + 1):
 		if not is_world_pos_navigable(a.lerp(b, float(i) / float(steps))):
 			return false

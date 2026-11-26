@@ -119,8 +119,12 @@ var _missile_mode: String = ""
 var _lb_pool: Array[Dictionary] = []
 var _lb_dirty: bool = false
 var _exp_dirty: bool = false
+var _ui_dirty: bool = false
 var _lb_timer: float = 0.0
 var _exp_timer: float = 0.0
+var _ui_dirty_timer: float = 0.0
+var _had_threat_markers: bool = false
+var _st_icon_cache: Dictionary = {}
 var _last_dock_cost_key: int = -1
 var _last_dock_afford_mask: int = -1
 var _current_room_code: String = ""
@@ -1633,6 +1637,18 @@ func _process(delta: float) -> void:
 		_toast_timer -= delta
 		if _toast_timer <= 0.0:
 			toast_panel.visible = false
+	if _ui_dirty:
+		_ui_dirty_timer += delta
+		if _ui_dirty_timer >= 0.15:
+			_ui_dirty_timer = 0.0
+			_ui_dirty = false
+			refresh_player_bar()
+			mark_leaderboard_dirty()
+			mark_expansions_dirty()
+			if _selected_structure_id > 0 and structure_panel.visible:
+				show_selected_structure(_selected_structure_id)
+			if _selected_dip_nation_id > 0 and diplomacy_panel.visible:
+				show_diplomacy_panel(_selected_dip_nation_id)
 	if _lb_dirty:
 		_lb_timer += delta
 		if _lb_timer >= 0.25:
@@ -2388,6 +2404,10 @@ func mark_expansions_dirty() -> void:
 	_exp_dirty = true
 
 
+func mark_ui_dirty() -> void:
+	_ui_dirty = true
+
+
 func refresh_all() -> void:
 	if _world_state == null:
 		return
@@ -2583,7 +2603,10 @@ func show_selected_structure(sid: int) -> void:
 		StructureData.TYPE_SAM_LAUNCHER:
 			base_t = _tex_sam
 			mask_t = _tex_sam_mask
-	st_icon.texture = _build_tinted_icon(base_t, mask_t, st_col)
+	var st_ic_key: String = "%s_%s" % [st.type, st_col.to_html(false)]
+	if not _st_icon_cache.has(st_ic_key):
+		_st_icon_cache[st_ic_key] = _build_tinted_icon(base_t, mask_t, st_col)
+	st_icon.texture = _st_icon_cache[st_ic_key] as Texture2D
 	var max_lvl: int = st.get_max_level()
 	st_title.text = "%s (Lv.%d / %d)" % [st.get_display_name(), st.level, max_lvl]
 	st_sub.text = "Owner: %s" % owner_name
@@ -3686,7 +3709,9 @@ func _refresh_offscreen_threats() -> void:
 	_threat_markers.clear()
 	if _world_state == null or _world_state.match_phase != WorldState.PHASE_PLAYING or menu_overlay.visible:
 		_threat_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		_threat_overlay.queue_redraw()
+		if _had_threat_markers:
+			_had_threat_markers = false
+			_threat_overlay.queue_redraw()
 		return
 	var vp_rect: Rect2 = get_viewport().get_visible_rect()
 	var xform: Transform2D = get_viewport().get_canvas_transform()
@@ -3718,8 +3743,11 @@ func _refresh_offscreen_threats() -> void:
 		_threat_markers.append({"screen": edge_pos, "dir": dir, "world": wp, "label": item["label"]})
 		if _threat_markers.size() >= 4:
 			break
-	_threat_overlay.mouse_filter = Control.MOUSE_FILTER_PASS if not _threat_markers.is_empty() else Control.MOUSE_FILTER_IGNORE
-	_threat_overlay.queue_redraw()
+	var has_now: bool = not _threat_markers.is_empty()
+	_threat_overlay.mouse_filter = Control.MOUSE_FILTER_PASS if has_now else Control.MOUSE_FILTER_IGNORE
+	if has_now or _had_threat_markers:
+		_had_threat_markers = has_now
+		_threat_overlay.queue_redraw()
 
 
 func _on_threat_overlay_draw() -> void:
