@@ -1,5 +1,12 @@
 # World War Pixel — Patch Notes
 
+## v1.3.3 — Responsive Input, Rounded UI, Rebindable Controls & Lobby Polish
+- **Idle Mobilization Troop Buff & Warship Gun Nerf**: Standing troop regeneration ramps up to **+55%** when peaceful/idle (resets during wars or exploration), while Warship cannon damage is rebalanced to `16` base (`+25%` per level).
+- **Deep-Zoom Mouse Responsiveness Fix**: Fixed fullscreen threat edge overlay intercepting mouse clicks/hover while zoomed in, added a 20s expiry on stale threat pings, clamped structure pick radius at high zoom, and auto-cleared stuck camera drags.
+- **Rounded Beveled UI, Exo 2 Font & Smartphone Signal Bars**: Upgraded panels, pill progress bars, buttons, and map labels with rounded beveled styling and **Exo 2** typography, replacing the Wi-Fi badge with crisp 4-bar mobile signal indicators.
+- **Quit to Home & Rebindable Controls**: Added a dedicated **Quit to Home** button in the in-game menu and post-match screen (alongside **Exit Game**), and added full keybind customization (`Settings → Controls & Keybinds`) for building, nuke, and camera pan controls.
+- **Multiplayer Create Room Page, Duplicate Join Guard & Host Disband**: Added a dedicated **Create Room** configuration page, blocked rapid spam-click duplicate joins on both client and server, and auto-disbanded lobbies/spawning rooms with a clear notification when the host leaves.
+
 ## v1.3.2 — MIRV Coverage, Fallout Balance, AI Army Cost & Coastal Ports
 - **Full-Territory MIRV Targeting & Preview**: Replaced corner-biased farthest-point selection and the 12-circle northern-edge hover preview with a shared uniform 2D coverage lattice + structure/capital anchors (`compute_mirv_targets`, up to 72 warheads) so both the live targeting preview and launched MIRV strikes blanket the target nation's entire landmass.
 - **Rebalanced Radioactive Fallout Cost**: Removed double-stacking of unclaimed explore and fallout multipliers (`1.85×` × `2.4×` = `4.44×`) on neutral nuclear waste so reclaiming irradiated land remains costly (`2.6×` base / ~`1.4×` explore cost) without wiping out entire armies.

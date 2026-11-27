@@ -17,6 +17,7 @@ signal map_ping_received(from_nation_id: int, from_name: String, team_id: int, c
 signal chat_msg_received(from_nation_id: int, from_name: String, team_id: int, channel: String, text: String)
 signal ping_updated(ping_ms: int)
 signal invite_received(from_name: String, room_code: String)
+signal room_disbanded(room_code: String, reason: String)
 signal disconnected(reason: String)
 signal server_error(message: String)
 
@@ -246,6 +247,14 @@ func _handle_message(msg: Dictionary) -> void:
 
 		"invite_received":
 			invite_received.emit(str(msg.get("from_name", "Friend")), str(msg.get("room_code", "")))
+
+		"room_disbanded":
+			var d_code: String = str(msg.get("room_code", _room_code))
+			var d_reason: String = str(msg.get("reason", "Room was disbanded by the host."))
+			_manual_disconnect = true
+			_in_match = false
+			disconnect_from_server(false)
+			room_disbanded.emit(d_code, d_reason)
 
 		"error":
 			server_error.emit(str(msg.get("message", "Server rejected action.")))

@@ -27,6 +27,8 @@ var troops: float = 1500.0
 var max_troops: float = 3200.0
 var troops_per_sec: float = 42.0
 var effective_troops_per_sec: float = 42.0
+var idle_ticks: int = 0
+var idle_regen_mult: float = 1.0
 var nukes_launched: int = 0
 var nukes_intercepted: int = 0
 

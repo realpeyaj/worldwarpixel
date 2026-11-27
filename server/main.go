@@ -134,11 +134,17 @@ func newServerMux(rm *RoomManager, store *MatchStore, acct ...*AccountService) h
 		}
 
 		var slot *PlayerSlot
+		var connID uint64
 		var reconnected bool
+		closeFn := func() { _ = conn.Close() }
 		if spectate {
 			slot, err = room.JoinSpectator(playerName, sendFn)
 		} else {
-			slot, reconnected, err = room.Join(playerName, token, sendFn)
+			acctUser := ""
+			if authedRec != nil {
+				acctUser = authedRec.Username
+			}
+			slot, connID, reconnected, err = room.JoinWithSession(playerName, token, acctUser, sendFn, closeFn)
 		}
 		if err != nil {
 			_ = conn.WriteMessage(websocket.TextMessage, mustJSON(map[string]any{"type": "error", "message": err.Error()}))
@@ -206,7 +212,7 @@ func newServerMux(rm *RoomManager, store *MatchStore, acct ...*AccountService) h
 			room.DetachSpectator(slot)
 		} else {
 			room.Detach(slot.NationID, func(p *PlayerSlot) bool {
-				return p == slot
+				return p == slot && p.connID == connID
 			})
 		}
 	})

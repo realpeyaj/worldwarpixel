@@ -229,7 +229,7 @@ func _handle_map_click(world_pos: Vector2, cell: Vector2i, is_double_click: bool
 			build_mode_cleared.emit()
 		return
 
-	var pick_r: float = 12.0 / maxf(camera.zoom.x, 0.5)
+	var pick_r: float = clampf(12.0 / maxf(camera.zoom.x, 0.5), 3.0, 24.0)
 	if _selected_ship_id > 0 and _world_state.get_terrain_at(cell.x, cell.y) == WorldState.T_OCEAN:
 		var sel_sh: ShipUnit = _world_state.ships.get(_selected_ship_id, null)
 		if sel_sh != null and sel_sh.active and sel_sh.kind == ShipUnit.KIND_WARSHIP:

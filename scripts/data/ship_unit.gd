@@ -76,4 +76,4 @@ func add_xp(points: int) -> bool:
 
 
 func get_shell_damage() -> float:
-	return 26.0 * (1.0 + 0.35 * float(ship_level - 1))
+	return 16.0 * (1.0 + 0.25 * float(ship_level - 1))

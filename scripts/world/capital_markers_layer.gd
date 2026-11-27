@@ -207,7 +207,7 @@ func _draw() -> void:
 	var z: float = _camera.zoom.x if _camera != null else 1.0
 	var icon_scale: float = 1.0 / maxf(z, 1.0)
 	var inv_z: float = icon_scale
-	var font: Font = ThemeDB.fallback_font
+	var font: Font = ThemeFactory.get_ui_font()
 
 	# 1. Draw subtle thin Factory roads on land and straight low-opacity pixel Bridges ONLY over water spans
 	for link: Dictionary in _world_state.factory_links:

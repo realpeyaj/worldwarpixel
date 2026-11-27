@@ -22,6 +22,17 @@ var _saved_pos: Vector2 = Vector2(1024.0, 512.0)
 var _saved_zoom: float = 1.0
 var _has_saved_view: bool = false
 var _bookmarks: Dictionary = {} # int slot (1..4) -> {"pos": Vector2, "zoom": float}
+var pan_key_up: int = KEY_W
+var pan_key_down: int = KEY_S
+var pan_key_left: int = KEY_A
+var pan_key_right: int = KEY_D
+
+
+func set_pan_keybinds(binds: Dictionary) -> void:
+	pan_key_up = int(binds.get("cam_up", KEY_W))
+	pan_key_down = int(binds.get("cam_down", KEY_S))
+	pan_key_left = int(binds.get("cam_left", KEY_A))
+	pan_key_right = int(binds.get("cam_right", KEY_D))
 
 
 func _ready() -> void:
@@ -121,14 +132,18 @@ func _process(delta: float) -> void:
 		_clamp_current_pos()
 		return
 
+	if _is_dragging and _drag_button > 0 and not Input.is_mouse_button_pressed(_drag_button):
+		_is_dragging = false
+		_drag_button = 0
+
 	var dir := Vector2.ZERO
-	if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
+	if Input.is_key_pressed(pan_key_left) or Input.is_key_pressed(KEY_LEFT):
 		dir.x -= 1.0
-	if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
+	if Input.is_key_pressed(pan_key_right) or Input.is_key_pressed(KEY_RIGHT):
 		dir.x += 1.0
-	if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
+	if Input.is_key_pressed(pan_key_up) or Input.is_key_pressed(KEY_UP):
 		dir.y -= 1.0
-	if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
+	if Input.is_key_pressed(pan_key_down) or Input.is_key_pressed(KEY_DOWN):
 		dir.y += 1.0
 
 	if dir != Vector2.ZERO:

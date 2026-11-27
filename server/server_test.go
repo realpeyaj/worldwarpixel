@@ -574,3 +574,60 @@ func TestLeaderboardReplaysModifiersChatSpectateAndChangePassword(t *testing.T) 
 		t.Fatalf("expected replay payload for %s, got status=%d body=%v", matchID, stRep, repBody)
 	}
 }
+
+func TestDuplicateJoinPreventedAndHostLeaveDisbandsRoom(t *testing.T) {
+	store, err := NewMatchStore(t.Context(), "")
+	if err != nil {
+		t.Fatalf("NewMatchStore failed: %v", err)
+	}
+	acct := NewAccountService(store)
+	rm := NewRoomManager(store)
+	defer rm.StopAll()
+
+	srv := httptest.NewServer(newServerMux(rm, store, acct))
+	defer srv.Close()
+
+	// 1. Spam-joining the same room with same guest name or authenticated account does not create duplicate slots
+	rmTest, _ := rm.CreateOrGetRoom("SPAM1")
+	s1, cid1, _, err := rmTest.JoinWithSession("SpamUser", "", "SpamUser", func([]byte) {}, nil)
+	if err != nil || s1 == nil || cid1 == 0 {
+		t.Fatalf("first join failed: %v", err)
+	}
+	s2, cid2, reconn, err := rmTest.JoinWithSession("SpamUser", "", "SpamUser", func([]byte) {}, nil)
+	if err != nil || !reconn || s2 != s1 || cid2 == cid1 {
+		t.Fatalf("expected second join to deduplicate onto same slot: reconn=%v same=%v cid1=%d cid2=%d err=%v", reconn, s2 == s1, cid1, cid2, err)
+	}
+	rmTest.mu.Lock()
+	slotCount := len(rmTest.Players)
+	rmTest.mu.Unlock()
+	if slotCount != 1 {
+		t.Fatalf("expected 1 player slot after duplicate join, got %d", slotCount)
+	}
+	rm.RemoveRoom("SPAM1")
+
+	// 2. Host disconnect in LOBBY disbands room with room_disbanded notification and deletes room
+	wsBase := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws?room=DISB1&name="
+	hostConn, _, err := websocket.DefaultDialer.Dial(wsBase+"LeaderOne", nil)
+	if err != nil {
+		t.Fatalf("dial host failed: %v", err)
+	}
+	defer hostConn.Close()
+	_ = readMsgType(t, hostConn, "connected")
+
+	guestConn, _, err := websocket.DefaultDialer.Dial(wsBase+"GuestTwo", nil)
+	if err != nil {
+		t.Fatalf("dial guest failed: %v", err)
+	}
+	defer guestConn.Close()
+	_ = readMsgType(t, guestConn, "connected")
+
+	_ = hostConn.Close()
+	disb := readMsgType(t, guestConn, "room_disbanded")
+	if disb["room_code"] != "DISB1" || !strings.Contains(strings.ToLower(disb["reason"].(string)), "disbanded") {
+		t.Fatalf("expected room_disbanded payload with reason, got %v", disb)
+	}
+	time.Sleep(80 * time.Millisecond)
+	if rm.RoomCount() != 0 {
+		t.Fatalf("expected disbanded room removed from RoomManager, still have %d", rm.RoomCount())
+	}
+}

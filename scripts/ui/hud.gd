@@ -52,11 +52,47 @@ signal friend_request_respond_requested(username: String, accept: bool)
 signal friend_remove_requested(username: String)
 signal friends_refresh_requested
 signal menu_visibility_changed(is_open: bool)
+signal return_to_home_requested
+signal keybinds_changed(binds: Dictionary)
 signal quit_requested
 
 const MAX_LEADERBOARD_ROWS := 7
 const FRIENDS_SAVE_PATH := "user://friends.cfg"
 const PROFILE_SAVE_PATH := "user://player_profile.cfg"
+const DEFAULT_KEYBINDS := {
+	"build_town": KEY_1,
+	"build_factory": KEY_2,
+	"build_port": KEY_3,
+	"build_defense": KEY_4,
+	"build_silo": KEY_5,
+	"build_sam": KEY_6,
+	"build_warship": KEY_7,
+	"missile_atom": KEY_8,
+	"missile_hydrogen": KEY_9,
+	"missile_mirv": KEY_F,
+	"snap_capital": KEY_SPACE,
+	"cam_up": KEY_W,
+	"cam_down": KEY_S,
+	"cam_left": KEY_A,
+	"cam_right": KEY_D,
+}
+const KEYBIND_LABELS := [
+	["build_town", "Build Town"],
+	["build_factory", "Build Factory"],
+	["build_port", "Build Port"],
+	["build_defense", "Build Defense Post"],
+	["build_silo", "Build Missile Silo"],
+	["build_sam", "Build SAM Launcher"],
+	["build_warship", "Build Warship"],
+	["missile_atom", "Select Atom Bomb"],
+	["missile_hydrogen", "Select H-Bomb"],
+	["missile_mirv", "Select MIRV"],
+	["snap_capital", "Focus Capital"],
+	["cam_up", "Camera Pan Up"],
+	["cam_down", "Camera Pan Down"],
+	["cam_left", "Camera Pan Left"],
+	["cam_right", "Camera Pan Right"],
+]
 const SERVER_REGIONS := [
 	{"name": "Manila, PH", "url": "ws://151.242.136.18:30041/ws"},
 ]
@@ -209,6 +245,30 @@ var _set_disp_opt: OptionButton
 var _set_scale_opt: OptionButton
 var _set_hotkeys_check: CheckButton
 var _syncing_settings := false
+var _return_home_btn: Button
+var _victory_home_btn: Button
+var _sig_bar_cache: Dictionary = {}
+var _keybinds: Dictionary = DEFAULT_KEYBINDS.duplicate()
+var _rebinding_action: String = ""
+var _keybind_buttons: Dictionary = {}
+var _settings_gen_box: VBoxContainer
+var _settings_ctrl_box: VBoxContainer
+var _settings_tab_gen: Button
+var _settings_tab_ctrl: Button
+var _mp_connecting: bool = false
+var _mp_connect_timer: float = 0.0
+var _mp_qp_btn: Button
+var _create_room_card: PanelContainer
+var _cr_public_chk: CheckBox
+var _cr_team_chk: CheckBox
+var _cr_ai_opt: OptionButton
+var _cr_speed_opt: OptionButton
+var _cr_diff_opt: OptionButton
+var _cr_preset_opt: OptionButton
+var _cr_nonukes_chk: CheckBox
+var _cr_code_edit: LineEdit
+var _cr_launch_btn: Button
+var _pending_create_room_opts: Dictionary = {}
 
 @onready var root_control: Control = $Root
 @onready var top_bar: PanelContainer = $Root/TopBar
@@ -483,7 +543,9 @@ func _ready() -> void:
 	account_back_btn.icon = icon_back_16
 	sp_back_btn.icon = icon_back_16
 	_populate_spawn_controls()
+	_load_keybinds()
 	_setup_extra_hud_panels()
+	_refresh_dock_key_labels()
 	_load_profile()
 	_apply_saved_display_settings()
 	_populate_server_regions()
@@ -541,7 +603,7 @@ func _ready() -> void:
 		if cnt_lbl != null:
 			cnt_lbl.add_theme_font_size_override("font_size", 8)
 
-	ping_icon.texture = _build_tinted_icon(_tex_wifi, null, Color.WHITE, 16, 16)
+	ping_icon.texture = _get_signal_bars_tex(0, Color(0.62, 0.70, 0.80, 0.85))
 	conn_bar_icon.texture = ping_icon.texture
 	update_ping(-1)
 	_sync_hud_chrome_visibility()
@@ -689,15 +751,15 @@ func _ready() -> void:
 	friends_back_btn.pressed.connect(_on_friends_back_pressed)
 	create_room_btn.pressed.connect(func() -> void:
 		AudioManager.play_ui_tap()
-		mp_room_edit.text = ""
-		mp_status_label.text = "Creating Room on %s..." % get_selected_server_name()
-		var cfg: Dictionary = get_spawn_config()
-		save_player_name(str(cfg.get("name", "")))
-		mp_connect_requested.emit(get_mp_server_url(), "", str(cfg.get("name", "Commander")))
+		if _mp_connecting:
+			return
+		_show_menu_page("mp_create")
 	)
 	mp_connect_btn.pressed.connect(func() -> void:
 		AudioManager.play_ui_tap()
 		var code_in: String = mp_room_edit.text.strip_edges().to_upper()
+		if not _begin_mp_connect_guard(code_in):
+			return
 		mp_status_label.text = ("Joining Room %s on %s..." % [code_in, get_selected_server_name()]) if not code_in.is_empty() else ("Creating Room on %s..." % get_selected_server_name())
 		var cfg: Dictionary = get_spawn_config()
 		save_player_name(str(cfg.get("name", "")))
@@ -770,12 +832,15 @@ func _ready() -> void:
 		invite_row.visible = false
 		_refresh_friends_badge()
 		if not _pending_join_invite_code.is_empty():
+			var code_inv: String = _pending_join_invite_code
+			_pending_join_invite_code = ""
+			if not _begin_mp_connect_guard(code_inv):
+				return
 			_show_menu_page("mp_lobby")
-			mp_room_edit.text = _pending_join_invite_code
+			mp_room_edit.text = code_inv
 			var cfg: Dictionary = get_spawn_config()
 			save_player_name(str(cfg.get("name", "")))
-			mp_connect_requested.emit(get_mp_server_url(), _pending_join_invite_code, str(cfg.get("name", "Commander")))
-			_pending_join_invite_code = ""
+			mp_connect_requested.emit(get_mp_server_url(), code_inv, str(cfg.get("name", "Commander")))
 	)
 	dismiss_invite_btn.pressed.connect(func() -> void:
 		AudioManager.play_ui_tap()
@@ -853,12 +918,16 @@ func _ready() -> void:
 
 
 func _show_menu_page(page: String) -> void:
+	_rebinding_action = ""
+	_refresh_keybind_buttons()
 	var is_home: bool = (page == "home")
 	menu_overlay.color = Color(0, 0, 0, 0) if is_home else Color(0.03, 0.05, 0.09, 0.56)
 	home_corners.visible = is_home
 	menu_card.visible = is_home
 	sp_card.visible = (page == "singleplayer")
 	mp_lobby_card.visible = (page == "mp_lobby")
+	if _create_room_card != null:
+		_create_room_card.visible = (page == "mp_create")
 	friends_card.visible = (page == "friends")
 	account_card.visible = (page == "account")
 	if _rankings_card != null:
@@ -932,6 +1001,7 @@ func _apply_ui_variants_and_icons(icon_back_16: ImageTexture, icon_friends_16: I
 	menu_rankings_btn.icon = _make_trophy_icon()
 	menu_audio_btn.icon = _make_gear_icon()
 	audio_btn.icon = icon_audio_16
+	quit_btn.text = "Exit Game"
 
 
 func _style_close_button(btn: Button) -> void:
@@ -1520,6 +1590,40 @@ func bind_world_state(world_state: WorldState) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if _rebinding_action != "" and event is InputEventKey:
+		var kr := event as InputEventKey
+		if kr.pressed and not kr.echo:
+			if kr.keycode == KEY_ESCAPE:
+				_rebinding_action = ""
+				_refresh_keybind_buttons()
+				AudioManager.play_panel_close()
+				get_viewport().set_input_as_handled()
+				return
+			if not (kr.keycode in [KEY_SHIFT, KEY_CTRL, KEY_ALT, KEY_META, KEY_CAPSLOCK]):
+				set_keybind(_rebinding_action, kr.keycode)
+				_rebinding_action = ""
+				_refresh_keybind_buttons()
+				AudioManager.play_ui_tap()
+				get_viewport().set_input_as_handled()
+				return
+		get_viewport().set_input_as_handled()
+		return
+
+	if (
+		not _threat_markers.is_empty()
+		and not menu_overlay.visible
+		and get_viewport().gui_get_hovered_control() == null
+		and event is InputEventMouseButton
+	):
+		var mb_th := event as InputEventMouseButton
+		if mb_th.pressed and mb_th.button_index == MOUSE_BUTTON_LEFT:
+			for mk: Dictionary in _threat_markers:
+				if mb_th.position.distance_to(mk["screen"] as Vector2) <= 22.0:
+					AudioManager.play_ui_tap()
+					camera_focus_requested.emit(mk["world"] as Vector2, 2.2)
+					get_viewport().set_input_as_handled()
+					return
+
 	if event is InputEventKey:
 		var k_any := event as InputEventKey
 		if k_any.pressed and not k_any.echo and k_any.alt_pressed and (k_any.keycode == KEY_ENTER or k_any.keycode == KEY_KP_ENTER):
@@ -1557,7 +1661,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				return
 	if menu_overlay.visible or not _hotkeys_enabled:
 		return
-	if nation_name_edit.has_focus() or menu_name_edit.has_focus() or mp_server_edit.has_focus() or mp_room_edit.has_focus() or friend_name_edit.has_focus() or account_user_edit.has_focus() or account_pass_edit.has_focus():
+	if nation_name_edit.has_focus() or menu_name_edit.has_focus() or mp_server_edit.has_focus() or mp_room_edit.has_focus() or friend_name_edit.has_focus() or account_user_edit.has_focus() or account_pass_edit.has_focus() or (_cr_code_edit != null and _cr_code_edit.has_focus()):
 		return
 	if event is InputEventKey:
 		var ke := event as InputEventKey
@@ -1574,41 +1678,40 @@ func _unhandled_input(event: InputEvent) -> void:
 				camera_bookmark_jump_requested.emit(j_slot)
 				get_viewport().set_input_as_handled()
 				return
-			if ke.keycode == KEY_SPACE or ke.keycode == KEY_HOME:
+			var kc: int = ke.keycode
+			if kc == get_keybind("snap_capital") or kc == KEY_HOME:
 				_snap_camera_to_capital()
 				get_viewport().set_input_as_handled()
-				return
-			match ke.keycode:
-				KEY_1:
-					_select_build_mode(StructureData.TYPE_TOWN)
-					get_viewport().set_input_as_handled()
-				KEY_2:
-					_select_build_mode(StructureData.TYPE_FACTORY)
-					get_viewport().set_input_as_handled()
-				KEY_3:
-					_select_build_mode(StructureData.TYPE_PORT)
-					get_viewport().set_input_as_handled()
-				KEY_4:
-					_select_build_mode(StructureData.TYPE_DEFENSE_POST)
-					get_viewport().set_input_as_handled()
-				KEY_5:
-					_select_build_mode(StructureData.TYPE_MISSILE_SILO)
-					get_viewport().set_input_as_handled()
-				KEY_6:
-					_select_build_mode(StructureData.TYPE_SAM_LAUNCHER)
-					get_viewport().set_input_as_handled()
-				KEY_7:
-					_select_build_mode("warship")
-					get_viewport().set_input_as_handled()
-				KEY_8, KEY_N:
-					_select_missile_mode(MissileUnit.KIND_ATOM)
-					get_viewport().set_input_as_handled()
-				KEY_9, KEY_H:
-					_select_missile_mode(MissileUnit.KIND_HYDROGEN)
-					get_viewport().set_input_as_handled()
-				KEY_F, KEY_0, KEY_M:
-					_select_missile_mode(MissileUnit.KIND_MIRV)
-					get_viewport().set_input_as_handled()
+			elif kc == get_keybind("build_town"):
+				_select_build_mode(StructureData.TYPE_TOWN)
+				get_viewport().set_input_as_handled()
+			elif kc == get_keybind("build_factory"):
+				_select_build_mode(StructureData.TYPE_FACTORY)
+				get_viewport().set_input_as_handled()
+			elif kc == get_keybind("build_port"):
+				_select_build_mode(StructureData.TYPE_PORT)
+				get_viewport().set_input_as_handled()
+			elif kc == get_keybind("build_defense"):
+				_select_build_mode(StructureData.TYPE_DEFENSE_POST)
+				get_viewport().set_input_as_handled()
+			elif kc == get_keybind("build_silo"):
+				_select_build_mode(StructureData.TYPE_MISSILE_SILO)
+				get_viewport().set_input_as_handled()
+			elif kc == get_keybind("build_sam"):
+				_select_build_mode(StructureData.TYPE_SAM_LAUNCHER)
+				get_viewport().set_input_as_handled()
+			elif kc == get_keybind("build_warship"):
+				_select_build_mode("warship")
+				get_viewport().set_input_as_handled()
+			elif kc == get_keybind("missile_atom") or (kc == KEY_N and not _is_key_bound_anywhere(KEY_N)):
+				_select_missile_mode(MissileUnit.KIND_ATOM)
+				get_viewport().set_input_as_handled()
+			elif kc == get_keybind("missile_hydrogen") or (kc == KEY_H and not _is_key_bound_anywhere(KEY_H)):
+				_select_missile_mode(MissileUnit.KIND_HYDROGEN)
+				get_viewport().set_input_as_handled()
+			elif kc == get_keybind("missile_mirv") or ((kc == KEY_0 or kc == KEY_M) and not _is_key_bound_anywhere(kc)):
+				_select_missile_mode(MissileUnit.KIND_MIRV)
+				get_viewport().set_input_as_handled()
 
 
 func _process(delta: float) -> void:
@@ -1633,6 +1736,10 @@ func _process(delta: float) -> void:
 	if victory_overlay.visible and _victory_avatar_frames.size() > 1:
 		var vst: int = int(_avatar_anim_ms / maxf(float(_victory_avatar_delay_ms), 40.0)) % _victory_avatar_frames.size()
 		victory_icon.texture = _victory_avatar_frames[vst] as Texture2D
+	if _mp_connect_timer > 0.0:
+		_mp_connect_timer -= delta
+		if _mp_connect_timer <= 0.0:
+			clear_mp_connecting_state()
 	if _toast_timer > 0.0:
 		_toast_timer -= delta
 		if _toast_timer <= 0.0:
@@ -1748,12 +1855,60 @@ func open_menu() -> void:
 	var in_match: bool = _world_state != null and _world_state.match_phase != WorldState.PHASE_SPAWN_SELECT
 	play_btn.text = "Resume Match" if in_match else "Singleplayer"
 	new_match_btn.visible = in_match
+	if _return_home_btn != null:
+		_return_home_btn.visible = in_match
 	_show_menu_page("home")
 	menu_overlay.visible = true
 	_sync_hud_chrome_visibility()
 
 
+func open_home_screen() -> void:
+	victory_overlay.visible = false
+	audio_popover.visible = false
+	play_btn.text = "Singleplayer"
+	new_match_btn.visible = false
+	if _return_home_btn != null:
+		_return_home_btn.visible = false
+	_show_menu_page("home")
+	menu_overlay.visible = true
+	_sync_hud_chrome_visibility()
+
+
+func _set_mp_buttons_locked(locked: bool) -> void:
+	mp_connect_btn.disabled = locked
+	create_room_btn.disabled = locked
+	if _mp_qp_btn != null:
+		_mp_qp_btn.disabled = locked
+	if _cr_launch_btn != null:
+		_cr_launch_btn.disabled = locked
+
+
+func _begin_mp_connect_guard(target_code: String) -> bool:
+	if _mp_connecting:
+		return false
+	var clean_target: String = target_code.strip_edges().to_upper()
+	if not clean_target.is_empty() and clean_target == _current_room_code:
+		return false
+	_mp_connecting = true
+	_mp_connect_timer = 6.0
+	_set_mp_buttons_locked(true)
+	return true
+
+
+func clear_mp_connecting_state() -> void:
+	_mp_connecting = false
+	_mp_connect_timer = 0.0
+	_set_mp_buttons_locked(false)
+
+
+func consume_pending_create_room_options() -> Dictionary:
+	var out: Dictionary = _pending_create_room_opts.duplicate()
+	_pending_create_room_opts.clear()
+	return out
+
+
 func update_mp_lobby(room_code: String, phase: String, players: Array, ai_count: int, is_host: bool) -> void:
+	clear_mp_connecting_state()
 	_current_room_code = room_code
 	mp_room_edit.text = room_code
 	assigned_code_label.text = "Room Code: %s" % (room_code if not room_code.is_empty() else "(Not in Room)")
@@ -1863,6 +2018,9 @@ func update_public_rooms(rooms: Array) -> void:
 		var join_cap := can_join
 		j_btn.pressed.connect(func() -> void:
 			AudioManager.play_ui_tap()
+			if not _begin_mp_connect_guard(code_cap):
+				return
+			j_btn.disabled = true
 			mp_room_edit.text = code_cap
 			var cfg: Dictionary = get_spawn_config()
 			save_player_name(str(cfg.get("name", "")))
@@ -1884,6 +2042,7 @@ func on_mp_spawn_phase(seconds_left: float) -> void:
 
 
 func on_mp_disconnected(reason: String) -> void:
+	clear_mp_connecting_state()
 	_current_room_code = ""
 	assigned_code_label.text = "Room Code: (Not in Room)"
 	copy_code_btn.disabled = true
@@ -1891,6 +2050,15 @@ func on_mp_disconnected(reason: String) -> void:
 	mp_status_label.text = reason
 	mp_players_label.text = "Players: --"
 	mp_start_btn.disabled = true
+
+
+func on_mp_room_disbanded(reason: String) -> void:
+	on_mp_disconnected(reason)
+	victory_overlay.visible = false
+	spectator_banner.visible = false
+	_show_menu_page("mp_lobby")
+	menu_overlay.visible = true
+	_sync_hud_chrome_visibility()
 
 
 func get_mp_server_url() -> String:
@@ -1902,30 +2070,55 @@ func get_mp_server_url() -> String:
 	return u if not u.is_empty() else MPClient.DEFAULT_SERVER_URL
 
 
+func _get_signal_bars_tex(active_bars: int, bar_col: Color) -> ImageTexture:
+	var key: String = "%d:%s" % [active_bars, bar_col.to_html()]
+	if _sig_bar_cache.has(key):
+		return _sig_bar_cache[key] as ImageTexture
+	var w := 16
+	var h := 14
+	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
+	var dim_col := Color(0.45, 0.52, 0.62, 0.34)
+	var heights := [4, 7, 10, 13]
+	for bi in range(4):
+		var col: Color = bar_col if bi < active_bars else dim_col
+		var x0: int = 1 + bi * 4
+		var bar_h: int = heights[bi]
+		var y0: int = h - 1 - bar_h
+		for yy in range(maxi(0, y0), h - 1):
+			for xx in range(x0, x0 + 2):
+				img.set_pixel(xx, yy, col)
+	var tex := ImageTexture.create_from_image(img)
+	_sig_bar_cache[key] = tex
+	return tex
+
+
 func update_ping(ping_ms: int) -> void:
 	var col := Color(0.62, 0.70, 0.80, 0.85)
-	var bars := "▯▯▯▯"
+	var active_bars := 0
 	if ping_ms < 0:
 		ping_label.text = "--ms"
-		conn_strength_label.text = "▯▯▯▯ --ms"
+		conn_strength_label.text = "--ms"
 	else:
 		ping_label.text = "%dms" % ping_ms
 		if ping_ms < 80:
 			col = Color(0.32, 0.92, 0.52, 1.0)
-			bars = "▮▮▮▮"
+			active_bars = 4
 		elif ping_ms < 150:
 			col = Color(0.66, 0.92, 0.42, 1.0)
-			bars = "▮▮▮▯"
+			active_bars = 3
 		elif ping_ms < 230:
 			col = Color(0.96, 0.80, 0.30, 1.0)
-			bars = "▮▮▯▯"
+			active_bars = 2
 		else:
 			col = Color(0.96, 0.38, 0.34, 1.0)
-			bars = "▮▯▯▯"
-		conn_strength_label.text = "%s %dms" % [bars, ping_ms]
-	ping_icon.self_modulate = col
+			active_bars = 1
+		conn_strength_label.text = "%dms" % ping_ms
+	var bar_tex: ImageTexture = _get_signal_bars_tex(active_bars, col)
+	ping_icon.texture = bar_tex
+	ping_icon.self_modulate = Color.WHITE
 	ping_label.modulate = col
-	conn_bar_icon.self_modulate = col
+	conn_bar_icon.texture = bar_tex
+	conn_bar_icon.self_modulate = Color.WHITE
 	conn_strength_label.modulate = col
 
 
@@ -2499,7 +2692,13 @@ func refresh_player_bar() -> void:
 	world_pct_label.text = "%.2f%% of the world%s" % [p.territory_percent, betray_tag]
 	troops_label.text = StructureData.format_compact(floor(p.troops))
 	troops_max_label.text = "/ %s" % StructureData.format_compact(round(p.max_troops))
-	troops_rate_label.text = ("+%.1f/s" % p.effective_troops_per_sec) if p.effective_troops_per_sec < 10.0 else ("+%s/s" % StructureData.format_compact(p.effective_troops_per_sec))
+	var t_rate_str: String = ("+%.1f/s" % p.effective_troops_per_sec) if p.effective_troops_per_sec < 10.0 else ("+%s/s" % StructureData.format_compact(p.effective_troops_per_sec))
+	if p.idle_regen_mult > 1.05:
+		troops_rate_label.text = "%s (+%d%%)" % [t_rate_str, int(round((p.idle_regen_mult - 1.0) * 100.0))]
+		troops_rate_label.modulate = Color(0.34, 0.96, 0.78)
+	else:
+		troops_rate_label.text = t_rate_str
+		troops_rate_label.modulate = Color(0.24, 0.90, 0.48)
 	gold_label.text = StructureData.format_compact(p.gold)
 	gold_rate_label.text = ("+%.1f/s" % p.gold_per_sec) if p.gold_per_sec < 10.0 else ("+%s/s" % StructureData.format_compact(p.gold_per_sec))
 	_update_attack_preview(p)
@@ -2993,9 +3192,36 @@ func _setup_extra_hud_panels() -> void:
 	_threat_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_threat_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_threat_overlay.draw.connect(_on_threat_overlay_draw)
-	_threat_overlay.gui_input.connect(_on_threat_overlay_input)
 	root_control.add_child(_threat_overlay)
 	root_control.move_child(_threat_overlay, 0)
+
+	# 1b. Dedicated "Quit to Home" buttons (in-match MenuCard + VictoryCard)
+	var menu_vbox := menu_card.get_node_or_null("VBox") as VBoxContainer
+	if menu_vbox != null:
+		_return_home_btn = Button.new()
+		_return_home_btn.name = "QuitToHomeBtn"
+		_return_home_btn.custom_minimum_size = Vector2(220, 32)
+		_return_home_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		_return_home_btn.text = "Quit to Home"
+		_return_home_btn.visible = false
+		ThemeFactory.apply_button_variant(_return_home_btn, "danger")
+		_return_home_btn.pressed.connect(func() -> void:
+			AudioManager.play_ui_tap()
+			return_to_home_requested.emit()
+		)
+		menu_vbox.add_child(_return_home_btn)
+	var v_btn_row := victory_overlay.get_node_or_null("Center/VictoryCard/VBox/BtnRow") as HBoxContainer
+	if v_btn_row != null:
+		_victory_home_btn = Button.new()
+		_victory_home_btn.text = "Quit to Home"
+		_victory_home_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		ThemeFactory.apply_button_variant(_victory_home_btn, "back")
+		_victory_home_btn.pressed.connect(func() -> void:
+			AudioManager.play_ui_tap()
+			victory_overlay.visible = false
+			return_to_home_requested.emit()
+		)
+		v_btn_row.add_child(_victory_home_btn)
 
 	# 2. Extend AudioPopover with persistent Window Mode & UI Scale controls
 	var avbox := audio_popover.get_node_or_null("VBox") as VBoxContainer
@@ -3040,16 +3266,18 @@ func _setup_extra_hud_panels() -> void:
 	if mp_vbox != null:
 		var qp_row := HBoxContainer.new()
 		qp_row.add_theme_constant_override("separation", 6)
-		var qp_btn := Button.new()
-		qp_btn.text = "Quick Play"
-		qp_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		ThemeFactory.apply_button_variant(qp_btn, "primary")
-		qp_btn.pressed.connect(func() -> void:
+		_mp_qp_btn = Button.new()
+		_mp_qp_btn.text = "Quick Play"
+		_mp_qp_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		ThemeFactory.apply_button_variant(_mp_qp_btn, "primary")
+		_mp_qp_btn.pressed.connect(func() -> void:
 			AudioManager.play_ui_tap()
+			if not _begin_mp_connect_guard(""):
+				return
 			mp_status_label.text = "Finding public match..."
 			mp_quickplay_requested.emit()
 		)
-		qp_row.add_child(qp_btn)
+		qp_row.add_child(_mp_qp_btn)
 		var ref_btn := Button.new()
 		ref_btn.text = "Refresh Rooms"
 		ThemeFactory.apply_button_variant(ref_btn, "secondary")
@@ -3279,10 +3507,10 @@ func _setup_extra_hud_panels() -> void:
 		rvbox.add_child(rscroll)
 		center_node.add_child(_rankings_card)
 
-		# Dedicated Settings Page Card
+		# Dedicated Settings & Rebindable Controls Page Card
 		_settings_card = PanelContainer.new()
 		_settings_card.visible = false
-		_settings_card.custom_minimum_size = Vector2(460, 0)
+		_settings_card.custom_minimum_size = Vector2(500, 0)
 		ThemeFactory.apply_panel_variant(_settings_card, "card")
 		var svbox := VBoxContainer.new()
 		svbox.add_theme_constant_override("separation", 8)
@@ -3311,7 +3539,25 @@ func _setup_extra_hud_panels() -> void:
 		stitle_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		shdr.add_child(stitle_l)
 		svbox.add_child(shdr)
+
+		var stabs := HBoxContainer.new()
+		stabs.add_theme_constant_override("separation", 6)
+		_settings_tab_gen = Button.new()
+		_settings_tab_gen.text = "Audio & Display"
+		_settings_tab_gen.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_settings_tab_ctrl = Button.new()
+		_settings_tab_ctrl.text = "Controls & Keybinds"
+		_settings_tab_ctrl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		ThemeFactory.apply_button_variant(_settings_tab_gen, "primary")
+		ThemeFactory.apply_button_variant(_settings_tab_ctrl, "secondary")
+		stabs.add_child(_settings_tab_gen)
+		stabs.add_child(_settings_tab_ctrl)
+		svbox.add_child(stabs)
 		svbox.add_child(HSeparator.new())
+
+		_settings_gen_box = VBoxContainer.new()
+		_settings_gen_box.add_theme_constant_override("separation", 8)
+		svbox.add_child(_settings_gen_box)
 
 		_set_mute_check = CheckButton.new()
 		_set_mute_check.text = "Mute All Audio"
@@ -3319,7 +3565,7 @@ func _setup_extra_hud_panels() -> void:
 			if not _syncing_settings:
 				mute_check.button_pressed = v
 		)
-		svbox.add_child(_set_mute_check)
+		_settings_gen_box.add_child(_set_mute_check)
 
 		for sl_pair: Array in [
 			["Master Volume", master_slider, "_set_master_sl"],
@@ -3345,9 +3591,9 @@ func _setup_extra_hud_panels() -> void:
 			set(str(sl_pair[2]), sldr)
 			srow.add_child(slbl)
 			srow.add_child(sldr)
-			svbox.add_child(srow)
+			_settings_gen_box.add_child(srow)
 
-		svbox.add_child(HSeparator.new())
+		_settings_gen_box.add_child(HSeparator.new())
 		var sd_row := HBoxContainer.new()
 		sd_row.add_theme_constant_override("separation", 8)
 		var sdlbl := Label.new()
@@ -3365,7 +3611,7 @@ func _setup_extra_hud_panels() -> void:
 		)
 		sd_row.add_child(sdlbl)
 		sd_row.add_child(_set_disp_opt)
-		svbox.add_child(sd_row)
+		_settings_gen_box.add_child(sd_row)
 
 		var ss_row := HBoxContainer.new()
 		ss_row.add_theme_constant_override("separation", 8)
@@ -3385,24 +3631,198 @@ func _setup_extra_hud_panels() -> void:
 		)
 		ss_row.add_child(sslbl)
 		ss_row.add_child(_set_scale_opt)
-		svbox.add_child(ss_row)
+		_settings_gen_box.add_child(ss_row)
 
 		_set_hotkeys_check = CheckButton.new()
-		_set_hotkeys_check.text = "Enable Combat Hotkeys (1-9, F, Space, Alt+Click)"
+		_set_hotkeys_check.text = "Enable Combat Hotkeys"
 		_set_hotkeys_check.button_pressed = _hotkeys_enabled
 		_set_hotkeys_check.toggled.connect(func(v: bool) -> void:
 			if _hotkeys_enabled != v:
 				toggle_hotkeys()
 		)
-		svbox.add_child(_set_hotkeys_check)
+		_settings_gen_box.add_child(_set_hotkeys_check)
 
-		var ctrl_lbl := Label.new()
-		ctrl_lbl.text = "Controls: Left-Click Explore/Build · Right-Click Wheel · Shift Multi-Build\nSpace Capital · Ctrl+1..4 / Alt+1..4 Bookmarks · Alt+Click Ping · Enter Chat"
-		ctrl_lbl.modulate = Color(0.68, 0.78, 0.90, 0.90)
-		ctrl_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		ctrl_lbl.add_theme_font_size_override("font_size", 11)
-		svbox.add_child(ctrl_lbl)
+		# Controls / Keybind Remapping Tab
+		_settings_ctrl_box = VBoxContainer.new()
+		_settings_ctrl_box.visible = false
+		_settings_ctrl_box.add_theme_constant_override("separation", 6)
+		var cscroll := ScrollContainer.new()
+		cscroll.custom_minimum_size = Vector2(0, 270)
+		var cgrid := VBoxContainer.new()
+		cgrid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		cgrid.add_theme_constant_override("separation", 5)
+		for kb_entry: Array in KEYBIND_LABELS:
+			var act_k: String = str(kb_entry[0])
+			var krow := HBoxContainer.new()
+			krow.add_theme_constant_override("separation", 8)
+			var klbl := Label.new()
+			klbl.text = str(kb_entry[1])
+			klbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			var kbtn := Button.new()
+			kbtn.custom_minimum_size = Vector2(116, 26)
+			kbtn.text = OS.get_keycode_string(get_keybind(act_k))
+			ThemeFactory.apply_button_variant(kbtn, "secondary")
+			var act_cap := act_k
+			kbtn.pressed.connect(func() -> void:
+				AudioManager.play_ui_tap()
+				_rebinding_action = act_cap
+				_refresh_keybind_buttons()
+			)
+			_keybind_buttons[act_k] = kbtn
+			krow.add_child(klbl)
+			krow.add_child(kbtn)
+			cgrid.add_child(krow)
+		cscroll.add_child(cgrid)
+		_settings_ctrl_box.add_child(cscroll)
+		var reset_kb_btn := Button.new()
+		reset_kb_btn.text = "Reset Default Keybinds"
+		ThemeFactory.apply_button_variant(reset_kb_btn, "back")
+		reset_kb_btn.pressed.connect(func() -> void:
+			AudioManager.play_ui_tap()
+			reset_keybinds()
+		)
+		_settings_ctrl_box.add_child(reset_kb_btn)
+		svbox.add_child(_settings_ctrl_box)
+
+		_settings_tab_gen.pressed.connect(func() -> void:
+			AudioManager.play_ui_tap()
+			_rebinding_action = ""
+			_settings_gen_box.visible = true
+			_settings_ctrl_box.visible = false
+			ThemeFactory.apply_button_variant(_settings_tab_gen, "primary")
+			ThemeFactory.apply_button_variant(_settings_tab_ctrl, "secondary")
+		)
+		_settings_tab_ctrl.pressed.connect(func() -> void:
+			AudioManager.play_ui_tap()
+			_settings_gen_box.visible = false
+			_settings_ctrl_box.visible = true
+			_refresh_keybind_buttons()
+			ThemeFactory.apply_button_variant(_settings_tab_gen, "secondary")
+			ThemeFactory.apply_button_variant(_settings_tab_ctrl, "primary")
+		)
 		center_node.add_child(_settings_card)
+
+		# Dedicated Create Room Page Card
+		_create_room_card = PanelContainer.new()
+		_create_room_card.visible = false
+		_create_room_card.custom_minimum_size = Vector2(460, 0)
+		ThemeFactory.apply_panel_variant(_create_room_card, "card")
+		var crv := VBoxContainer.new()
+		crv.add_theme_constant_override("separation", 9)
+		_create_room_card.add_child(crv)
+
+		var crhdr := HBoxContainer.new()
+		crhdr.add_theme_constant_override("separation", 8)
+		var crback := Button.new()
+		crback.text = "Back"
+		crback.icon = _make_pixel_icon(_tex_back, Color.WHITE, 14)
+		ThemeFactory.apply_button_variant(crback, "back")
+		crback.pressed.connect(func() -> void:
+			AudioManager.play_ui_tap()
+			_show_menu_page("mp_lobby")
+		)
+		crhdr.add_child(crback)
+		var crtitle := Label.new()
+		crtitle.text = "CREATE MULTIPLAYER ROOM"
+		crtitle.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		crtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		crhdr.add_child(crtitle)
+		crv.add_child(crhdr)
+		crv.add_child(HSeparator.new())
+
+		var cr_vis_row := HBoxContainer.new()
+		cr_vis_row.add_theme_constant_override("separation", 12)
+		_cr_public_chk = CheckBox.new()
+		_cr_public_chk.text = "Public Listing"
+		_cr_public_chk.button_pressed = true
+		_cr_team_chk = CheckBox.new()
+		_cr_team_chk.text = "Team Mode"
+		_cr_nonukes_chk = CheckBox.new()
+		_cr_nonukes_chk.text = "No Nukes"
+		cr_vis_row.add_child(_cr_public_chk)
+		cr_vis_row.add_child(_cr_team_chk)
+		cr_vis_row.add_child(_cr_nonukes_chk)
+		crv.add_child(cr_vis_row)
+
+		var cr_ai_row := HBoxContainer.new()
+		cr_ai_row.add_theme_constant_override("separation", 8)
+		var cr_ai_lbl := Label.new()
+		cr_ai_lbl.text = "AI Nations"
+		cr_ai_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_cr_ai_opt = OptionButton.new()
+		for cnt in [0, 4, 6, 8, 12, 16, 20, 23]:
+			_cr_ai_opt.add_item("%d AI" % cnt, cnt)
+		_cr_ai_opt.select(1)
+		cr_ai_row.add_child(cr_ai_lbl)
+		cr_ai_row.add_child(_cr_ai_opt)
+		crv.add_child(cr_ai_row)
+
+		var cr_mod_row := HBoxContainer.new()
+		cr_mod_row.add_theme_constant_override("separation", 6)
+		_cr_speed_opt = OptionButton.new()
+		_cr_speed_opt.add_item("1× Speed", 0)
+		_cr_speed_opt.add_item("1.5× Speed", 1)
+		_cr_speed_opt.add_item("2× Speed", 2)
+		_cr_speed_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_cr_diff_opt = OptionButton.new()
+		_cr_diff_opt.add_item("AI Normal", 0)
+		_cr_diff_opt.add_item("AI Hard", 1)
+		_cr_diff_opt.add_item("AI Brutal", 2)
+		_cr_diff_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_cr_preset_opt = OptionButton.new()
+		_cr_preset_opt.add_item("Standard", 0)
+		_cr_preset_opt.add_item("Fast Start", 1)
+		_cr_preset_opt.add_item("Sandbox", 2)
+		_cr_preset_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		cr_mod_row.add_child(_cr_speed_opt)
+		cr_mod_row.add_child(_cr_diff_opt)
+		cr_mod_row.add_child(_cr_preset_opt)
+		crv.add_child(cr_mod_row)
+
+		var cr_code_row := HBoxContainer.new()
+		cr_code_row.add_theme_constant_override("separation", 8)
+		var cr_code_lbl := Label.new()
+		cr_code_lbl.text = "Custom Code"
+		_cr_code_edit = LineEdit.new()
+		_cr_code_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_cr_code_edit.placeholder_text = "Optional (blank = auto 6-char)"
+		cr_code_row.add_child(cr_code_lbl)
+		cr_code_row.add_child(_cr_code_edit)
+		crv.add_child(cr_code_row)
+
+		_cr_launch_btn = Button.new()
+		_cr_launch_btn.custom_minimum_size = Vector2(0, 38)
+		_cr_launch_btn.text = "Create & Open Lobby"
+		ThemeFactory.apply_button_variant(_cr_launch_btn, "primary")
+		_cr_launch_btn.pressed.connect(func() -> void:
+			AudioManager.play_ui_tap()
+			var custom_c: String = _cr_code_edit.text.strip_edges().to_upper()
+			if not _begin_mp_connect_guard(custom_c):
+				return
+			var spds := [1.0, 1.5, 2.0]
+			var diffs := ["normal", "hard", "brutal"]
+			var presets := ["standard", "fast", "sandbox"]
+			_pending_create_room_opts = {
+				"is_public": _cr_public_chk.button_pressed,
+				"team_mode": _cr_team_chk.button_pressed,
+				"no_nukes": _cr_nonukes_chk.button_pressed,
+				"game_speed": spds[clampi(_cr_speed_opt.selected, 0, 2)],
+				"ai_difficulty": diffs[clampi(_cr_diff_opt.selected, 0, 2)],
+				"start_preset": presets[clampi(_cr_preset_opt.selected, 0, 2)],
+			}
+			var sel_ai_idx: int = ai_count_option.get_item_index(_cr_ai_opt.get_selected_id())
+			if sel_ai_idx >= 0:
+				ai_count_option.select(sel_ai_idx)
+				menu_ai_option.select(sel_ai_idx)
+			mp_room_edit.text = custom_c
+			mp_status_label.text = "Creating Room on %s..." % get_selected_server_name()
+			var cfg: Dictionary = get_spawn_config()
+			save_player_name(str(cfg.get("name", "")))
+			_show_menu_page("mp_lobby")
+			mp_connect_requested.emit(get_mp_server_url(), custom_c, str(cfg.get("name", "Commander")))
+		)
+		crv.add_child(_cr_launch_btn)
+		center_node.add_child(_create_room_card)
 
 	# 8. In-Game Change Password Security + Profile Quick Links inside AccountCard
 	var acct_vbox := account_card.get_node_or_null("VBox") as VBoxContainer
@@ -3606,6 +4026,91 @@ func _setup_extra_hud_panels() -> void:
 		sp_hbox.move_child(_replay_controls_row, maxi(1, sp_hbox.get_child_count() - 2))
 
 
+func _load_keybinds() -> void:
+	_keybinds = DEFAULT_KEYBINDS.duplicate()
+	var cfg := ConfigFile.new()
+	if cfg.load(PROFILE_SAVE_PATH) == OK:
+		for k: String in DEFAULT_KEYBINDS.keys():
+			var code: int = int(cfg.get_value("controls", k, int(DEFAULT_KEYBINDS[k])))
+			if code > 0:
+				_keybinds[k] = code
+	keybinds_changed.emit(get_all_keybinds())
+
+
+func _save_keybinds() -> void:
+	var cfg := ConfigFile.new()
+	cfg.load(PROFILE_SAVE_PATH)
+	for k: String in _keybinds.keys():
+		cfg.set_value("controls", k, int(_keybinds[k]))
+	cfg.save(PROFILE_SAVE_PATH)
+
+
+func get_keybind(action: String) -> int:
+	return int(_keybinds.get(action, DEFAULT_KEYBINDS.get(action, 0)))
+
+
+func get_all_keybinds() -> Dictionary:
+	return _keybinds.duplicate()
+
+
+func _is_key_bound_anywhere(code: int) -> bool:
+	for k: String in _keybinds.keys():
+		if int(_keybinds[k]) == code:
+			return true
+	return false
+
+
+func set_keybind(action: String, keycode: int) -> void:
+	if not DEFAULT_KEYBINDS.has(action) or keycode <= 0:
+		return
+	var prev_code: int = get_keybind(action)
+	for other: String in _keybinds.keys():
+		if other != action and int(_keybinds[other]) == keycode:
+			_keybinds[other] = prev_code
+	_keybinds[action] = keycode
+	_save_keybinds()
+	_refresh_dock_key_labels()
+	_refresh_keybind_buttons()
+	keybinds_changed.emit(get_all_keybinds())
+
+
+func reset_keybinds() -> void:
+	_rebinding_action = ""
+	_keybinds = DEFAULT_KEYBINDS.duplicate()
+	_save_keybinds()
+	_refresh_dock_key_labels()
+	_refresh_keybind_buttons()
+	keybinds_changed.emit(get_all_keybinds())
+
+
+func _refresh_keybind_buttons() -> void:
+	for act: String in _keybind_buttons.keys():
+		var btn := _keybind_buttons[act] as Button
+		if btn != null:
+			btn.text = "Press Key..." if _rebinding_action == act else OS.get_keycode_string(get_keybind(act))
+
+
+func _refresh_dock_key_labels() -> void:
+	var dock_map := [
+		[town_btn, "build_town"],
+		[factory_btn, "build_factory"],
+		[port_btn, "build_port"],
+		[defense_btn, "build_defense"],
+		[silo_btn, "build_silo"],
+		[sam_btn, "build_sam"],
+		[warship_btn, "build_warship"],
+		[atom_dock_btn, "missile_atom"],
+		[hbomb_dock_btn, "missile_hydrogen"],
+		[mirv_dock_btn, "missile_mirv"],
+	]
+	for pair: Array in dock_map:
+		var btn: Button = pair[0] as Button
+		var key_lbl := btn.get_node_or_null("TopMeta/KeyLbl") as Label
+		if key_lbl != null:
+			var ks: String = OS.get_keycode_string(get_keybind(str(pair[1])))
+			key_lbl.text = ks.substr(0, 3) if ks.length() > 3 else ks
+
+
 func _sync_settings_controls() -> void:
 	_syncing_settings = true
 	if _set_mute_check != null:
@@ -3726,7 +4231,7 @@ func _refresh_offscreen_threats() -> void:
 		var sh: ShipUnit = _world_state.ships[sid]
 		if sh.active and sh.kind == ShipUnit.KIND_LANDING and sh.nation_id != p_id and sh.target_owner_id == p_id:
 			candidates.append({"world": sh.position, "label": "LANDING"})
-	if _world_state.last_player_threat_world_pos.x >= 0.0 and candidates.is_empty():
+	if _world_state.last_player_threat_world_pos.x >= 0.0 and (_world_state.current_tick - _world_state.last_player_threat_tick) <= 480 and candidates.is_empty():
 		candidates.append({"world": _world_state.last_player_threat_world_pos, "label": "ATTACK"})
 
 	for item: Dictionary in candidates:
@@ -3744,7 +4249,7 @@ func _refresh_offscreen_threats() -> void:
 		if _threat_markers.size() >= 4:
 			break
 	var has_now: bool = not _threat_markers.is_empty()
-	_threat_overlay.mouse_filter = Control.MOUSE_FILTER_PASS if has_now else Control.MOUSE_FILTER_IGNORE
+	_threat_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	if has_now or _had_threat_markers:
 		_had_threat_markers = has_now
 		_threat_overlay.queue_redraw()
@@ -3753,7 +4258,7 @@ func _refresh_offscreen_threats() -> void:
 func _on_threat_overlay_draw() -> void:
 	if _threat_markers.is_empty():
 		return
-	var font: Font = ThemeDB.fallback_font
+	var font: Font = ThemeFactory.get_ui_font()
 	for mk: Dictionary in _threat_markers:
 		var sp: Vector2 = mk["screen"] as Vector2
 		var dir: Vector2 = mk["dir"] as Vector2
@@ -3762,17 +4267,6 @@ func _on_threat_overlay_draw() -> void:
 		_threat_overlay.draw_colored_polygon(tri, Color(1.0, 0.28, 0.34, 0.94))
 		if font != null:
 			_threat_overlay.draw_string(font, sp + Vector2(-18.0, 22.0), str(mk["label"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1.0, 0.78, 0.72, 0.96))
-
-
-func _on_threat_overlay_input(ev: InputEvent) -> void:
-	if ev is InputEventMouseButton and (ev as InputEventMouseButton).pressed and (ev as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
-		var click_pos: Vector2 = (ev as InputEventMouseButton).position
-		for mk: Dictionary in _threat_markers:
-			if click_pos.distance_to(mk["screen"] as Vector2) <= 22.0:
-				AudioManager.play_ui_tap()
-				camera_focus_requested.emit(mk["world"] as Vector2, 2.2)
-				get_viewport().set_input_as_handled()
-				return
 
 
 func _on_victory_chart_draw() -> void:

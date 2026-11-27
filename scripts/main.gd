@@ -71,6 +71,9 @@ func _ready() -> void:
 	hud.donate_gold_requested.connect(_on_donate_gold_requested)
 	hud.donate_troops_requested.connect(_on_donate_troops_requested)
 	hud.new_match_requested.connect(_on_new_match_requested)
+	hud.return_to_home_requested.connect(_on_return_to_home_requested)
+	hud.keybinds_changed.connect(world_map.camera.set_pan_keybinds)
+	world_map.camera.set_pan_keybinds(hud.get_all_keybinds())
 	hud.mp_connect_requested.connect(_on_mp_connect_requested)
 	hud.mp_disconnect_requested.connect(_on_mp_disconnect_requested)
 	hud.mp_start_match_requested.connect(func(ai_c: int) -> void: mp_client.send_start_match(ai_c))
@@ -153,6 +156,7 @@ func _ready() -> void:
 	)
 	account_client.incoming_room_invite_notified.connect(_on_mp_invite_received)
 
+	mp_client.connected_to_room.connect(_on_mp_connected_to_room)
 	mp_client.lobby_updated.connect(hud.update_mp_lobby)
 	mp_client.room_options_updated.connect(hud.update_mp_room_options)
 	mp_client.room_modifiers_updated.connect(hud.update_mp_room_modifiers)
@@ -166,8 +170,12 @@ func _ready() -> void:
 	)
 	mp_client.ping_updated.connect(hud.update_ping)
 	mp_client.invite_received.connect(_on_mp_invite_received)
+	mp_client.room_disbanded.connect(_on_mp_room_disbanded)
 	mp_client.disconnected.connect(_on_mp_disconnected)
-	mp_client.server_error.connect(func(msg: String) -> void: hud.show_toast(msg, true))
+	mp_client.server_error.connect(func(msg: String) -> void:
+		hud.clear_mp_connecting_state()
+		hud.show_toast(msg, true)
+	)
 
 	world_state.match_started.connect(_on_match_started)
 	world_state.territory_changed.connect(func() -> void: hud.mark_leaderboard_dirty())
@@ -344,6 +352,11 @@ func _on_new_match_requested() -> void:
 	hud.on_match_reset()
 
 
+func _on_return_to_home_requested() -> void:
+	_on_new_match_requested()
+	hud.open_home_screen()
+
+
 func _on_mp_connect_requested(ws_url: String, room_code: String, player_name: String) -> void:
 	if _http_ping_inflight:
 		_tcp_ping.disconnect_from_host()
@@ -512,6 +525,7 @@ func _on_mp_quickplay_requested() -> void:
 			var cfg: Dictionary = hud.get_spawn_config()
 			_on_mp_connect_requested(hud.get_mp_server_url(), code, str(cfg.get("name", "Commander")))
 		else:
+			hud.clear_mp_connecting_state()
 			hud.show_toast(err_msg if not err_msg.is_empty() else "Quick Play failed.", true)
 			AudioManager.play_error()
 	)
@@ -561,6 +575,27 @@ func _fetch_mp_player_avatars(players: Array) -> void:
 		account_client.fetch_remote_avatar(acct_u, func(_u: String, frames: Array, dms: int) -> void:
 			world_map.layer4_cities.set_nation_avatar(nid, frames, dms)
 		)
+
+
+func _on_mp_connected_to_room(_code: String, _nid: int, _token: String, is_host: bool) -> void:
+	var pending_opts: Dictionary = hud.consume_pending_create_room_options()
+	if is_host and not pending_opts.is_empty():
+		mp_client.send_room_modifiers(pending_opts)
+
+
+func _on_mp_room_disbanded(_code: String, reason: String) -> void:
+	var was_in_match: bool = world_state.match_phase != WorldState.PHASE_SPAWN_SELECT
+	if was_in_match:
+		_on_new_match_requested()
+	else:
+		is_multiplayer = false
+		_mp_spawning = false
+		_pending_batches.clear()
+		_http_ping_timer = 0.5
+	AudioManager.play_error()
+	hud.on_mp_room_disbanded(reason)
+	hud.show_toast(reason, true)
+	_on_mp_rooms_refresh_requested()
 
 
 func _on_mp_disconnected(reason: String) -> void:

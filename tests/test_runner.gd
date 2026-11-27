@@ -796,9 +796,40 @@ func _run_all_tests() -> void:
 			var hk_m: bool = hud._missile_mode == MissileUnit.KIND_MIRV
 			hud.clear_missile_mode()
 			hud._world_state.match_phase = WorldState.PHASE_SPAWN_SELECT
-			ui_ok = menu_init and cam_pan_init and cam_pan_moved and friends_open_ok and friends_back_ok and name_rem_ok and play_reveals_spawn and no_color_or_slider and r10 and r25 and r50 and r75 and hk_init and hk_off and lb_min and lb_restored and dock_icons and of_nodes and mp_nodes and ping_nodes and ping_set_ok and ping_reset_ok and peso_hud_ok and smooth_filter_ok and hk_fact and hk_ship and hk_atom and hk_h and hk_m
+
+			# v1.3.3 HUD checks inside live main scene instance
+			hud.update_ping(48)
+			var p_img: Image = hud.ping_icon.texture.get_image()
+			var bars_v133_ok: bool = p_img != null and p_img.get_width() == 16 and p_img.get_pixel(1, 12).a > 0.5 and p_img.get_pixel(1, 1).a < 0.1
+			hud.update_ping(-1)
+			hud._threat_markers = [{"screen": Vector2(40, 40), "dir": Vector2.LEFT, "world": Vector2(10, 10), "label": "ATTACK"}]
+			hud._had_threat_markers = true
+			hud._refresh_offscreen_threats()
+			var threat_ignore_ok: bool = hud._threat_overlay.mouse_filter == Control.MOUSE_FILTER_IGNORE
+			hud._show_menu_page("mp_create")
+			var create_page_ok: bool = hud._create_room_card != null and hud._create_room_card.visible and hud._cr_launch_btn != null
+			var spam_1: bool = hud._begin_mp_connect_guard("ABC123")
+			var spam_2: bool = hud._begin_mp_connect_guard("ABC123")
+			hud.clear_mp_connecting_state()
+			var home_sig := {"emitted": false}
+			hud.return_to_home_requested.connect(func() -> void: home_sig["emitted"] = true)
+			hud._return_home_btn.emit_signal("pressed")
+			hud.set_keybind("build_town", KEY_T)
+			hud._world_state.match_phase = WorldState.PHASE_PLAYING
+			hud.menu_overlay.visible = false
+			var ev_t := InputEventKey.new()
+			ev_t.keycode = KEY_T
+			ev_t.pressed = true
+			hud._unhandled_input(ev_t)
+			var rebind_ok: bool = hud._build_mode == StructureData.TYPE_TOWN and hud.get_keybind("build_town") == KEY_T
+			hud.clear_build_mode()
+			hud.reset_keybinds()
+			hud._world_state.match_phase = WorldState.PHASE_SPAWN_SELECT
+			var v133_hud_ok: bool = bars_v133_ok and threat_ignore_ok and create_page_ok and spam_1 and not spam_2 and bool(home_sig["emitted"]) and rebind_ok
+
+			ui_ok = menu_init and cam_pan_init and cam_pan_moved and friends_open_ok and friends_back_ok and name_rem_ok and play_reveals_spawn and no_color_or_slider and r10 and r25 and r50 and r75 and hk_init and hk_off and lb_min and lb_restored and dock_icons and of_nodes and mp_nodes and ping_nodes and ping_set_ok and ping_reset_ok and peso_hud_ok and smooth_filter_ok and hk_fact and hk_ship and hk_atom and hk_h and hk_m and v133_hud_ok
 			if not ui_ok:
-				print("[UI DEBUG] menu_init=", menu_init, " cam_pan_init=", cam_pan_init, " cam_pan_moved=", cam_pan_moved, " friends_open=", friends_open_ok, " friends_back=", friends_back_ok, " name_rem=", name_rem_ok, " play=", play_reveals_spawn, " r10/25=", r10, "/", r25, " lb_min=", lb_min, " lb_restored=", lb_restored, " dock_icons=", dock_icons, " dock_min=", hud.action_dock.get_combined_minimum_size(), " mp_nodes=", mp_nodes, " peso=", peso_hud_ok, " hk=", hk_fact, "/", hk_ship, "/", hk_atom, "/", hk_h, "/", hk_m)
+				print("[UI DEBUG] menu_init=", menu_init, " cam_pan_init=", cam_pan_init, " cam_pan_moved=", cam_pan_moved, " friends_open=", friends_open_ok, " friends_back=", friends_back_ok, " name_rem=", name_rem_ok, " play=", play_reveals_spawn, " r10/25=", r10, "/", r25, " lb_min=", lb_min, " lb_restored=", lb_restored, " dock_icons=", dock_icons, " dock_min=", hud.action_dock.get_combined_minimum_size(), " mp_nodes=", mp_nodes, " peso=", peso_hud_ok, " hk=", hk_fact, "/", hk_ship, "/", hk_atom, "/", hk_h, "/", hk_m, " v133=", v133_hud_ok, " bars=", bars_v133_ok, " ign=", threat_ignore_ok, " cr=", create_page_ok, " sp=", spam_1, "/", spam_2, " home=", home_sig["emitted"], " reb=", rebind_ok)
 		_check(ok and no_army_ui and has_banner and ui_ok,
 			"Main scene verifies smooth filters, Pesos bottom HUD, hotkeys(1..9,F), PingBadge, RadialMenu & Diplomacy")
 		inst.queue_free()
@@ -930,9 +961,9 @@ func _run_openfront_feature_tests(us_spot: Vector2i, normandy: Vector2i, england
 	var trade_end: Vector2 = warship.position
 	if warship.waypoints.size() >= 2:
 		var wp1: Vector2 = warship.waypoints[warship.waypoints.size() - 1]
-		nav_off = warship.position.lerp(wp1, 0.35)
-		trade_start = warship.position.lerp(wp1, 0.55)
-		trade_end = warship.position.lerp(wp1, 0.15)
+		nav_off = warship.position.lerp(wp1, 0.45)
+		trade_start = wp1
+		trade_end = wp1.lerp(warship.position, 0.25)
 	var enemy_land_boat := ShipUnit.new()
 	enemy_land_boat.id = 9001
 	enemy_land_boat.kind = ShipUnit.KIND_LANDING
@@ -951,9 +982,9 @@ func _run_openfront_feature_tests(us_spot: Vector2i, normandy: Vector2i, england
 	enemy_trade.kind = ShipUnit.KIND_TRADE
 	enemy_trade.nation_id = foe.id
 	enemy_trade.position = trade_start
-	enemy_trade.waypoints = PackedVector2Array([trade_start, trade_end])
+	enemy_trade.waypoints = PackedVector2Array([trade_start, trade_end, trade_start, trade_end, trade_start])
 	enemy_trade.waypoint_index = 1
-	enemy_trade.speed_px_per_sec = 1.2
+	enemy_trade.speed_px_per_sec = 0.6
 	enemy_trade.gold_value = 65000.0
 	ws_nav.ships[9002] = enemy_trade
 
@@ -966,7 +997,7 @@ func _run_openfront_feature_tests(us_spot: Vector2i, normandy: Vector2i, england
 	ws_nav.trade_ship_captured.connect(func(_cid: int, _pos: Vector2, _amt: float) -> void:
 		nav_ev["captured_ship"] = true
 	)
-	for _t in range(220):
+	for _t in range(340):
 		ws_nav.step_tick(ws_nav.current_tick + 1)
 	var st_probe := StructureData.new()
 	st_probe.level = 1
@@ -1963,3 +1994,49 @@ func _run_phase2_account_and_pfp_tests() -> void:
 		and not bool(port_lake_chk.get("ok", true)) and "coastline" in str(port_lake_chk.get("reason", "")).to_lower(),
 		"Port placement strictly requires ocean coastline with open-sea access (rejects 2px inland & inland lakes)",
 		"coast=%s inland=%s lake=%s" % [str(port_ok_chk), str(port_inland_chk), str(port_lake_chk)])
+
+	# 9. v1.3.3 Checks: Idle Troop Regen Buff, Warship Damage Nerf, Rounded UI Theme & MP Room Disband Signal
+	var ws_idle := WorldState.new()
+	ws_idle.load_world()
+	ws_idle.apply_command({"type": "spawn_player", "x": n1_pos.x, "y": n1_pos.y, "name": "IdleMobilize", "ai_count": 0, "seed": 505})
+	var pn_idle: NationData = ws_idle.get_player_nation()
+	pn_idle.troops = pn_idle.max_troops * 0.42
+	ws_idle.step_tick(1)
+	var rate_early: float = pn_idle.effective_troops_per_sec
+	for _t in range(290):
+		ws_idle.step_tick(ws_idle.current_tick + 1)
+	pn_idle.troops = pn_idle.max_troops * 0.42
+	ws_idle.step_tick(ws_idle.current_tick + 1)
+	var rate_boosted: float = pn_idle.effective_troops_per_sec
+	var idle_mult_peak: float = pn_idle.idle_regen_mult
+	ws_idle.apply_command({"type": "expand_to", "nation_id": pn_idle.id, "x": n1_pos.x + 12, "y": n1_pos.y, "commit_ratio": 0.25})
+	ws_idle.step_tick(ws_idle.current_tick + 1)
+	var idle_reset_ok: bool = is_equal_approx(pn_idle.idle_regen_mult, 1.0)
+	_check(idle_mult_peak >= 1.50 and rate_boosted > rate_early * 1.45 and idle_reset_ok,
+		"Peacetime idle troop respawn boosts regen up to +55%% (%.2fx) & resets during expansion" % idle_mult_peak,
+		"early=%.2f boosted=%.2f peak=%.2f reset=%s" % [rate_early, rate_boosted, idle_mult_peak, str(idle_reset_ok)])
+
+	var dmg_ship := ShipUnit.new()
+	dmg_ship.kind = ShipUnit.KIND_WARSHIP
+	var d1: float = dmg_ship.get_shell_damage()
+	dmg_ship.add_xp(2)
+	var d2: float = dmg_ship.get_shell_damage()
+	dmg_ship.add_xp(3)
+	var d3: float = dmg_ship.get_shell_damage()
+	_check(is_equal_approx(d1, 16.0) and is_equal_approx(d2, 20.0) and is_equal_approx(d3, 24.0),
+		"Warship cannon damage nerfed across levels (Lv.1=%.0f, Lv.2=%.0f, Lv.3=%.0f)" % [d1, d2, d3])
+
+	var ui_theme: Theme = ThemeFactory.build_strategy_theme()
+	var panel_sb: StyleBox = ui_theme.get_stylebox("panel", "PanelContainer")
+	var font_loaded: bool = ThemeFactory.get_ui_font() != null and ThemeFactory.get_ui_font() != ThemeDB.fallback_font
+	var rounded_ok: bool = panel_sb is StyleBoxFlat and (panel_sb as StyleBoxFlat).corner_radius_top_left >= 8
+	var mpc := MPClient.new()
+	var disb_ev := {"code": "", "reason": ""}
+	mpc.room_disbanded.connect(func(c: String, r: String) -> void:
+		disb_ev["code"] = c
+		disb_ev["reason"] = r
+	)
+	mpc._handle_message({"type": "room_disbanded", "room_code": "XYZ9", "reason": "Host left."})
+	_check(font_loaded and rounded_ok and disb_ev["code"] == "XYZ9",
+		"Rounded ThemeFactory, Exo 2 font & MP room_disbanded handling load cleanly",
+		"font=%s rounded=%s disb=%s" % [str(font_loaded), str(rounded_ok), disb_ev["code"]])

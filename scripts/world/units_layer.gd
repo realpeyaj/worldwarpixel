@@ -98,7 +98,7 @@ func _draw() -> void:
 		return
 	var z: float = _camera.zoom.x if _camera != null else 1.0
 	var inv_z: float = 1.0 / maxf(z, 1.0)
-	var font: Font = ThemeDB.fallback_font
+	var font: Font = ThemeFactory.get_ui_font()
 
 	# 1. Active expansion targets + live troop counts on every expanding border
 	for eid: int in _world_state.expansions.keys():

@@ -142,6 +142,7 @@ var ai_difficulty: String = "normal"
 var start_preset: String = "standard"
 var match_history: Array[Dictionary] = []
 var last_player_threat_world_pos: Vector2 = Vector2(-1.0, -1.0)
+var last_player_threat_tick: int = -1000
 var _rng := RandomNumberGenerator.new()
 var _nation_borders: Dictionary = {}     # int -> Dictionary (cell_idx -> true)
 var _nation_coasts: Dictionary = {}      # int -> Dictionary (cell_idx -> true)
@@ -249,6 +250,7 @@ func reset_match() -> void:
 	start_preset = "standard"
 	match_history.clear()
 	last_player_threat_world_pos = Vector2(-1.0, -1.0)
+	last_player_threat_tick = -1000
 	current_tick = 0
 	match_phase = PHASE_SPAWN_SELECT
 	owner_dirty = true
@@ -1675,10 +1677,34 @@ func _step_structures() -> void:
 
 
 func _step_economy_and_troops() -> void:
+	var busy_nations: Dictionary = {}
+	for eid: int in expansions.keys():
+		var eo: ExpansionOrder = expansions[eid]
+		if eo.active and eo.remaining_troops > 0.5:
+			busy_nations[eo.nation_id] = true
+			if eo.enemy_nation_id > 0:
+				busy_nations[eo.enemy_nation_id] = true
+	for sid_s: int in ships.keys():
+		var sh: ShipUnit = ships[sid_s]
+		if sh.active and sh.kind == ShipUnit.KIND_LANDING:
+			busy_nations[sh.nation_id] = true
+			if sh.target_owner_id > 0:
+				busy_nations[sh.target_owner_id] = true
+
 	for nid: int in nations.keys():
 		var n: NationData = nations[nid]
 		if not n.alive:
 			continue
+		if busy_nations.has(nid):
+			n.idle_ticks = 0
+			n.idle_regen_mult = 1.0
+		else:
+			n.idle_ticks = mini(n.idle_ticks + 1, 720)
+			if n.idle_ticks > 48:
+				n.idle_regen_mult = 1.0 + 0.55 * clampf(float(n.idle_ticks - 48) / 240.0, 0.0, 1.0)
+			else:
+				n.idle_regen_mult = 1.0
+
 		var betray_mult: float = 0.65 if n.is_betrayer(current_tick) else 1.0
 		var earned: float = n.gold_per_sec * betray_mult * TICK_DT
 		n.gold += earned
@@ -1688,7 +1714,7 @@ func _step_economy_and_troops() -> void:
 		var fill: float = clampf(n.troops / maxf(n.max_troops, 1.0), 0.0, 1.0)
 		var peak_norm: float = pow(maxf(fill, 0.02), 0.73) * (1.0 - fill) / 0.307
 		var curve: float = clampf(0.18 + 1.45 * peak_norm, 0.15, 1.65)
-		n.effective_troops_per_sec = n.troops_per_sec * curve * betray_mult
+		n.effective_troops_per_sec = n.troops_per_sec * curve * betray_mult * n.idle_regen_mult
 		n.troops = minf(n.max_troops, n.troops + n.effective_troops_per_sec * TICK_DT)
 
 
@@ -1913,6 +1939,7 @@ func _step_ships() -> void:
 				player_land_conquered.emit(beach_claimed, l_ship.target_owner_id != 0)
 			elif l_ship.target_owner_id == player_nation_id:
 				last_player_threat_world_pos = sim_to_world(l_ship.landing_cell)
+				last_player_threat_tick = current_tick
 				player_territory_attacked.emit(n.id, beach_claimed)
 		var beach_mult: float = FALLOUT_TROOP_COST_MULT if hit_fallout else (NEUTRAL_EXPLORE_TROOP_COST_MULT if l_ship.target_owner_id == 0 else 1.65)
 		var beach_cost: float = float(beach_claimed) * 0.25 * beach_mult
@@ -2082,9 +2109,18 @@ func _step_warship_ai(ship: ShipUnit) -> void:
 					trade_ship_captured.emit(captor.id, best_tgt.position, full_loot)
 					trade_completed.emit(captor.id, best_tgt.position, full_loot)
 			ship.add_xp(1)
-		elif (not ship.manual_moving) and best_tgt.position.distance_to(patrol_ctr) <= ship.patrol_radius and sea_pathfinder.is_world_pos_navigable(best_tgt.position) and _is_water_segment_clear(ship.position, best_tgt.position):
-			ship.waypoints = PackedVector2Array([ship.position, best_tgt.position])
-			ship.waypoint_index = 1
+		elif (not ship.manual_moving) and best_tgt.position.distance_to(patrol_ctr) <= ship.patrol_radius and sea_pathfinder.is_world_pos_navigable(best_tgt.position):
+			if _is_water_segment_clear(ship.position, best_tgt.position):
+				ship.waypoints = PackedVector2Array([ship.position, best_tgt.position])
+				ship.waypoint_index = 1
+			elif (current_tick + ship.id) % 18 == 0 or ship.waypoint_index >= ship.waypoints.size():
+				var s_nav: Vector2i = sea_pathfinder.find_nearest_nav_cell(world_to_sim(ship.position), 14)
+				var t_nav: Vector2i = sea_pathfinder.find_nearest_nav_cell(world_to_sim(best_tgt.position), 14)
+				if s_nav.x >= 0 and t_nav.x >= 0:
+					var route: PackedVector2Array = sea_pathfinder.find_path(s_nav, t_nav)
+					if route.size() >= 2:
+						ship.waypoints = route
+						ship.waypoint_index = 1
 	else:
 		if dist <= 82.0 and ship.fire_cooldown_ticks <= 0:
 			naval_shells.append({
@@ -2169,7 +2205,7 @@ func _step_naval_shells() -> void:
 			sh_d["target_pos"] = tgt.position
 		if prog >= 1.0:
 			if tgt != null and tgt.active:
-				tgt.hp -= float(sh_d.get("damage", 26.0))
+				tgt.hp -= float(sh_d.get("damage", 16.0))
 				if tgt.hp <= 0.0:
 					tgt.active = false
 					if tgt.kind == ShipUnit.KIND_LANDING:
@@ -2267,6 +2303,7 @@ func _step_expansions() -> void:
 					player_lost_cells += 1
 					player_attacker_id = order.nation_id
 					last_player_threat_world_pos = Vector2(float(idx % sim_width) + 0.5, float(int(idx / sim_width)) + 0.5) * sim_scale
+					last_player_threat_tick = current_tick
 			sum_x += float(idx % sim_width)
 			sum_y += float(int(idx / sim_width))
 			any_flipped = true
@@ -3383,6 +3420,7 @@ func _cmd_launch_missile(cmd: Dictionary) -> Dictionary:
 		shooter_n.nukes_launched += 1
 	if m.target_nation_id == player_nation_id and nid != player_nation_id:
 		last_player_threat_world_pos = m.target_pos
+		last_player_threat_tick = current_tick
 	missile_launched.emit(m.id, m.kind)
 	return {"ok": true, "missile_id": m.id, "silo_id": silo.id}
 

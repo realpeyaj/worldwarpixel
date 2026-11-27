@@ -44,8 +44,10 @@ type PlayerSlot struct {
 	IsSpectator    bool         `json:"-"`
 	LastSeq        int64        `json:"-"`
 	Limiter        *RateLimiter `json:"-"`
+	connID         uint64       `json:"-"`
 	sendMu         sync.Mutex   `json:"-"`
 	sendFn         func([]byte) `json:"-"`
+	closeFn        func()       `json:"-"`
 }
 
 // Send delivers a serialized message safely if connected.
@@ -94,6 +96,8 @@ type Room struct {
 	persistCh     chan BatchRecord
 	tickerRunning bool
 	closed        bool
+	nextConnID    uint64
+	onDisband     func(string)
 }
 
 // NewRoom creates an initialized lobby room with a random match seed.
@@ -217,78 +221,180 @@ func sanitizeName(name string) string {
 
 // Join attaches or reconnects a player to the room and attaches sendFn.
 func (r *Room) Join(name, token string, sendFn func([]byte)) (*PlayerSlot, bool, error) {
+	slot, _, reconnected, err := r.JoinWithSession(name, token, "", sendFn, nil)
+	return slot, reconnected, err
+}
+
+// JoinWithSession attaches or reconnects a player, deduplicating rapid repeat joins by account or active guest session.
+func (r *Room) JoinWithSession(name, token, accountUser string, sendFn func([]byte), closeFn func()) (*PlayerSlot, uint64, bool, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 
 	if r.closed {
-		return nil, false, errRoomClosed
+		r.mu.Unlock()
+		return nil, 0, false, errRoomClosed
 	}
 	r.LastActivity = time.Now()
 	cleanName := sanitizeName(name)
+	cleanUser := strings.TrimSpace(accountUser)
 
 	if token != "" {
 		for _, p := range r.Players {
 			if p.ReconnectToken == token {
+				r.nextConnID++
+				cid := r.nextConnID
 				p.sendMu.Lock()
+				oldClose := p.closeFn
+				p.connID = cid
 				p.sendFn = sendFn
+				p.closeFn = closeFn
 				p.Connected = true
 				p.sendMu.Unlock()
 				if cleanName != "Commander" {
 					p.Name = cleanName
 				}
-				return p, true, nil
+				r.mu.Unlock()
+				if oldClose != nil {
+					oldClose()
+				}
+				return p, cid, true, nil
 			}
 		}
 	}
 
 	if r.Phase != PhaseLobby {
-		return nil, false, errMatchInProgress
-	}
-	if len(r.Players) >= MaxPlayersPerRoom {
-		return nil, false, errRoomFull
+		r.mu.Unlock()
+		return nil, 0, false, errMatchInProgress
 	}
 
+	// Prevent spam-click duplicate joins in Lobby for the same signed-in account or same connected guest name.
+	for _, p := range r.Players {
+		sameAcct := cleanUser != "" && p.AccountUser != "" && strings.EqualFold(p.AccountUser, cleanUser)
+		sameGuest := cleanUser == "" && p.AccountUser == "" && p.Connected && strings.EqualFold(p.Name, cleanName)
+		if sameAcct || sameGuest {
+			r.nextConnID++
+			cid := r.nextConnID
+			p.sendMu.Lock()
+			oldClose := p.closeFn
+			p.connID = cid
+			p.sendFn = sendFn
+			p.closeFn = closeFn
+			p.Connected = true
+			p.sendMu.Unlock()
+			r.mu.Unlock()
+			if oldClose != nil {
+				oldClose()
+			}
+			return p, cid, true, nil
+		}
+	}
+
+	if len(r.Players) >= MaxPlayersPerRoom {
+		r.mu.Unlock()
+		return nil, 0, false, errRoomFull
+	}
+
+	maxNID := 0
+	for _, existing := range r.Players {
+		if existing.NationID > maxNID {
+			maxNID = existing.NationID
+		}
+	}
+	r.nextConnID++
+	cid := r.nextConnID
 	slot := &PlayerSlot{
-		NationID:       len(r.Players) + 1,
+		NationID:       maxNID + 1,
 		Name:           cleanName,
+		AccountUser:    cleanUser,
 		ReconnectToken: randHex(16),
 		SpawnX:         -1,
 		SpawnY:         -1,
 		Connected:      true,
 		IsHost:         len(r.Players) == 0,
 		Limiter:        NewRateLimiter(12.0, 20.0),
+		connID:         cid,
 		sendFn:         sendFn,
+		closeFn:        closeFn,
 	}
 	r.Players = append(r.Players, slot)
-	return slot, false, nil
+	r.mu.Unlock()
+	return slot, cid, false, nil
 }
 
-// Detach marks a player disconnected and transfers host role if needed in lobby.
+// Detach marks a player disconnected, removes non-host lobby guests, and disbands lobby/spawning rooms when host leaves.
 func (r *Room) Detach(nationID int, sendFnMatches func(*PlayerSlot) bool) {
 	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return
+	}
 	var needBroadcast bool
-	for _, p := range r.Players {
+	var disband bool
+	var disbandHost string
+	var remainTargets []*PlayerSlot
+
+	for i, p := range r.Players {
 		if p.NationID == nationID && sendFnMatches(p) {
 			p.sendMu.Lock()
 			p.Connected = false
 			p.sendFn = nil
+			p.closeFn = nil
 			p.sendMu.Unlock()
-			needBroadcast = true
-			if p.IsHost && r.Phase == PhaseLobby {
-				p.IsHost = false
-				for _, cand := range r.Players {
-					if cand.Connected {
-						cand.IsHost = true
-						break
-					}
-				}
+
+			if p.IsHost && (r.Phase == PhaseLobby || r.Phase == PhaseSpawning) {
+				disband = true
+				disbandHost = p.Name
+				r.closed = true
+				remainTargets = append(remainTargets, r.Players...)
+				remainTargets = append(remainTargets, r.Spectators...)
+			} else if r.Phase == PhaseLobby {
+				r.Players = append(r.Players[:i], r.Players[i+1:]...)
+				needBroadcast = true
+			} else {
+				needBroadcast = true
 			}
 			break
 		}
 	}
 	r.LastActivity = time.Now()
-	snap := r.buildLobbyLocked()
+	var snap map[string]any
+	if needBroadcast {
+		snap = r.buildLobbyLocked()
+	}
+	code := r.Code
+	onDisbandFn := r.onDisband
 	r.mu.Unlock()
+
+	if disband {
+		msg := mustJSON(map[string]any{
+			"type":      "room_disbanded",
+			"room_code": code,
+			"reason":    fmt.Sprintf("Room %s disbanded because host %s left.", code, disbandHost),
+		})
+		for _, tgt := range remainTargets {
+			if tgt.NationID != nationID || tgt.IsSpectator {
+				tgt.Send(msg)
+			}
+		}
+		if onDisbandFn != nil {
+			onDisbandFn(code)
+		}
+		r.Stop()
+		go func(targets []*PlayerSlot) {
+			time.Sleep(50 * time.Millisecond)
+			for _, tgt := range targets {
+				tgt.sendMu.Lock()
+				cfn := tgt.closeFn
+				tgt.closeFn = nil
+				tgt.sendFn = nil
+				tgt.Connected = false
+				tgt.sendMu.Unlock()
+				if cfn != nil {
+					cfn()
+				}
+			}
+		}(remainTargets)
+		return
+	}
 
 	if needBroadcast {
 		r.broadcastBytes(mustJSON(snap))
@@ -976,8 +1082,16 @@ func (rm *RoomManager) CreateOrGetRoom(requestedCode string) (*Room, error) {
 		return nil, errServerFull
 	}
 	room := NewRoom(code, rm.store, rm.acctSvc)
+	room.onDisband = rm.RemoveRoom
 	rm.rooms[code] = room
 	return room, nil
+}
+
+// RemoveRoom deletes a disbanded or closed room from active tracking.
+func (rm *RoomManager) RemoveRoom(code string) {
+	rm.mu.Lock()
+	delete(rm.rooms, strings.ToUpper(strings.TrimSpace(code)))
+	rm.mu.Unlock()
 }
 
 // QuickPlayRoom returns the fullest joinable public LOBBY room or creates a new public room.
